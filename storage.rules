@@ -1,0 +1,45 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // User profile avatars
+    match /avatars/{userId}/{allPaths=**} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == userId
+                   && request.resource.size < 5 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*');
+    }
+    
+    // Recharge payment receipts (Item 10 & 11)
+    match /receipts/{userId}/{allPaths=**} {
+      // User can upload their own receipt; Admins can read
+      allow create: if request.auth != null && request.auth.uid == userId
+                    && request.resource.size < 10 * 1024 * 1024
+                    && request.resource.contentType.matches('image/.*');
+      allow read: if request.auth != null && (
+        request.auth.uid == userId ||
+        request.auth.token.role == 'owner' ||
+        request.auth.token.role == 'supervisor' ||
+        request.auth.token.email == 'livo.admin@gmail.com'
+      );
+      // Never allow deleting receipts once submitted
+      allow delete: if false;
+    }
+    
+    // Verification proof documents
+    match /verifications/{userId}/{allPaths=**} {
+      allow create: if request.auth != null && request.auth.uid == userId
+                    && request.resource.size < 10 * 1024 * 1024;
+      allow read: if request.auth != null;
+      allow delete: if false;
+    }
+    
+    // Genuine uploaded short videos
+    match /videos/{userId}/{allPaths=**} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == userId
+                   && request.resource.size < 50 * 1024 * 1024
+                   && request.resource.contentType.matches('video/.*');
+    }
+  }
+}

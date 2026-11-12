@@ -1,0 +1,6 @@
+{
+  "name": "LIVO - Live & Social Platform",
+  "description": "منصة LIVO الاجتماعية للبث المباشر والدردشة الصوتية والغرف وتطبيق الإدارة الشامل",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

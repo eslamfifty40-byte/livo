@@ -1,0 +1,348 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile in LIVO platform with role, coins, and verification status",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 32 },
+        "authUid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 128 },
+        "username": { "type": "string", "maxLength": 64 },
+        "displayName": { "type": "string", "maxLength": 64 },
+        "avatar": { "type": "string", "maxLength": 500 },
+        "role": { "type": "string", "enum": ["owner", "supervisor", "agent", "user"] },
+        "coins": { "type": "number" },
+        "isVerified": { "type": "boolean" },
+        "verifiedUntil": { "type": "string" },
+        "followingCount": { "type": "number" },
+        "followersCount": { "type": "number" },
+        "agencyType": { "type": "string" },
+        "agencyName": { "type": "string" },
+        "canChargeUsers": { "type": "boolean" },
+        "isBanned": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["uid", "username", "displayName", "role", "coins"]
+    },
+    "DirectMessage": {
+      "title": "DirectMessage",
+      "description": "Direct chat message or room announcement",
+      "type": "object",
+      "properties": {
+        "chatId": { "type": "string", "maxLength": 128 },
+        "senderUid": { "type": "string", "maxLength": 32 },
+        "senderName": { "type": "string", "maxLength": 64 },
+        "senderAvatar": { "type": "string", "maxLength": 500 },
+        "receiverUid": { "type": "string", "maxLength": 32 },
+        "content": { "type": "string", "maxLength": 2000 },
+        "type": { "type": "string", "enum": ["text", "image", "voice", "video"] },
+        "mediaUrl": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string" },
+        "status": { "type": "string", "enum": ["sent", "delivered", "read"] }
+      },
+      "required": ["senderUid", "receiverUid", "content", "createdAt"]
+    },
+    "VoiceRoom": {
+      "title": "VoiceRoom",
+      "description": "12-seat Voice Room or Live stream room",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "maxLength": 100 },
+        "ownerUid": { "type": "string", "maxLength": 32 },
+        "ownerName": { "type": "string", "maxLength": 64 },
+        "ownerAvatar": { "type": "string", "maxLength": 500 },
+        "category": { "type": "string", "maxLength": 32 },
+        "isOfficial": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["open", "closed", "locked_by_admin"] },
+        "announcement": { "type": "string", "maxLength": 500 },
+        "viewersCount": { "type": "number" }
+      },
+      "required": ["title", "ownerUid", "status"]
+    },
+    "RechargeRequest": {
+      "title": "RechargeRequest",
+      "description": "User coin purchase request with receipt proof",
+      "type": "object",
+      "properties": {
+        "orderNumber": { "type": "string", "maxLength": 32 },
+        "uid": { "type": "string", "maxLength": 32 },
+        "username": { "type": "string", "maxLength": 64 },
+        "userAvatar": { "type": "string", "maxLength": 500 },
+        "packageCoins": { "type": "number" },
+        "amountEGP": { "type": "number" },
+        "payerPhone": { "type": "string", "maxLength": 20 },
+        "receiptUrl": { "type": "string", "maxLength": 500 },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "createdAt": { "type": "string" },
+        "reviewedBy": { "type": "string" },
+        "reviewedAt": { "type": "string" },
+        "rejectReason": { "type": "string", "maxLength": 500 }
+      },
+      "required": ["orderNumber", "uid", "packageCoins", "amountEGP", "receiptUrl", "status"]
+    },
+    "CoinAuditRecord": {
+      "title": "CoinAuditRecord",
+      "description": "Immutable ledger record for all coin changes",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 32 },
+        "username": { "type": "string", "maxLength": 64 },
+        "actionType": { "type": "string" },
+        "coinsChange": { "type": "number" },
+        "balanceBefore": { "type": "number" },
+        "balanceAfter": { "type": "number" },
+        "reason": { "type": "string", "maxLength": 500 },
+        "performedBy": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["uid", "actionType", "coinsChange", "balanceBefore", "balanceAfter", "performedBy"]
+    },
+    "AgencyApplication": {
+      "title": "AgencyApplication",
+      "description": "Application to become an official charging or distributor agent",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 32 },
+        "username": { "type": "string", "maxLength": 64 },
+        "userAvatar": { "type": "string", "maxLength": 500 },
+        "agencyType": { "type": "string", "enum": ["charging_agent", "distributors_agent"] },
+        "agencyName": { "type": "string", "maxLength": 100 },
+        "phone": { "type": "string", "maxLength": 20 },
+        "experienceNotes": { "type": "string", "maxLength": 1000 },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "canChargeUsers": { "type": "boolean" },
+        "totalSalesEGP": { "type": "number" },
+        "commissionEarnedEGP": { "type": "number" },
+        "membersCount": { "type": "number" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["uid", "agencyType", "agencyName", "phone", "status"]
+    },
+    "BlueVerificationRequest": {
+      "title": "BlueVerificationRequest",
+      "description": "Subscription for LIVO verified blue badge",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 32 },
+        "username": { "type": "string", "maxLength": 64 },
+        "userAvatar": { "type": "string", "maxLength": 500 },
+        "monthsCount": { "type": "number" },
+        "priceEGP": { "type": "number" },
+        "paymentPhone": { "type": "string", "maxLength": 20 },
+        "receiptUrl": { "type": "string", "maxLength": 500 },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["uid", "monthsCount", "priceEGP", "receiptUrl", "status"]
+    },
+    "WithdrawalRequest": {
+      "title": "WithdrawalRequest",
+      "description": "User payout request converting earned coins to cash",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 32 },
+        "username": { "type": "string", "maxLength": 64 },
+        "totalCoins": { "type": "number" },
+        "grossAmountEGP": { "type": "number" },
+        "platformFeeEGP": { "type": "number" },
+        "netPayoutEGP": { "type": "number" },
+        "paymentMethod": { "type": "string", "enum": ["vodafone_cash", "instapay", "bank_transfer"] },
+        "paymentDetails": { "type": "string", "maxLength": 100 },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "transferProofUrl": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["uid", "totalCoins", "netPayoutEGP", "paymentMethod", "paymentDetails", "status"]
+    },
+    "BanRecord": {
+      "title": "BanRecord",
+      "description": "Administrative ban log",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 32 },
+        "username": { "type": "string", "maxLength": 64 },
+        "deviceId": { "type": "string", "maxLength": 128 },
+        "banType": { "type": "string", "enum": ["account", "device", "both"] },
+        "duration": { "type": "string", "enum": ["temporary", "permanent"] },
+        "durationDays": { "type": "number" },
+        "reason": { "type": "string", "maxLength": 500 },
+        "bannedBy": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "enum": ["active", "unbanned"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["uid", "banType", "duration", "reason", "bannedBy", "status"]
+    },
+    "Advertisement": {
+      "title": "Advertisement",
+      "description": "Platform advertisements created and managed by Admin",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "title": { "type": "string", "maxLength": 120 },
+        "description": { "type": "string", "maxLength": 500 },
+        "imageUrl": { "type": "string", "maxLength": 500 },
+        "targetUrl": { "type": "string", "maxLength": 500 },
+        "startDate": { "type": "string" },
+        "endDate": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "inactive"] },
+        "placement": { "type": "string", "enum": ["banner", "popup", "feed"] },
+        "clicksCount": { "type": "number" },
+        "viewsCount": { "type": "number" },
+        "createdAt": { "type": "string" },
+        "createdBy": { "type": "string" }
+      },
+      "required": ["title", "imageUrl", "startDate", "endDate", "status", "placement"]
+    },
+    "SupportTicket": {
+      "title": "SupportTicket",
+      "description": "Central support ticket, user inquiry, report or complaint for Admin inbox",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "uid": { "type": "string", "maxLength": 32 },
+        "username": { "type": "string", "maxLength": 64 },
+        "userAvatar": { "type": "string", "maxLength": 500 },
+        "category": { "type": "string", "enum": ["complaint", "inquiry", "report", "technical", "financial"] },
+        "subject": { "type": "string", "maxLength": 150 },
+        "message": { "type": "string", "maxLength": 2000 },
+        "attachmentUrl": { "type": "string", "maxLength": 500 },
+        "status": { "type": "string", "enum": ["pending", "in_progress", "resolved", "closed"] },
+        "priority": { "type": "string", "enum": ["normal", "high", "urgent"] },
+        "createdAt": { "type": "string" },
+        "reply": { "type": "string", "maxLength": 2000 },
+        "repliedBy": { "type": "string" },
+        "repliedAt": { "type": "string" }
+      },
+      "required": ["uid", "username", "category", "subject", "message", "status"]
+    },
+    "PaymentMethodConfig": {
+      "title": "PaymentMethodConfig",
+      "description": "Payment methods like Vodafone Cash, InstaPay, and Electronic Wallets configured by Admin",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "type": { "type": "string" },
+        "title": { "type": "string", "maxLength": 100 },
+        "accountNumber": { "type": "string", "maxLength": 100 },
+        "accountHolder": { "type": "string", "maxLength": 100 },
+        "instructions": { "type": "string", "maxLength": 500 },
+        "isActive": { "type": "boolean" },
+        "isDefault": { "type": "boolean" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "type", "title", "accountNumber", "isActive"]
+    },
+    "GiftItem": {
+      "title": "GiftItem",
+      "description": "Live stream animated gift managed by Admin",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "name": { "type": "string", "maxLength": 100 },
+        "coins": { "type": "number" },
+        "icon": { "type": "string", "maxLength": 100 },
+        "animationType": { "type": "string" },
+        "durationMs": { "type": "number" },
+        "imageUrl": { "type": "string", "maxLength": 500 },
+        "isActive": { "type": "boolean" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "name", "coins", "icon"]
+    },
+    "StoreItem": {
+      "title": "StoreItem",
+      "description": "Store avatar frames and entrance effects",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "name": { "type": "string", "maxLength": 100 },
+        "type": { "type": "string", "enum": ["frame", "entrance"] },
+        "priceCoins": { "type": "number" },
+        "image": { "type": "string", "maxLength": 500 },
+        "description": { "type": "string", "maxLength": 500 },
+        "isActive": { "type": "boolean" }
+      },
+      "required": ["id", "name", "type", "priceCoins"]
+    },
+    "RechargeCode": {
+      "title": "RechargeCode",
+      "description": "Recharge voucher code for instant coin redemption",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "code": { "type": "string", "maxLength": 64 },
+        "coins": { "type": "number" },
+        "description": { "type": "string", "maxLength": 200 },
+        "status": { "type": "string", "enum": ["active", "used", "cancelled"] },
+        "maxUses": { "type": "number" },
+        "usedCount": { "type": "number" },
+        "createdAt": { "type": "string" },
+        "createdBy": { "type": "string" }
+      },
+      "required": ["id", "code", "coins", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Collection of platform user accounts and profiles"
+    },
+    "/messages/{messageId}": {
+      "schema": "DirectMessage",
+      "description": "Collection of private direct messages"
+    },
+    "/rooms/{roomId}": {
+      "schema": "VoiceRoom",
+      "description": "Collection of voice chat and streaming rooms"
+    },
+    "/recharge_requests/{requestId}": {
+      "schema": "RechargeRequest",
+      "description": "Collection of coin purchase requests submitted with receipt proof"
+    },
+    "/coin_audits/{auditId}": {
+      "schema": "CoinAuditRecord",
+      "description": "Immutable ledger of all coin balance modifications"
+    },
+    "/agencies/{agencyId}": {
+      "schema": "AgencyApplication",
+      "description": "Agency applications and verified agent management"
+    },
+    "/verifications/{verId}": {
+      "schema": "BlueVerificationRequest",
+      "description": "Blue check subscription applications"
+    },
+    "/withdrawals/{wthId}": {
+      "schema": "WithdrawalRequest",
+      "description": "Creator withdrawal requests"
+    },
+    "/bans/{banId}": {
+      "schema": "BanRecord",
+      "description": "Sanctions and account/device ban logs"
+    },
+    "/advertisements/{adId}": {
+      "schema": "Advertisement",
+      "description": "Platform announcements and advertisements"
+    },
+    "/support_tickets/{ticketId}": {
+      "schema": "SupportTicket",
+      "description": "Central user tickets, complaints, and reports for admin inbox"
+    },
+    "/payment_methods/{methodId}": {
+      "schema": "PaymentMethodConfig",
+      "description": "Vodafone Cash, InstaPay, and wallet payment methods configured by Admin"
+    },
+    "/gifts/{giftId}": {
+      "schema": "GiftItem",
+      "description": "Animated live gifts managed by Admin"
+    },
+    "/store_items/{itemId}": {
+      "schema": "StoreItem",
+      "description": "Store frames and entrance effects managed by Admin"
+    },
+    "/recharge_codes/{codeId}": {
+      "schema": "RechargeCode",
+      "description": "Recharge voucher codes managed by Admin"
+    }
+  }
+}
