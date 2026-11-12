@@ -8,7 +8,7 @@ import { LivoCustomerAppIcon, LivoAdminAppIcon } from './assets/appIcons';
 
 export default function App() {
   // Support independent app launch: Customer by default, Admin via ?app=admin or discrete portal toggle
-  const [appMode, setAppMode] = useState<'customer' | 'admin'>('customer');
+  const [appMode, setAppMode] = useState<'customer' | 'admin'>((import.meta as any).env?.VITE_APP_MODE === 'admin' ? 'admin' : 'customer');
   const [currentUser, setCurrentUser] = useState<UserProfile>(livoStore.getCurrentUser());
 
   useEffect(() => {
@@ -43,7 +43,7 @@ export default function App() {
         {appMode === 'admin' && (
           <div className="w-full h-full p-2 sm:p-4 animate-in fade-in">
             {/* Mobile Exit to Customer */}
-            <div className="lg:hidden mb-2 flex justify-start">
+            <div className={(import.meta as any).env?.VITE_APP_MODE === 'admin' ? 'hidden' : 'lg:hidden mb-2 flex justify-start'}>
               <button
                 onClick={() => setAppMode('customer')}
                 className="bg-[#FFE600] text-black text-xs font-black px-3 py-1.5 rounded-full flex items-center gap-1 shadow-md"
