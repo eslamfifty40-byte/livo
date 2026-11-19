@@ -209,7 +209,7 @@ export const ChargingAgentModal: React.FC<ChargingAgentModalProps> = ({
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="أدخل معرّف المستخدم (مثال: 10245)"
+                    placeholder="أدخل معرّف المستخدم (مثال: 48291)"
                     className="flex-1 bg-white/5 border border-purple-500/30 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-purple-300/40 focus:outline-none focus:border-yellow-400 font-digits"
                   />
                   <button

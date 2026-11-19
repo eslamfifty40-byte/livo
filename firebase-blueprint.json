@@ -2,7 +2,7 @@
   "entities": {
     "UserProfile": {
       "title": "UserProfile",
-      "description": "User profile in LIVO platform with role, coins, and verification status",
+      "description": "User profile in LIVO platform with role, coins, background preference, and verification status",
       "type": "object",
       "properties": {
         "uid": { "type": "string", "maxLength": 32 },
@@ -10,8 +10,9 @@
         "email": { "type": "string", "maxLength": 128 },
         "username": { "type": "string", "maxLength": 64 },
         "displayName": { "type": "string", "maxLength": 64 },
-        "avatar": { "type": "string", "maxLength": 500 },
-        "role": { "type": "string", "enum": ["owner", "supervisor", "agent", "user"] },
+        "avatar": { "type": "string", "maxLength": 200000 },
+        "voiceRoomBgUrl": { "type": "string", "maxLength": 500000 },
+        "role": { "type": "string", "enum": ["owner", "supervisor", "agent", "charging_agent", "distributor_agent", "user"] },
         "coins": { "type": "number" },
         "isVerified": { "type": "boolean" },
         "verifiedUntil": { "type": "string" },
@@ -27,31 +28,56 @@
     },
     "DirectMessage": {
       "title": "DirectMessage",
-      "description": "Direct chat message or room announcement",
+      "description": "Direct private chat message bound to sender/receiver Auth UIDs",
       "type": "object",
       "properties": {
+        "id": { "type": "string", "maxLength": 64 },
         "chatId": { "type": "string", "maxLength": 128 },
         "senderUid": { "type": "string", "maxLength": 32 },
+        "senderAuthUid": { "type": "string", "maxLength": 128 },
         "senderName": { "type": "string", "maxLength": 64 },
-        "senderAvatar": { "type": "string", "maxLength": 500 },
+        "senderAvatar": { "type": "string", "maxLength": 200000 },
         "receiverUid": { "type": "string", "maxLength": 32 },
-        "content": { "type": "string", "maxLength": 2000 },
+        "receiverAuthUid": { "type": "string", "maxLength": 128 },
+        "content": { "type": "string", "maxLength": 4000 },
         "type": { "type": "string", "enum": ["text", "image", "voice", "video"] },
-        "mediaUrl": { "type": "string", "maxLength": 500 },
+        "mediaUrl": { "type": "string", "maxLength": 500000 },
         "createdAt": { "type": "string" },
         "status": { "type": "string", "enum": ["sent", "delivered", "read"] }
       },
-      "required": ["senderUid", "receiverUid", "content", "createdAt"]
+      "required": ["id", "senderUid", "receiverUid", "content", "createdAt"]
+    },
+    "MessageRequest": {
+      "title": "MessageRequest",
+      "description": "Private chat permission request with pending, accepted, rejected, and suspended states",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "senderUid": { "type": "string", "maxLength": 32 },
+        "senderAuthUid": { "type": "string", "maxLength": 128 },
+        "senderName": { "type": "string", "maxLength": 64 },
+        "senderAvatar": { "type": "string", "maxLength": 200000 },
+        "receiverUid": { "type": "string", "maxLength": 32 },
+        "receiverAuthUid": { "type": "string", "maxLength": 128 },
+        "receiverName": { "type": "string", "maxLength": 64 },
+        "receiverAvatar": { "type": "string", "maxLength": 200000 },
+        "introMessage": { "type": "string", "maxLength": 1000 },
+        "status": { "type": "string", "enum": ["pending", "accepted", "rejected", "suspended"] },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "senderUid", "receiverUid", "introMessage", "status", "createdAt"]
     },
     "VoiceRoom": {
       "title": "VoiceRoom",
-      "description": "12-seat Voice Room or Live stream room",
+      "description": "12-seat Voice Room or Live stream room with customizable background",
       "type": "object",
       "properties": {
         "title": { "type": "string", "maxLength": 100 },
         "ownerUid": { "type": "string", "maxLength": 32 },
         "ownerName": { "type": "string", "maxLength": 64 },
-        "ownerAvatar": { "type": "string", "maxLength": 500 },
+        "ownerAvatar": { "type": "string", "maxLength": 200000 },
+        "backgroundUrl": { "type": "string", "maxLength": 500000 },
         "category": { "type": "string", "maxLength": 32 },
         "isOfficial": { "type": "boolean" },
         "status": { "type": "string", "enum": ["open", "closed", "locked_by_admin"] },
@@ -68,11 +94,11 @@
         "orderNumber": { "type": "string", "maxLength": 32 },
         "uid": { "type": "string", "maxLength": 32 },
         "username": { "type": "string", "maxLength": 64 },
-        "userAvatar": { "type": "string", "maxLength": 500 },
+        "userAvatar": { "type": "string", "maxLength": 200000 },
         "packageCoins": { "type": "number" },
         "amountEGP": { "type": "number" },
         "payerPhone": { "type": "string", "maxLength": 20 },
-        "receiptUrl": { "type": "string", "maxLength": 500 },
+        "receiptUrl": { "type": "string", "maxLength": 500000 },
         "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
         "createdAt": { "type": "string" },
         "reviewedBy": { "type": "string" },
@@ -105,7 +131,7 @@
       "properties": {
         "uid": { "type": "string", "maxLength": 32 },
         "username": { "type": "string", "maxLength": 64 },
-        "userAvatar": { "type": "string", "maxLength": 500 },
+        "userAvatar": { "type": "string", "maxLength": 200000 },
         "agencyType": { "type": "string", "enum": ["charging_agent", "distributors_agent"] },
         "agencyName": { "type": "string", "maxLength": 100 },
         "phone": { "type": "string", "maxLength": 20 },
@@ -126,11 +152,11 @@
       "properties": {
         "uid": { "type": "string", "maxLength": 32 },
         "username": { "type": "string", "maxLength": 64 },
-        "userAvatar": { "type": "string", "maxLength": 500 },
+        "userAvatar": { "type": "string", "maxLength": 200000 },
         "monthsCount": { "type": "number" },
         "priceEGP": { "type": "number" },
         "paymentPhone": { "type": "string", "maxLength": 20 },
-        "receiptUrl": { "type": "string", "maxLength": 500 },
+        "receiptUrl": { "type": "string", "maxLength": 500000 },
         "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
         "createdAt": { "type": "string" }
       },
@@ -181,7 +207,7 @@
         "id": { "type": "string", "maxLength": 64 },
         "title": { "type": "string", "maxLength": 120 },
         "description": { "type": "string", "maxLength": 500 },
-        "imageUrl": { "type": "string", "maxLength": 500 },
+        "imageUrl": { "type": "string", "maxLength": 500000 },
         "targetUrl": { "type": "string", "maxLength": 500 },
         "startDate": { "type": "string" },
         "endDate": { "type": "string" },
@@ -202,11 +228,11 @@
         "id": { "type": "string", "maxLength": 64 },
         "uid": { "type": "string", "maxLength": 32 },
         "username": { "type": "string", "maxLength": 64 },
-        "userAvatar": { "type": "string", "maxLength": 500 },
+        "userAvatar": { "type": "string", "maxLength": 200000 },
         "category": { "type": "string", "enum": ["complaint", "inquiry", "report", "technical", "financial"] },
         "subject": { "type": "string", "maxLength": 150 },
         "message": { "type": "string", "maxLength": 2000 },
-        "attachmentUrl": { "type": "string", "maxLength": 500 },
+        "attachmentUrl": { "type": "string", "maxLength": 500000 },
         "status": { "type": "string", "enum": ["pending", "in_progress", "resolved", "closed"] },
         "priority": { "type": "string", "enum": ["normal", "high", "urgent"] },
         "createdAt": { "type": "string" },
@@ -218,7 +244,7 @@
     },
     "PaymentMethodConfig": {
       "title": "PaymentMethodConfig",
-      "description": "Payment methods like Vodafone Cash, InstaPay, and Electronic Wallets configured by Admin",
+      "description": "Payment methods configured by Admin",
       "type": "object",
       "properties": {
         "id": { "type": "string", "maxLength": 64 },
@@ -244,7 +270,7 @@
         "icon": { "type": "string", "maxLength": 100 },
         "animationType": { "type": "string" },
         "durationMs": { "type": "number" },
-        "imageUrl": { "type": "string", "maxLength": 500 },
+        "imageUrl": { "type": "string", "maxLength": 500000 },
         "isActive": { "type": "boolean" },
         "updatedAt": { "type": "string" }
       },
@@ -259,7 +285,7 @@
         "name": { "type": "string", "maxLength": 100 },
         "type": { "type": "string", "enum": ["frame", "entrance"] },
         "priceCoins": { "type": "number" },
-        "image": { "type": "string", "maxLength": 500 },
+        "image": { "type": "string", "maxLength": 500000 },
         "description": { "type": "string", "maxLength": 500 },
         "isActive": { "type": "boolean" }
       },
@@ -281,6 +307,50 @@
         "createdBy": { "type": "string" }
       },
       "required": ["id", "code", "coins", "status"]
+    },
+    "CoinPackage": {
+      "title": "CoinPackage",
+      "description": "Purchasable coin package configured by Admin",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "coins": { "type": "number" },
+        "priceEGP": { "type": "number" },
+        "label": { "type": "string", "maxLength": 64 },
+        "isActive": { "type": "boolean" }
+      },
+      "required": ["id", "coins", "priceEGP"]
+    },
+    "SupervisorRecord": {
+      "title": "SupervisorRecord",
+      "description": "Supervisor role & permission entry managed by Owner",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "uid": { "type": "string", "maxLength": 32 },
+        "name": { "type": "string", "maxLength": 64 },
+        "email": { "type": "string", "maxLength": 128 },
+        "permissions": { "type": "array" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "uid", "name", "email", "isActive"]
+    },
+    "VideoPost": {
+      "title": "VideoPost",
+      "description": "Short video posted by genuine platform user",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "authorUid": { "type": "string", "maxLength": 32 },
+        "authorName": { "type": "string", "maxLength": 64 },
+        "videoUrl": { "type": "string", "maxLength": 500000 },
+        "caption": { "type": "string", "maxLength": 500 },
+        "likesCount": { "type": "number" },
+        "commentsCount": { "type": "number" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "authorUid", "videoUrl", "createdAt"]
     }
   },
   "firestore": {
@@ -291,6 +361,10 @@
     "/messages/{messageId}": {
       "schema": "DirectMessage",
       "description": "Collection of private direct messages"
+    },
+    "/message_requests/{requestId}": {
+      "schema": "MessageRequest",
+      "description": "Collection of private chat permission requests (pending, accepted, rejected, suspended)"
     },
     "/rooms/{roomId}": {
       "schema": "VoiceRoom",
@@ -343,6 +417,18 @@
     "/recharge_codes/{codeId}": {
       "schema": "RechargeCode",
       "description": "Recharge voucher codes managed by Admin"
+    },
+    "/coin_packages/{pkgId}": {
+      "schema": "CoinPackage",
+      "description": "Coin packages and pricing managed by Admin"
+    },
+    "/supervisors/{supId}": {
+      "schema": "SupervisorRecord",
+      "description": "Supervisor role assignments and permissions"
+    },
+    "/videos/{videoId}": {
+      "schema": "VideoPost",
+      "description": "Short videos posted by genuine users"
     }
   }
 }

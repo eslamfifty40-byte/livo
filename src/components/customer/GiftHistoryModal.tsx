@@ -20,8 +20,8 @@ export const GiftHistoryModal: React.FC<GiftHistoryModalProps> = ({
 
   const allAudits = livoStore.getCoinAudits(user.uid);
   const giftRecords = allAudits.filter(
-    a => a.actionType === 'gift_send' ||
-         a.actionType === 'gift_receive' ||
+    a => a.actionType === 'gift_sent' ||
+         a.actionType === 'gift_received' ||
          a.reason.includes('هدية') ||
          a.reason.includes('Gift')
   );
@@ -126,7 +126,7 @@ export const GiftHistoryModal: React.FC<GiftHistoryModalProps> = ({
                           {r.reason}
                         </h4>
                         <span className="text-[10px] font-digits text-purple-300/80 block">
-                          {new Date(r.timestamp).toLocaleString('en-GB')}
+                          {new Date(r.createdAt).toLocaleString('en-GB')}
                         </span>
                       </div>
                     </div>

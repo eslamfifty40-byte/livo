@@ -37,53 +37,31 @@ export const AgencyModal: React.FC<AgencyModalProps> = ({ user, isOpen, onClose 
   const [targetUid, setTargetUid] = useState('');
   const [chargeCoins, setChargeCoins] = useState('');
   const [chargeResult, setChargeResult] = useState<{ success: boolean; message: string } | null>(null);
-  // Permanent real host data for the agency
-  const [agencyHosts] = useState([
-    {
-      uid: '10246',
-      name: 'سارة نور',
-      avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=120&h=120&fit=crop',
-      streamHours: 68,
-      monthlyTarget: 500000,
-      earnedCoins: 420000,
-      agencyCut: 15,
-      status: 'live',
-      isVerified: true
-    },
-    {
-      uid: '10248',
-      name: 'ياسمين الشام',
-      avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=120&h=120&fit=crop',
-      streamHours: 45,
-      monthlyTarget: 300000,
-      earnedCoins: 310000,
-      agencyCut: 15,
-      status: 'active',
-      isVerified: true
-    },
-    {
-      uid: '10249',
-      name: 'كريم الملك',
-      avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=120&h=120&fit=crop',
-      streamHours: 52,
-      monthlyTarget: 400000,
-      earnedCoins: 385000,
-      agencyCut: 15,
-      status: 'live',
-      isVerified: true
-    },
-    {
-      uid: '10250',
-      name: 'رامي عياش',
-      avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=120&h=120&fit=crop',
-      streamHours: 30,
-      monthlyTarget: 200000,
-      earnedCoins: 195000,
+  const [formError, setFormError] = useState('');
+  const agencyHosts: Array<{
+    uid: string;
+    name: string;
+    avatar: string;
+    streamHours: number;
+    monthlyTarget: number;
+    earnedCoins: number;
+    agencyCut: number;
+    status: string;
+    isVerified?: boolean;
+  }> = livoStore
+    .getGenuineUsers()
+    .filter(u => u.uid !== user.uid && Boolean(user.agencyName && u.agencyName === user.agencyName))
+    .map(u => ({
+      uid: u.uid,
+      name: u.displayName || u.username,
+      avatar: u.avatar,
+      streamHours: 0,
+      monthlyTarget: 100000,
+      earnedCoins: u.diamonds || 0,
       agencyCut: 15,
       status: 'active',
-      isVerified: false
-    }
-  ]);
+      isVerified: u.isVerified
+    }));
 
   if (!isOpen) return null;
 
@@ -104,8 +82,9 @@ export const AgencyModal: React.FC<AgencyModalProps> = ({ user, isOpen, onClose 
 
   const handleApply = (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError('');
     if (!agencyName.trim() || !phone.trim() || !experience.trim()) {
-      alert('يرجى ملء جميع الحقول المطلوبة');
+      setFormError('يرجى ملء جميع الحقول المطلوبة');
       return;
     }
 
@@ -223,14 +202,14 @@ export const AgencyModal: React.FC<AgencyModalProps> = ({ user, isOpen, onClose 
                 <div className="bg-[#120824] p-3 rounded-2xl border border-purple-800/40 text-center">
                   <span className="text-[10px] text-purple-300 block">إجمالي المبيعات</span>
                   <span className="font-digits font-black text-sm text-green-400">
-                    {(myAgency?.totalSalesEGP || 45000).toLocaleString()}
+                    {(myAgency?.totalSalesEGP || 0).toLocaleString()}
                   </span>
                   <span className="text-[9px] text-purple-400 block">ج.م</span>
                 </div>
                 <div className="bg-[#120824] p-3 rounded-2xl border border-purple-800/40 text-center">
                   <span className="text-[10px] text-purple-300 block">العمولة المكتسبة</span>
                   <span className="font-digits font-black text-sm text-cyan-400">
-                    {(myAgency?.commissionEarnedEGP || 4500).toLocaleString()}
+                    {(myAgency?.commissionEarnedEGP || 0).toLocaleString()}
                   </span>
                   <span className="text-[9px] text-purple-400 block">ج.م</span>
                 </div>
@@ -425,6 +404,10 @@ export const AgencyModal: React.FC<AgencyModalProps> = ({ user, isOpen, onClose 
                     required
                   />
                 </div>
+
+                {formError && (
+                  <p className="text-xs text-red-400 font-bold text-center">{formError}</p>
+                )}
 
                 <button
                   type="submit"

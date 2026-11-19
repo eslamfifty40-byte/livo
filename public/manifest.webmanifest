@@ -1,0 +1,26 @@
+{
+  "name": "LIVO - Live & Social Platform",
+  "short_name": "LIVO",
+  "description": "منصة LIVO الاجتماعية للبث المباشر والدردشة الصوتية والغرف وتطبيق الإدارة الشامل",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0515",
+  "theme_color": "#0a0515",
+  "dir": "rtl",
+  "lang": "ar",
+  "icons": [
+    {
+      "src": "/assets/livo/customer_icon.jpg",
+      "sizes": "192x192",
+      "type": "image/jpeg",
+      "purpose": "any"
+    },
+    {
+      "src": "/assets/livo/customer_icon.jpg",
+      "sizes": "512x512",
+      "type": "image/jpeg",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -91,7 +91,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
           <UserCheck className="w-3.5 h-3.5 text-amber-400" />
           <span className="text-xs text-purple-300 hidden md:inline">الحساب النشط:</span>
           <select
-            value={currentUser.uid}
+            value={currentUser?.uid || ''}
             onChange={(e) => handleQuickSwitchUser(e.target.value)}
             className="bg-transparent text-xs text-amber-300 font-bold outline-none cursor-pointer"
           >

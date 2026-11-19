@@ -197,304 +197,35 @@ export const INITIAL_LEVEL_CONFIGS: LevelConfig[] = Array.from({ length: 51 }, (
   };
 });
 
-// Initial real verified users with unique 5-digit UIDs
-export const INITIAL_USERS: UserProfile[] = [
-  {
-    uid: '10000',
-    email: 'livo.admin@gmail.com',
-    username: 'livoadmin',
-    displayName: 'LIVO Official Admin',
-    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&h=200&fit=crop&crop=faces',
-    role: 'owner',
-    coins: 500000,
-    diamonds: 50000,
-    level: 50,
-    eligibleRechargedCoins: 5000000,
-    unlockedLevelRewards: Array.from({ length: 50 }, (_, i) => i + 1),
-    isVerified: true,
-    equippedFrame: 'frame-royal-gold',
-    bio: 'الحساب الرسمي لإدارة منصة LIVO 🛡️',
-    followingCount: 142,
-    followersCount: 12500,
-    createdAt: '2026-01-01T00:00:00.000Z'
-  },
-  {
-    uid: '10245',
-    username: 'ahmed_king',
-    displayName: 'أحمد شاهين',
-    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&h=200&fit=crop&crop=faces',
-    role: 'user',
-    coins: 350,
-    diamonds: 0,
-    level: 0,
-    eligibleRechargedCoins: 0,
-    unlockedLevelRewards: [],
-    isVerified: true,
-    equippedFrame: 'frame-neon-flame',
-    bio: 'صانع محتوى وبثوث يومية 🎙️ مرحباً بالجميع',
-    followingCount: 88,
-    followersCount: 2450,
-    deviceId: 'dev_ahmed_92a1',
-    createdAt: '2026-01-10T14:20:00.000Z'
-  },
-  {
-    uid: '10246',
-    username: 'sara_live',
-    displayName: 'سارة نور',
-    avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&h=200&fit=crop&crop=faces',
-    role: 'user',
-    coins: 1200,
-    diamonds: 0,
-    level: 0,
-    eligibleRechargedCoins: 0,
-    unlockedLevelRewards: [],
-    isVerified: false,
-    bio: 'غناء ومحادثات ليلية هادئة ✨',
-    followingCount: 120,
-    followersCount: 1890,
-    deviceId: 'dev_sara_34b2',
-    createdAt: '2026-01-15T09:12:00.000Z'
-  },
-  {
-    uid: '10247',
-    username: 'tariq_agency',
-    displayName: 'طارق المصري (وكيل)',
-    avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200&h=200&fit=crop&crop=faces',
-    role: 'charging_agent',
-    agencyType: 'charging_agent',
-    agencyName: 'وكالة الأهرام للشحن',
-    canChargeUsers: true,
-    coins: 45000,
-    diamonds: 500,
-    level: 5,
-    eligibleRechargedCoins: 25000,
-    unlockedLevelRewards: [1, 2, 3, 4, 5],
-    agentBalance: 40000,
-    isVerified: true,
-    bio: 'وكيل شحن معتمد في LIVO ⚡ سرعة وموثوقية',
-    followingCount: 340,
-    followersCount: 8900,
-    deviceId: 'dev_tariq_78f9',
-    createdAt: '2026-01-18T18:00:00.000Z'
-  }
-];
+// Zero fake seeded users — all users come from real Firebase Auth / Admin creation
+export const INITIAL_USERS: UserProfile[] = [];
 
-// Initial voice rooms grid (12 rooms with official room at top)
+// Single official LIVO Admin room (starts closed until opened by Owner/Admin)
 export const INITIAL_ROOMS: VoiceRoom[] = [
   {
     id: 'room-official-livo',
-    title: '📢 الغرفة الرسمية - LIVO Admin Official',
+    title: '📢 الغرفة الرسمية - LIVO Official',
     ownerUid: '10000',
-    ownerName: 'LIVO Official Admin',
-    ownerAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&h=200&fit=crop&crop=faces',
+    ownerName: 'إدارة LIVO الرسمية',
+    ownerAvatar: '/assets/livo/customer_icon.jpg',
     isOfficial: true,
-    status: 'open',
+    roomType: 'voice',
+    status: 'closed',
     category: 'إدارة وإعلانات رسمية',
+    viewersCount: 0,
     allChatDisabled: false,
     announcement: 'مرحباً بجميع رواد LIVO! مرحباً بكم في الغرفة الرسمية للإدارة.',
-    seats: [
-      { seatIndex: 0, occupiedByUid: '10000', occupiedByName: 'LIVO Official Admin', occupiedByAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&h=200&fit=crop&crop=faces', isMuted: false, isLocked: false },
-      { seatIndex: 1, isMuted: false, isLocked: false },
-      { seatIndex: 2, isMuted: false, isLocked: false },
-      { seatIndex: 3, isMuted: false, isLocked: false },
-      { seatIndex: 4, isMuted: false, isLocked: false },
-      { seatIndex: 5, isMuted: false, isLocked: false },
-      { seatIndex: 6, isMuted: false, isLocked: false },
-      { seatIndex: 7, isMuted: false, isLocked: false },
-    ],
+    seats: Array.from({ length: 12 }, (_, idx) => ({
+      seatIndex: idx,
+      isMuted: false,
+      isLocked: false
+    })),
     mutedUsers: [],
-    bannedUsers: []
-  },
-  {
-    id: 'room-2',
-    title: 'جلسة سمر وطرب مصري 🎶',
-    ownerUid: '10245',
-    ownerName: 'أحمد شاهين',
-    ownerAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&h=200&fit=crop&crop=faces',
-    isOfficial: false,
-    status: 'open',
-    category: 'موسيقى ودردشة',
-    allChatDisabled: false,
-    announcement: 'احترام الجميع شرط أساسي للبقاء في الروم 🌟',
-    seats: [
-      { seatIndex: 0, occupiedByUid: '10245', occupiedByName: 'أحمد شاهين', occupiedByAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&h=200&fit=crop&crop=faces', isMuted: false, isLocked: false },
-      { seatIndex: 1, occupiedByUid: '10246', occupiedByName: 'سارة نور', occupiedByAvatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&h=200&fit=crop&crop=faces', isMuted: false, isLocked: false },
-      { seatIndex: 2, isMuted: false, isLocked: false },
-      { seatIndex: 3, isMuted: false, isLocked: false },
-      { seatIndex: 4, isMuted: false, isLocked: false },
-      { seatIndex: 5, isMuted: false, isLocked: false },
-      { seatIndex: 6, isMuted: false, isLocked: false },
-      { seatIndex: 7, isMuted: false, isLocked: false },
-    ],
-    mutedUsers: [],
-    bannedUsers: []
-  },
-  {
-    id: 'room-3',
-    title: 'ديوانية ليالي القاهرة ☕',
-    ownerUid: '10247',
-    ownerName: 'طارق المصري',
-    ownerAvatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200&h=200&fit=crop&crop=faces',
-    isOfficial: false,
-    status: 'open',
-    category: 'نقاشات عامة',
-    allChatDisabled: false,
-    seats: Array(8).fill(null).map((_, i) => ({ seatIndex: i, isMuted: false, isLocked: false })),
-    mutedUsers: [],
-    bannedUsers: []
-  },
-  {
-    id: 'room-4',
-    title: 'تحديات لودو والمسابقات 🎲',
-    ownerUid: '10248',
-    ownerName: 'كابتن ماجد',
-    ownerAvatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&h=200&fit=crop',
-    isOfficial: false,
-    status: 'open',
-    category: 'ألعاب ومسابقات',
-    allChatDisabled: false,
-    seats: Array(8).fill(null).map((_, i) => ({ seatIndex: i, isMuted: false, isLocked: false })),
-    mutedUsers: [],
-    bannedUsers: []
-  },
-  {
-    id: 'room-5',
-    title: 'نادي رواد الأعمال والتقنية 💡',
-    ownerUid: '10249',
-    ownerName: 'م. إبراهيم',
-    ownerAvatar: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=200&h=200&fit=crop',
-    isOfficial: false,
-    status: 'open',
-    category: 'تطوير وتكنولوجيا',
-    allChatDisabled: false,
-    seats: Array(8).fill(null).map((_, i) => ({ seatIndex: i, isMuted: false, isLocked: false })),
-    mutedUsers: [],
-    bannedUsers: []
-  },
-  {
-    id: 'room-6',
-    title: 'خواطر وشعر وقهوة المساء 📖',
-    ownerUid: '10250',
-    ownerName: 'ياسمين الشام',
-    ownerAvatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=200&h=200&fit=crop',
-    isOfficial: false,
-    status: 'open',
-    category: 'أدب وشعر',
-    allChatDisabled: false,
-    seats: Array(8).fill(null).map((_, i) => ({ seatIndex: i, isMuted: false, isLocked: false })),
-    mutedUsers: [],
-    bannedUsers: []
-  },
-  {
-    id: 'room-7',
-    title: 'سهرة ضحك ومواقف طريفة 😂',
-    ownerUid: '10251',
-    ownerName: 'محمود كوميدي',
-    ownerAvatar: 'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=200&h=200&fit=crop',
-    isOfficial: false,
-    status: 'open',
-    category: 'ترفيه وضحك',
-    allChatDisabled: false,
-    seats: Array(8).fill(null).map((_, i) => ({ seatIndex: i, isMuted: false, isLocked: false })),
-    mutedUsers: [],
-    bannedUsers: []
-  },
-  {
-    id: 'room-8',
-    title: 'بودكاست الشباب والرياضة ⚽',
-    ownerUid: '10252',
-    ownerName: 'كابتن حسام',
-    ownerAvatar: 'https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?w=200&h=200&fit=crop',
-    isOfficial: false,
-    status: 'open',
-    category: 'رياضة وكرة قدم',
-    allChatDisabled: false,
-    seats: Array(8).fill(null).map((_, i) => ({ seatIndex: i, isMuted: false, isLocked: false })),
-    mutedUsers: [],
-    bannedUsers: []
-  },
-  {
-    id: 'room-9',
-    title: 'ألحان الجيتار والموسيقى الهادئة 🎸',
-    ownerUid: '10253',
-    ownerName: 'عمر عازف',
-    ownerAvatar: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=200&h=200&fit=crop',
-    isOfficial: false,
-    status: 'open',
-    category: 'موسيقى وعزف',
-    allChatDisabled: false,
-    seats: Array(8).fill(null).map((_, i) => ({ seatIndex: i, isMuted: false, isLocked: false })),
-    mutedUsers: [],
-    bannedUsers: []
-  },
-  {
-    id: 'room-10',
-    title: 'تطوير الذات والطاقة الإيجابية 🌿',
-    ownerUid: '10254',
-    ownerName: 'د. منى',
-    ownerAvatar: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=200&h=200&fit=crop',
-    isOfficial: false,
-    status: 'open',
-    category: 'تنمية بشرية',
-    allChatDisabled: false,
-    seats: Array(8).fill(null).map((_, i) => ({ seatIndex: i, isMuted: false, isLocked: false })),
-    mutedUsers: [],
-    bannedUsers: []
-  },
-  {
-    id: 'room-11',
-    title: 'محبو الأنمي والجيمنج 🎮',
-    ownerUid: '10255',
-    ownerName: 'أوتاكو جيمر',
-    ownerAvatar: 'https://images.unsplash.com/photo-1566492031773-4f4e44671857?w=200&h=200&fit=crop',
-    isOfficial: false,
-    status: 'open',
-    category: 'جيمنج وأنيمي',
-    allChatDisabled: false,
-    seats: Array(8).fill(null).map((_, i) => ({ seatIndex: i, isMuted: false, isLocked: false })),
-    mutedUsers: [],
-    bannedUsers: []
-  },
-  {
-    id: 'room-12',
-    title: 'ملتقى الصداقة والتعارف الراقي 🤝',
-    ownerUid: '10256',
-    ownerName: 'كريم وندى',
-    ownerAvatar: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=200&h=200&fit=crop',
-    isOfficial: false,
-    status: 'open',
-    category: 'صداقة وتعارف',
-    allChatDisabled: false,
-    seats: Array(8).fill(null).map((_, i) => ({ seatIndex: i, isMuted: false, isLocked: false })),
-    mutedUsers: [],
-    bannedUsers: []
+    bannedUsers: [],
+    messages: []
   }
 ];
 
-// Initial genuine user videos (NO fake videos or inflated numbers)
-export const INITIAL_VIDEOS: VideoPost[] = [
-  {
-    id: 'vid-1',
-    authorUid: '10245',
-    authorName: 'أحمد شاهين',
-    authorAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&h=200&fit=crop&crop=faces',
-    isVerified: true,
-    videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-    caption: 'أجمل لقطات لايف الليلة مع الأصدقاء شكراً لكل الداعمين 💎🔥',
-    likesCount: 28,
-    commentsCount: 6,
-    createdAt: '2026-11-08T18:30:00.000Z'
-  },
-  {
-    id: 'vid-2',
-    authorUid: '10246',
-    authorName: 'سارة نور',
-    authorAvatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&h=200&fit=crop&crop=faces',
-    isVerified: false,
-    videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyBlazes.mp4',
-    caption: 'مقطع غنائي هادئ قبل انطلاق التحدي القادم 🎤🎵 شاركوني رأيكم!',
-    likesCount: 45,
-    commentsCount: 11,
-    createdAt: '2026-11-09T08:15:00.000Z'
-  }
-];
+// Zero fake seeded videos — only real user uploads
+export const INITIAL_VIDEOS: VideoPost[] = [];
+

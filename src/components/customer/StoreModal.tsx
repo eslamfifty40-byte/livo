@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { X, ShoppingBag, Sparkles, Check, Coins, AlertCircle, RefreshCw } from 'lucide-react';
-import { INITIAL_STORE_ITEMS, INITIAL_GIFTS } from '../../data/initialData';
-import { UserProfile, StoreItem } from '../../types';
+import { UserProfile, StoreItem, GiftItem } from '../../types';
 import { livoStore } from '../../services/livoStore';
 
 interface StoreModalProps {

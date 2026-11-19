@@ -26,6 +26,8 @@ import {
   getAuth,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  sendPasswordResetEmail,
+  updateProfile,
   signOut,
   onAuthStateChanged,
   GoogleAuthProvider,
@@ -43,6 +45,7 @@ import {
   WithdrawalRequest,
   BanRecord,
   DirectMessage,
+  MessageRequest,
   VoiceRoom,
   VideoPost,
   Advertisement,
@@ -54,8 +57,29 @@ import {
   PaymentMethodConfig,
   GiftItem,
   StoreItem,
-  RechargeCode
+  RechargeCode,
+  CoinPackage,
+  SupervisorRecord
 } from '../types';
+
+/**
+ * Recursively strips undefined keys so Firestore setDoc never fails on optional fields.
+ */
+function stripUndefined<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((item) => stripUndefined(item)) as unknown as T;
+  }
+  if (value !== null && typeof value === 'object') {
+    const clean: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (v !== undefined) {
+        clean[k] = stripUndefined(v);
+      }
+    }
+    return clean as T;
+  }
+  return value;
+}
 
 // 1. Initialize Firebase App
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
@@ -133,6 +157,7 @@ export const COLLECTIONS = {
   RECHARGE_REQUESTS: 'recharge_requests',
   COIN_AUDITS: 'coin_audits',
   MESSAGES: 'messages',
+  MESSAGE_REQUESTS: 'message_requests',
   ROOMS: 'rooms',
   AGENCIES: 'agencies',
   VERIFICATIONS: 'verifications',
@@ -148,7 +173,9 @@ export const COLLECTIONS = {
   PAYMENT_METHODS: 'payment_methods',
   GIFTS: 'gifts',
   STORE_ITEMS: 'store_items',
-  RECHARGE_CODES: 'recharge_codes'
+  RECHARGE_CODES: 'recharge_codes',
+  COIN_PACKAGES: 'coin_packages',
+  SUPERVISORS: 'supervisors'
 };
 
 // 4. Firebase Service Implementation
@@ -224,26 +251,167 @@ export class FirebaseService {
   }
 
   /**
-   * Real-time subscription to Messages
+   * Real-time subscription to Messages.
+   * Uses targeted queries for authenticated participants (and full collection for owner/admin)
+   * so Firestore Security Rules never reject the query with PERMISSION_DENIED.
    */
-  public subscribeToMessages(onUpdate: (messages: DirectMessage[]) => void): Unsubscribe {
-    const q = collection(db, COLLECTIONS.MESSAGES);
-    const unsub = onSnapshot(
-      q,
+  public subscribeToMessages(
+    onUpdate: (messages: DirectMessage[]) => void,
+    options?: { authUid?: string; isOwner?: boolean }
+  ): Unsubscribe {
+    const authUid = options?.authUid || auth.currentUser?.uid;
+    const isOwner = Boolean(options?.isOwner);
+
+    if (!authUid) {
+      return () => {};
+    }
+
+    if (isOwner) {
+      const q = collection(db, COLLECTIONS.MESSAGES);
+      const unsub = onSnapshot(
+        q,
+        (snapshot) => {
+          const msgs: DirectMessage[] = [];
+          snapshot.forEach((docSnap) => {
+            msgs.push(docSnap.data() as DirectMessage);
+          });
+          msgs.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+          onUpdate(msgs);
+        },
+        (error) => {
+          console.warn('Error listening to messages:', error.message);
+        }
+      );
+      this.activeListeners.push(unsub);
+      return unsub;
+    }
+
+    const merged = new Map<string, DirectMessage>();
+    const emit = () => {
+      const list = Array.from(merged.values()).sort(
+        (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+      );
+      onUpdate(list);
+    };
+
+    const qSent = query(collection(db, COLLECTIONS.MESSAGES), where('senderAuthUid', '==', authUid));
+    const qRecv = query(collection(db, COLLECTIONS.MESSAGES), where('receiverAuthUid', '==', authUid));
+
+    const unsubSent = onSnapshot(
+      qSent,
       (snapshot) => {
-        const msgs: DirectMessage[] = [];
         snapshot.forEach((docSnap) => {
-          msgs.push(docSnap.data() as DirectMessage);
+          const item = docSnap.data() as DirectMessage;
+          merged.set(item.id, item);
         });
-        msgs.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-        onUpdate(msgs);
+        emit();
       },
       (error) => {
-        console.warn('Error listening to messages:', error.message);
+        console.warn('Error listening to sent messages:', error.message);
       }
     );
-    this.activeListeners.push(unsub);
-    return unsub;
+
+    const unsubRecv = onSnapshot(
+      qRecv,
+      (snapshot) => {
+        snapshot.forEach((docSnap) => {
+          const item = docSnap.data() as DirectMessage;
+          merged.set(item.id, item);
+        });
+        emit();
+      },
+      (error) => {
+        console.warn('Error listening to received messages:', error.message);
+      }
+    );
+
+    const combinedUnsub = () => {
+      unsubSent();
+      unsubRecv();
+    };
+    this.activeListeners.push(combinedUnsub);
+    return combinedUnsub;
+  }
+
+  /**
+   * Real-time subscription to Message Requests (pending / accepted / rejected / suspended)
+   */
+  public subscribeToMessageRequests(
+    onUpdate: (requests: MessageRequest[]) => void,
+    options?: { authUid?: string; isOwner?: boolean }
+  ): Unsubscribe {
+    const authUid = options?.authUid || auth.currentUser?.uid;
+    const isOwner = Boolean(options?.isOwner);
+
+    if (!authUid) {
+      return () => {};
+    }
+
+    if (isOwner) {
+      const q = collection(db, COLLECTIONS.MESSAGE_REQUESTS);
+      const unsub = onSnapshot(
+        q,
+        (snapshot) => {
+          const reqs: MessageRequest[] = [];
+          snapshot.forEach((docSnap) => {
+            reqs.push(docSnap.data() as MessageRequest);
+          });
+          reqs.sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime());
+          onUpdate(reqs);
+        },
+        (error) => {
+          console.warn('Error listening to message requests:', error.message);
+        }
+      );
+      this.activeListeners.push(unsub);
+      return unsub;
+    }
+
+    const merged = new Map<string, MessageRequest>();
+    const emit = () => {
+      const list = Array.from(merged.values()).sort(
+        (a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime()
+      );
+      onUpdate(list);
+    };
+
+    const qSent = query(collection(db, COLLECTIONS.MESSAGE_REQUESTS), where('senderAuthUid', '==', authUid));
+    const qRecv = query(collection(db, COLLECTIONS.MESSAGE_REQUESTS), where('receiverAuthUid', '==', authUid));
+
+    const unsubSent = onSnapshot(
+      qSent,
+      (snapshot) => {
+        snapshot.forEach((docSnap) => {
+          const item = docSnap.data() as MessageRequest;
+          merged.set(item.id, item);
+        });
+        emit();
+      },
+      (error) => {
+        console.warn('Error listening to sent message requests:', error.message);
+      }
+    );
+
+    const unsubRecv = onSnapshot(
+      qRecv,
+      (snapshot) => {
+        snapshot.forEach((docSnap) => {
+          const item = docSnap.data() as MessageRequest;
+          merged.set(item.id, item);
+        });
+        emit();
+      },
+      (error) => {
+        console.warn('Error listening to incoming message requests:', error.message);
+      }
+    );
+
+    const combinedUnsub = () => {
+      unsubSent();
+      unsubRecv();
+    };
+    this.activeListeners.push(combinedUnsub);
+    return combinedUnsub;
   }
 
   /**
@@ -412,7 +580,7 @@ export class FirebaseService {
    */
   public async saveUserProfile(user: UserProfile): Promise<void> {
     try {
-      await setDoc(doc(db, COLLECTIONS.USERS, user.uid), user, { merge: true });
+      await setDoc(doc(db, COLLECTIONS.USERS, user.uid), stripUndefined(user), { merge: true });
     } catch (e) {
       console.error('Error saving user profile to Firestore:', e);
     }
@@ -423,7 +591,7 @@ export class FirebaseService {
    */
   public async saveRechargeRequest(req: RechargeRequest): Promise<void> {
     try {
-      await setDoc(doc(db, COLLECTIONS.RECHARGE_REQUESTS, req.id), req, { merge: true });
+      await setDoc(doc(db, COLLECTIONS.RECHARGE_REQUESTS, req.id), stripUndefined(req), { merge: true });
     } catch (e) {
       console.error('Error saving recharge request to Firestore:', e);
     }
@@ -434,20 +602,39 @@ export class FirebaseService {
    */
   public async saveCoinAudit(audit: CoinAuditRecord): Promise<void> {
     try {
-      await setDoc(doc(db, COLLECTIONS.COIN_AUDITS, audit.id), audit);
+      await setDoc(doc(db, COLLECTIONS.COIN_AUDITS, audit.id), stripUndefined(audit));
     } catch (e) {
       console.error('Error saving coin audit to Firestore:', e);
     }
   }
 
   /**
-   * Write message
+   * Write or update message
    */
   public async saveMessage(msg: DirectMessage): Promise<void> {
     try {
-      await setDoc(doc(db, COLLECTIONS.MESSAGES, msg.id), msg);
+      await setDoc(doc(db, COLLECTIONS.MESSAGES, msg.id), stripUndefined(msg), { merge: true });
     } catch (e) {
       console.error('Error saving message to Firestore:', e);
+    }
+  }
+
+  /**
+   * Write or update message request
+   */
+  public async saveMessageRequest(req: MessageRequest): Promise<void> {
+    try {
+      await setDoc(doc(db, COLLECTIONS.MESSAGE_REQUESTS, req.id), stripUndefined(req), { merge: true });
+    } catch (e) {
+      console.error('Error saving message request to Firestore:', e);
+    }
+  }
+
+  public async deleteMessageRequest(id: string): Promise<void> {
+    try {
+      await deleteDoc(doc(db, COLLECTIONS.MESSAGE_REQUESTS, id));
+    } catch (e) {
+      console.error('Error deleting message request from Firestore:', e);
     }
   }
 
@@ -456,9 +643,17 @@ export class FirebaseService {
    */
   public async saveRoom(room: VoiceRoom): Promise<void> {
     try {
-      await setDoc(doc(db, COLLECTIONS.ROOMS, room.id), room, { merge: true });
+      await setDoc(doc(db, COLLECTIONS.ROOMS, room.id), stripUndefined(room), { merge: true });
     } catch (e) {
       console.error('Error saving room to Firestore:', e);
+    }
+  }
+
+  public async deleteRoom(roomId: string): Promise<void> {
+    try {
+      await deleteDoc(doc(db, COLLECTIONS.ROOMS, roomId));
+    } catch (e) {
+      console.error('Error deleting room from Firestore:', e);
     }
   }
 
@@ -844,6 +1039,123 @@ export class FirebaseService {
   }
 
   /**
+   * Real-time subscription to Coin Packages
+   */
+  public subscribeToCoinPackages(onUpdate: (packages: CoinPackage[]) => void): Unsubscribe {
+    const q = collection(db, COLLECTIONS.COIN_PACKAGES);
+    const unsub = onSnapshot(
+      q,
+      (snapshot) => {
+        const list: CoinPackage[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push(docSnap.data() as CoinPackage);
+        });
+        list.sort((a, b) => a.coins - b.coins);
+        onUpdate(list);
+      },
+      (error) => {
+        console.warn('Error listening to coin packages:', error.message);
+      }
+    );
+    this.activeListeners.push(unsub);
+    return unsub;
+  }
+
+  public async saveCoinPackage(pkg: CoinPackage): Promise<void> {
+    try {
+      await setDoc(doc(db, COLLECTIONS.COIN_PACKAGES, pkg.id), pkg, { merge: true });
+    } catch (e) {
+      console.error('Error saving coin package to Firestore:', e);
+    }
+  }
+
+  public async deleteCoinPackage(id: string): Promise<void> {
+    try {
+      await deleteDoc(doc(db, COLLECTIONS.COIN_PACKAGES, id));
+    } catch (e) {
+      console.error('Error deleting coin package from Firestore:', e);
+    }
+  }
+
+  /**
+   * Real-time subscription to Supervisors
+   */
+  public subscribeToSupervisors(onUpdate: (supervisors: SupervisorRecord[]) => void): Unsubscribe {
+    const q = collection(db, COLLECTIONS.SUPERVISORS);
+    const unsub = onSnapshot(
+      q,
+      (snapshot) => {
+        const list: SupervisorRecord[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push(docSnap.data() as SupervisorRecord);
+        });
+        list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        onUpdate(list);
+      },
+      (error) => {
+        console.warn('Error listening to supervisors:', error.message);
+      }
+    );
+    this.activeListeners.push(unsub);
+    return unsub;
+  }
+
+  public async saveSupervisor(sup: SupervisorRecord): Promise<void> {
+    try {
+      await setDoc(doc(db, COLLECTIONS.SUPERVISORS, sup.id), sup, { merge: true });
+    } catch (e) {
+      console.error('Error saving supervisor to Firestore:', e);
+    }
+  }
+
+  public async deleteSupervisor(id: string): Promise<void> {
+    try {
+      await deleteDoc(doc(db, COLLECTIONS.SUPERVISORS, id));
+    } catch (e) {
+      console.error('Error deleting supervisor from Firestore:', e);
+    }
+  }
+
+  /**
+   * Real-time subscription to genuine User Videos
+   */
+  public subscribeToVideos(onUpdate: (videos: VideoPost[]) => void): Unsubscribe {
+    const q = collection(db, COLLECTIONS.VIDEOS);
+    const unsub = onSnapshot(
+      q,
+      (snapshot) => {
+        const list: VideoPost[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push(docSnap.data() as VideoPost);
+        });
+        list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        onUpdate(list);
+      },
+      (error) => {
+        console.warn('Error listening to videos:', error.message);
+      }
+    );
+    this.activeListeners.push(unsub);
+    return unsub;
+  }
+
+  public async saveVideo(video: VideoPost): Promise<void> {
+    try {
+      await setDoc(doc(db, COLLECTIONS.VIDEOS, video.id), video, { merge: true });
+    } catch (e) {
+      console.error('Error saving video to Firestore:', e);
+    }
+  }
+
+  public async deleteVideo(id: string): Promise<void> {
+    try {
+      await deleteDoc(doc(db, COLLECTIONS.VIDEOS, id));
+    } catch (e) {
+      console.error('Error deleting video from Firestore:', e);
+    }
+  }
+
+  /**
    * Upload image file to Firebase Storage with base64 DataURL fallback
    */
   public async uploadImage(path: string, fileOrDataUrl: File | string): Promise<string> {
@@ -946,6 +1258,71 @@ export class FirebaseService {
       console.warn('Customer Google Sign-In error:', err);
       return { success: false, error: err.message || 'تم إلغاء نافذة اختيار حساب Google' };
     }
+  }
+
+  /**
+   * Customer Sign-In via Email/Password in Firebase Auth
+   */
+  public async loginCustomerWithEmail(email: string, pass: string): Promise<{ success: boolean; user?: FirebaseUser; error?: string }> {
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanPass = pass.trim();
+    try {
+      const cred = await signInWithEmailAndPassword(auth, cleanEmail, cleanPass);
+      return { success: true, user: cred.user };
+    } catch (err: any) {
+      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+        return { success: false, error: 'البريد الإلكتروني أو كلمة المرور غير صحيحة' };
+      }
+      if (err.code === 'auth/invalid-email') {
+        return { success: false, error: 'صيغة البريد الإلكتروني غير صحيحة' };
+      }
+      if (err.code === 'auth/operation-not-allowed') {
+        return { success: false, error: 'تسجيل الدخول بالبريد غير مفعّل في Firebase حالياً' };
+      }
+      return { success: false, error: err.message || 'تعذر تسجيل الدخول عبر البريد الإلكتروني' };
+    }
+  }
+
+  /**
+   * Customer Registration via Email/Password in Firebase Auth
+   */
+  public async registerCustomerWithEmail(email: string, pass: string, displayName?: string): Promise<{ success: boolean; user?: FirebaseUser; error?: string }> {
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanPass = pass.trim();
+    try {
+      const cred = await createUserWithEmailAndPassword(auth, cleanEmail, cleanPass);
+      if (displayName && cred.user) {
+        await updateProfile(cred.user, { displayName: displayName.trim() }).catch(() => {});
+      }
+      return { success: true, user: cred.user };
+    } catch (err: any) {
+      if (err.code === 'auth/email-already-in-use') {
+        return { success: false, error: 'هذا البريد الإلكتروني مسجل بالفعل. يرجى تسجيل الدخول.' };
+      }
+      if (err.code === 'auth/weak-password') {
+        return { success: false, error: 'كلمة المرور ضعيفة جداً (يجب أن تكون 6 أحرف على الأقل).' };
+      }
+      if (err.code === 'auth/invalid-email') {
+        return { success: false, error: 'صيغة البريد الإلكتروني غير صحيحة.' };
+      }
+      return { success: false, error: err.message || 'تعذر إنشاء الحساب عبر Firebase' };
+    }
+  }
+
+  /**
+   * Send Password Reset Email
+   */
+  public async resetCustomerPassword(email: string): Promise<{ success: boolean; message: string }> {
+    try {
+      await sendPasswordResetEmail(auth, email.trim().toLowerCase());
+      return { success: true, message: 'تم إرسال رابط إعادة تعيين كلمة المرور إلى بريدك الإلكتروني' };
+    } catch {
+      return { success: false, message: 'تأكد من كتابة البريد الإلكتروني المسجل بشكل صحيح' };
+    }
+  }
+
+  public getCurrentAuthUid(): string | undefined {
+    return auth.currentUser?.uid;
   }
 
   public onAuthStateChanged(callback: (user: FirebaseUser | null) => void): Unsubscribe {

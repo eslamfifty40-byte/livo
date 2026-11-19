@@ -36,8 +36,18 @@ export const RechargeModal: React.FC<RechargeModalProps> = ({ user, isOpen, onCl
     return def ? def.id : (INITIAL_PAYMENT_METHODS[0]?.id || '');
   });
 
+  // Dynamic Coin Packages from Admin CRUD
+  const [coinPackages, setCoinPackages] = useState<CoinPackage[]>(() => {
+    const active = livoStore.getActiveCoinPackages();
+    return active.length > 0 ? active : INITIAL_COIN_PACKAGES;
+  });
+
   // Package & Form Fields
-  const [selectedPkg, setSelectedPkg] = useState<CoinPackage>(INITIAL_COIN_PACKAGES[9]); // 1000 coins default
+  const [selectedPkg, setSelectedPkg] = useState<CoinPackage>(() => {
+    const active = livoStore.getActiveCoinPackages();
+    const list = active.length > 0 ? active : INITIAL_COIN_PACKAGES;
+    return list.find(p => p.popular) || list[0];
+  });
   const [payerPhone, setPayerPhone] = useState('');
   const [receiptImage, setReceiptImage] = useState<string | null>(null);
   const [receiptFileName, setReceiptFileName] = useState('');
@@ -51,13 +61,18 @@ export const RechargeModal: React.FC<RechargeModalProps> = ({ user, isOpen, onCl
   const [voucherSuccess, setVoucherSuccess] = useState<string | null>(null);
   const [voucherError, setVoucherError] = useState<string | null>(null);
 
-  // Sync payment methods in real time when Admin modifies them
+  // Sync payment methods & coin packages in real time when Admin modifies them
   useEffect(() => {
-    const updateMethods = () => {
-      const active = livoStore.getActivePaymentMethods();
-      setPaymentMethods(active.length > 0 ? active : INITIAL_PAYMENT_METHODS);
+    const syncStore = () => {
+      const activeMethods = livoStore.getActivePaymentMethods();
+      setPaymentMethods(activeMethods.length > 0 ? activeMethods : INITIAL_PAYMENT_METHODS);
+
+      const activePkgs = livoStore.getActiveCoinPackages();
+      const pkgList = activePkgs.length > 0 ? activePkgs : INITIAL_COIN_PACKAGES;
+      setCoinPackages(pkgList);
+      setSelectedPkg(prev => pkgList.find(p => p.id === prev?.id) || pkgList.find(p => p.popular) || pkgList[0]);
     };
-    const unsub = livoStore.subscribe(updateMethods);
+    const unsub = livoStore.subscribe(syncStore);
     return () => unsub();
   }, []);
 
@@ -379,8 +394,8 @@ export const RechargeModal: React.FC<RechargeModalProps> = ({ user, isOpen, onCl
                 اختر الباقة المطلوبة (100 إلى 10000 كوينز):
               </label>
               <div className="grid grid-cols-4 sm:grid-cols-5 gap-2">
-                {INITIAL_COIN_PACKAGES.map((pkg) => {
-                  const isSelected = selectedPkg.id === pkg.id;
+                {coinPackages.map((pkg) => {
+                  const isSelected = selectedPkg?.id === pkg.id;
                   return (
                     <button
                       key={pkg.id}

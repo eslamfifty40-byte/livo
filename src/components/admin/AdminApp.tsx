@@ -61,22 +61,33 @@ import {
   RechargeCode,
   GiftItem,
   StoreItem,
-  DirectMessage
+  DirectMessage,
+  CoinPackage,
+  SupervisorRecord
 } from '../../types';
 import { livoStore } from '../../services/livoStore';
 import { firebaseService } from '../../services/firebase';
-import { INITIAL_STORE_ITEMS, INITIAL_GIFTS, INITIAL_COIN_PACKAGES } from '../../data/initialData';
 import { LivoAdminAppIcon } from '../../assets/appIcons';
 
 interface AdminAppProps {
   onLogoutAdmin?: () => void;
 }
 
+const SUPERVISOR_PERMISSIONS_OPTIONS: Array<{ id: string; label: string }> = [
+  { id: 'recharges', label: 'طلبات الشحن' },
+  { id: 'withdrawals', label: 'طلبات السحب' },
+  { id: 'bans', label: 'الحظر والرقابة' },
+  { id: 'rooms', label: 'إدارة الغرف' },
+  { id: 'users', label: 'الحسابات والأعضاء' },
+  { id: 'agencies', label: 'الوكالات' },
+  { id: 'verifications', label: 'التوثيق الأزرق' },
+  { id: 'support', label: 'الدعم والشكاوى' }
+];
+
 export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
-  // Authentication State (Empty by default per prompt requirement, checks localStorage for persistent session)
-  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(() => {
-    return localStorage.getItem('livo_admin_session') === 'true';
-  });
+  // Authentication State (Strictly verified via Firebase Auth)
+  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
+  const [activeAdminEmail, setActiveAdminEmail] = useState('');
   const [adminUsername, setAdminUsername] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
   const [authError, setAuthError] = useState('');
@@ -101,6 +112,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
   const [rechargeCodes, setRechargeCodes] = useState<RechargeCode[]>(livoStore.getRechargeCodes());
   const [giftsList, setGiftsList] = useState<GiftItem[]>(livoStore.getGifts());
   const [storeItemsList, setStoreItemsList] = useState<StoreItem[]>(livoStore.getStoreItems());
+  const [coinPackagesList, setCoinPackagesList] = useState<CoinPackage[]>(livoStore.getCoinPackages());
   const [allMessages, setAllMessages] = useState<DirectMessage[]>(livoStore.getMessages());
 
   // Direct Support Hub State
@@ -118,6 +130,14 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
   const [paymentInstructions, setPaymentInstructions] = useState('');
   const [paymentIsDefault, setPaymentIsDefault] = useState(false);
 
+  // Coin Packages CRUD State
+  const [showCoinPkgModal, setShowCoinPkgModal] = useState(false);
+  const [editCoinPkgId, setEditCoinPkgId] = useState<string | null>(null);
+  const [pkgCoinsInput, setPkgCoinsInput] = useState('');
+  const [pkgPriceInput, setPkgPriceInput] = useState('');
+  const [pkgPopularInput, setPkgPopularInput] = useState(false);
+  const [pkgActiveInput, setPkgActiveInput] = useState(true);
+
   // Recharge Codes State
   const [showAddCodeModal, setShowAddCodeModal] = useState(false);
   const [newCodeInput, setNewCodeInput] = useState('');
@@ -126,10 +146,11 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
 
   // Gifts Management State
   const [showAddGiftModal, setShowAddGiftModal] = useState(false);
+  const [editGiftId, setEditGiftId] = useState<string | null>(null);
   const [newGiftName, setNewGiftName] = useState('');
   const [newGiftPrice, setNewGiftPrice] = useState('');
   const [newGiftIcon, setNewGiftIcon] = useState('🎁');
-  const [newGiftAnimation, setNewGiftAnimation] = useState<'lion' | 'car' | 'dragon' | 'fireworks' | 'standard'>('standard');
+  const [newGiftAnimation, setNewGiftAnimation] = useState<GiftItem['animationType']>('heart');
 
   // Verifications & Withdrawals Modals
   const [zoomedVerificationReceiptUrl, setZoomedVerificationReceiptUrl] = useState<string | null>(null);
@@ -194,56 +215,46 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
   const [announcementText, setAnnouncementText] = useState('مرحباً بجميع رواد LIVO! مرحباً بكم في الغرفة الرسمية للإدارة.');
   const [officialRoomStatus, setOfficialRoomStatus] = useState<'open' | 'closed' | 'locked_by_admin'>('open');
 
-  // Supervisors management state
-  const [supervisors, setSupervisors] = useState<Array<{ uid: string; name: string; email: string; permissions: string[] }>>([
-    { uid: '10001', name: 'مشرف العمليات المالية', email: 'finance.supervisor@livo.live', permissions: ['recharges', 'withdrawals'] },
-    { uid: '10002', name: 'مشرف الدعم والرقابة', email: 'moderation.supervisor@livo.live', permissions: ['bans', 'rooms', 'users'] }
-  ]);
+  // Supervisors management state (Synced with Firestore via livoStore)
+  const [supervisors, setSupervisors] = useState<SupervisorRecord[]>(livoStore.getSupervisors());
   const [newSupervisorUid, setNewSupervisorUid] = useState('');
+  const [newSupervisorName, setNewSupervisorName] = useState('');
   const [newSupervisorEmail, setNewSupervisorEmail] = useState('');
+  const [newSupervisorPermissions, setNewSupervisorPermissions] = useState<string[]>(['recharges', 'bans', 'rooms']);
+  const [editingSupervisorId, setEditingSupervisorId] = useState<string | null>(null);
+  const [editingSupervisorPerms, setEditingSupervisorPerms] = useState<string[]>([]);
 
   // Listen to Firebase Auth state to maintain verified session
   useEffect(() => {
-    const unsubAuth = firebaseService.onAuthStateChanged((firebaseUser) => {
-      if (firebaseUser) {
-        const email = firebaseUser.email?.toLowerCase();
-        // Check if authenticated user is the designated owner
-        if (email === 'livo.admin@gmail.com' || email === 'eslamfifty11@gmail.com') {
-          setIsAdminLoggedIn(true);
-          // Sync with profile in store or create/update with real Firebase UID
-          const existing = livoStore.getUserByUid(firebaseUser.uid) || livoStore.getUsers().find(u => u.email?.toLowerCase() === email);
-          if (existing) {
-            livoStore.setCurrentUser(existing.uid);
-          } else {
-            const ownerProfile: UserProfile = {
-              uid: firebaseUser.uid,
-              email: email,
-              username: 'livoadmin',
-              displayName: firebaseUser.displayName || 'LIVO Official Admin',
-              avatar: firebaseUser.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&h=200&fit=crop&crop=faces',
-              role: 'owner',
-              coins: 500000,
-              diamonds: 50000,
-              level: 50,
-              eligibleRechargedCoins: 5000000,
-              unlockedLevelRewards: Array.from({ length: 51 }, (_, i) => i),
-              isVerified: true,
-              followingCount: 142,
-              followersCount: 12500,
-              createdAt: new Date().toISOString()
-            };
-            livoStore.registerUser(ownerProfile);
-            firebaseService.saveUserProfile(ownerProfile);
-            livoStore.setCurrentUser(firebaseUser.uid);
-          }
-        }
+    let latestFbUser: any = null;
+
+    const evaluateAdminAuth = (fbUser: any) => {
+      if (!fbUser) {
+        setIsAdminLoggedIn(false);
+        setActiveAdminEmail('');
+        localStorage.removeItem('livo_admin_session');
+        return;
+      }
+      const email = fbUser.email?.trim().toLowerCase() || '';
+      if (livoStore.isAuthorizedAdminEmail(email)) {
+        setIsAdminLoggedIn(true);
+        setActiveAdminEmail(email);
+        localStorage.setItem('livo_admin_session', 'true');
+        livoStore.syncFirebaseUser(fbUser);
       } else {
         setIsAdminLoggedIn(false);
+        setActiveAdminEmail('');
+        localStorage.removeItem('livo_admin_session');
       }
+    };
+
+    const unsubAuth = firebaseService.onAuthStateChanged((firebaseUser) => {
+      latestFbUser = firebaseUser;
+      evaluateAdminAuth(firebaseUser);
     });
 
     const unsubscribe = livoStore.subscribe(() => {
-      setUsers([...livoStore.getUsers()]);
+      setUsers([...livoStore.getGenuineUsers()]);
       setRecharges([...livoStore.getRechargeRequests()]);
       setAudits([...livoStore.getCoinAudits()]);
       setAgencies([...livoStore.getAgencies()]);
@@ -256,7 +267,12 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
       setRechargeCodes([...livoStore.getRechargeCodes()]);
       setGiftsList([...livoStore.getGifts()]);
       setStoreItemsList([...livoStore.getStoreItems()]);
+      setCoinPackagesList([...livoStore.getCoinPackages()]);
+      setSupervisors([...livoStore.getSupervisors()]);
       setAllMessages([...livoStore.getMessages()]);
+      if (latestFbUser) {
+        evaluateAdminAuth(latestFbUser);
+      }
     });
 
     return () => {
@@ -265,17 +281,16 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
     };
   }, []);
 
-  // Admin Login with Firebase Auth and real server-side validation
+  // Admin Login with Firebase Auth and real server-side validation (Owner + Active Supervisors)
   const handleAdminLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError('');
     setIsLoggingIn(true);
 
     const cleanEmail = adminUsername.trim().toLowerCase();
-    
-    // Check owner email format
-    if (cleanEmail !== 'livo.admin@gmail.com') {
-      setAuthError('حساب الإدارة غير معتمد. المالك الوحيد المعتمد هو livo.admin@gmail.com');
+
+    if (!livoStore.isAuthorizedAdminEmail(cleanEmail)) {
+      setAuthError('حساب الإدارة غير معتمد. يرجى الدخول بحساب المالك الرسمي أو مشرف مفعّل في المنظومة.');
       setIsLoggingIn(false);
       return;
     }
@@ -284,8 +299,9 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
       const res = await firebaseService.loginAdmin(cleanEmail, adminPassword);
       if (res.success && res.user) {
         setIsAdminLoggedIn(true);
+        setActiveAdminEmail(cleanEmail);
         localStorage.setItem('livo_admin_session', 'true');
-        livoStore.setCurrentUser(res.user.uid);
+        livoStore.syncFirebaseUser(res.user);
         showToast('تم تسجيل الدخول بنجاح عبر Firebase Authentication 🛡️');
       } else {
         setAuthError(res.error || 'فشل التحقق من بيانات الدخول');
@@ -297,17 +313,26 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
     }
   };
 
-  // Google Login for Admin
+  // Google Login for Admin (Strictly checks authorized owner/supervisor email)
   const handleGoogleLogin = async () => {
     setAuthError('');
     setIsLoggingIn(true);
     try {
       const res = await firebaseService.loginAdminWithGoogle();
       if (res.success && res.user) {
+        const email = res.user.email?.trim().toLowerCase() || '';
+        if (!livoStore.isAuthorizedAdminEmail(email)) {
+          await firebaseService.logout();
+          setIsAdminLoggedIn(false);
+          localStorage.removeItem('livo_admin_session');
+          setAuthError('هذا البريد غير مصرح له بدخول لوحة الإدارة (مقصور على المالك والمشرفين المعتمدين).');
+          return;
+        }
         setIsAdminLoggedIn(true);
+        setActiveAdminEmail(email);
         localStorage.setItem('livo_admin_session', 'true');
-        livoStore.setCurrentUser(res.user.uid);
-        showToast('تم تسجيل الدخول بنجاح كمالك للمنظومة عبر Google 🛡️');
+        livoStore.syncFirebaseUser(res.user);
+        showToast('تم تسجيل الدخول بنجاح كمسؤول للمنظومة عبر Google 🛡️');
       } else {
         setAuthError(res.error || 'فشل تسجيل الدخول عبر Google');
       }
@@ -321,7 +346,9 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
   // Safe Logout
   const handleLogout = async () => {
     await firebaseService.logout();
+    livoStore.logoutSession();
     setIsAdminLoggedIn(false);
+    setActiveAdminEmail('');
     localStorage.removeItem('livo_admin_session');
     setAdminPassword('');
     setAdminUsername('');
@@ -519,11 +546,12 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
       type: paymentType,
       title: paymentTitle.trim(),
       accountNumber: paymentAccountNum.trim(),
-      accountHolderName: paymentHolderName.trim() || undefined,
-      instructions: paymentInstructions.trim() || undefined,
+      accountHolder: paymentHolderName.trim() || 'إدارة LIVO',
+      instructions: paymentInstructions.trim() || 'يرجى تحويل المبلغ وإرفاق صورة إيصال التحويل واضحة',
       isActive: true,
       isDefault: paymentIsDefault,
-      updatedAt: new Date().toISOString()
+      updatedAt: new Date().toISOString(),
+      updatedBy: activeAdminEmail || 'livo.admin@gmail.com'
     };
     livoStore.savePaymentMethod(newMethod);
     showToast(editPaymentId ? 'تم تحديث وسيلة الدفع بنجاح' : 'تم إضافة وسيلة الدفع بنجاح');
@@ -550,6 +578,47 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
     showToast('تم حذف وسيلة الدفع بنجاح');
   };
 
+  // Coin Packages CRUD Handlers
+  const handleSaveCoinPackage = (e: React.FormEvent) => {
+    e.preventDefault();
+    const parsedCoins = parseInt(pkgCoinsInput, 10);
+    const parsedPrice = parseFloat(pkgPriceInput);
+    if (isNaN(parsedCoins) || parsedCoins <= 0 || isNaN(parsedPrice) || parsedPrice <= 0) {
+      showToast('يرجى إدخال عدد كوينز وسعر صالحين أكبر من الصفر');
+      return;
+    }
+    const pkg: CoinPackage = {
+      id: editCoinPkgId || `pkg-${Date.now()}`,
+      coins: parsedCoins,
+      priceEGP: parsedPrice,
+      popular: pkgPopularInput,
+      isActive: pkgActiveInput,
+      updatedAt: new Date().toISOString()
+    };
+    livoStore.saveCoinPackage(pkg);
+    showToast(editCoinPkgId ? 'تم تعديل باقة الشحن بنجاح ✓' : 'تمت إضافة باقة الشحن الجديدة بنجاح ✓');
+    setShowCoinPkgModal(false);
+    setEditCoinPkgId(null);
+    setPkgCoinsInput('');
+    setPkgPriceInput('');
+    setPkgPopularInput(false);
+    setPkgActiveInput(true);
+  };
+
+  const handleToggleCoinPackageActive = (pkg: CoinPackage) => {
+    livoStore.saveCoinPackage({
+      ...pkg,
+      isActive: pkg.isActive === false ? true : false,
+      updatedAt: new Date().toISOString()
+    });
+    showToast(`تم ${pkg.isActive === false ? 'تفعيل' : 'تعطيل'} باقة ${pkg.coins.toLocaleString()} كوينز`);
+  };
+
+  const handleDeleteCoinPackage = (id: string) => {
+    livoStore.deleteCoinPackage(id);
+    showToast('تم حذف باقة الشحن بنجاح');
+  };
+
   // Recharge Codes Handlers
   const handleCreateRechargeCode = (e: React.FormEvent) => {
     e.preventDefault();
@@ -560,19 +629,21 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
       showToast('يرجى إدخال كود صالح وقيمة كوينز أكبر من الصفر');
       return;
     }
-    const res = livoStore.createRechargeCode({
-      code: cleanCode,
-      coinsAmount: parsedCoins,
-      maxUses: parsedMaxUses,
-      createdBy: 'livo.admin@gmail.com'
-    });
-    showToast(res.message);
-    if (res.success) {
-      setShowAddCodeModal(false);
-      setNewCodeInput('');
-      setNewCodeCoinsInput('');
-      setNewCodeMaxUsesInput('100');
+    if (rechargeCodes.some(c => c.code.toUpperCase() === cleanCode)) {
+      showToast('هذا الكود موجود بالفعل، يرجى اختيار كود آخر');
+      return;
     }
+    const created = livoStore.createRechargeCode({
+      code: cleanCode,
+      coins: parsedCoins,
+      maxUses: parsedMaxUses,
+      createdBy: activeAdminEmail || 'livo.admin@gmail.com'
+    });
+    showToast(`تم إنشاء كود الشحن ${created.code} بقيمة ${created.coins.toLocaleString()} كوينز ✓`);
+    setShowAddCodeModal(false);
+    setNewCodeInput('');
+    setNewCodeCoinsInput('');
+    setNewCodeMaxUsesInput('100');
   };
 
   const handleDeleteRechargeCode = (codeId: string) => {
@@ -580,7 +651,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
     showToast('تم حذف كود الشحن بنجاح');
   };
 
-  // Gifts Handlers
+  // Gifts Handlers (Add + Edit + Toggle Active + Delete)
   const handleSaveGift = (e: React.FormEvent) => {
     e.preventDefault();
     const parsedPrice = parseInt(newGiftPrice, 10);
@@ -588,22 +659,26 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
       showToast('يرجى إدخال اسم الهدية وسعر صحيح');
       return;
     }
-    const newGift: GiftItem = {
-      id: `gift-${Date.now()}`,
+    const existingGift = editGiftId ? giftsList.find(g => g.id === editGiftId) : undefined;
+    const savedGift: GiftItem = {
+      id: editGiftId || `gift-${Date.now()}`,
       name: newGiftName.trim(),
-      priceCoins: parsedPrice,
-      icon: newGiftIcon.trim(),
-      category: 'popular',
+      coins: parsedPrice,
+      icon: newGiftIcon.trim() || '🎁',
+      category: existingGift?.category || 'popular',
       animationType: newGiftAnimation,
-      isActive: true,
+      durationMs: existingGift?.durationMs || 3500,
+      isActive: existingGift?.isActive ?? true,
       updatedAt: new Date().toISOString()
     };
-    livoStore.saveGift(newGift);
-    showToast(`تمت إضافة الهدية ${newGift.name} للمتجر بنجاح`);
+    livoStore.saveGift(savedGift);
+    showToast(editGiftId ? `تم تحديث الهدية ${savedGift.name} بنجاح ✓` : `تمت إضافة الهدية ${savedGift.name} للمتجر بنجاح ✓`);
     setShowAddGiftModal(false);
+    setEditGiftId(null);
     setNewGiftName('');
     setNewGiftPrice('');
     setNewGiftIcon('🎁');
+    setNewGiftAnimation('heart');
   };
 
   const handleToggleGiftStatus = (gift: GiftItem) => {
@@ -612,7 +687,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
       isActive: gift.isActive === false ? true : false,
       updatedAt: new Date().toISOString()
     });
-    showToast('تم تحديث حالة الهدية');
+    showToast(`تم ${gift.isActive === false ? 'تفعيل' : 'تعطيل'} الهدية ${gift.name}`);
   };
 
   const handleDeleteGift = (giftId: string) => {
@@ -1647,7 +1722,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                     type="text"
                     value={searchCoinsUid}
                     onChange={(e) => setSearchCoinsUid(e.target.value)}
-                    placeholder="أدخل معرّف Public ID (مثال: 10245)"
+                    placeholder="أدخل معرّف Public ID (مثال: 48291)"
                     className="flex-1 bg-[#120824] border border-purple-800/60 rounded-xl px-3 py-2 text-xs font-digits text-white placeholder-purple-400/50 outline-none focus:border-amber-400"
                   />
                   <button
@@ -1777,40 +1852,97 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
             </div>
           )}
 
-          {/* SECTION 4: PRICING & COIN PACKAGES */}
+          {/* SECTION 4: PRICING & COIN PACKAGES (FULL CRUD SYNCED LIVE) */}
           {activeSection === 'pricing' && (
             <div className="space-y-4">
-              <div>
-                <h2 className="text-lg font-black text-white">أسعار وباقات الكوينز المعتمدة</h2>
-                <p className="text-xs text-purple-300">
-                  السعر الأساسي المعتمد: 1000 كوينز = 350 جنيه مصري (تناسب طردي، بدون بونص خادع)
-                </p>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-black text-white">أسعار وباقات الكوينز المعتمدة</h2>
+                  <p className="text-xs text-purple-300">
+                    إدارة كاملة للباقات (إضافة، تعديل، تفعيل/تعطيل، حذف) مع مزامنة فورية في شاشة الشحن للعملاء
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    setEditCoinPkgId(null);
+                    setPkgCoinsInput('');
+                    setPkgPriceInput('');
+                    setPkgPopularInput(false);
+                    setPkgActiveInput(true);
+                    setShowCoinPkgModal(true);
+                  }}
+                  className="bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 text-black font-extrabold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow transition-all shrink-0"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>إضافة باقة شحن جديدة</span>
+                </button>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {INITIAL_COIN_PACKAGES.map((pkg) => (
+                {coinPackagesList.map((pkg) => (
                   <div
                     key={pkg.id}
-                    className="bg-[#170b2c] p-3.5 rounded-2xl border border-purple-800/50 flex items-center justify-between"
+                    className={`bg-[#170b2c] p-3.5 rounded-2xl border transition-all flex flex-col justify-between gap-3 ${
+                      pkg.isActive !== false ? 'border-purple-800/60' : 'border-red-900/40 opacity-60'
+                    }`}
                   >
-                    <div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-digits font-black text-amber-400 text-sm">
-                          {pkg.coins.toLocaleString()} كوينز
-                        </span>
-                        {pkg.popular && (
-                          <span className="text-[9px] bg-red-500/20 text-red-300 border border-red-500/40 px-1.5 py-0.2 rounded font-bold">
-                            شائع
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-digits font-black text-amber-400 text-base">
+                            {pkg.coins.toLocaleString()} كوينز
                           </span>
-                        )}
+                          {pkg.popular && (
+                            <span className="text-[9px] bg-red-500/20 text-red-300 border border-red-500/40 px-1.5 py-0.2 rounded font-bold">
+                              الأكثر طلباً
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-xs text-green-400 font-digits font-bold block mt-0.5">
+                          {pkg.priceEGP.toLocaleString()} جنيه مصري
+                        </span>
                       </div>
-                      <span className="text-xs text-green-400 font-digits font-bold block mt-0.5">
-                        {pkg.priceEGP} جنيه مصري
+                      <span className={`text-[10px] px-2 py-0.5 rounded-lg font-bold ${
+                        pkg.isActive !== false ? 'bg-green-500/20 text-green-300' : 'bg-red-500/20 text-red-300'
+                      }`}>
+                        {pkg.isActive !== false ? 'مفعلة' : 'معطلة'}
                       </span>
                     </div>
-                    <span className="text-[10px] bg-purple-900/60 text-purple-300 px-2 py-1 rounded-lg">
-                      معتمد رسمياً
-                    </span>
+
+                    <div className="pt-2 border-t border-purple-800/40 flex items-center justify-between gap-2">
+                      <button
+                        onClick={() => handleToggleCoinPackageActive(pkg)}
+                        className={`text-[11px] px-2.5 py-1 rounded-lg font-bold flex items-center gap-1 ${
+                          pkg.isActive !== false ? 'bg-amber-900/40 text-amber-300' : 'bg-green-900/40 text-green-300'
+                        }`}
+                      >
+                        {pkg.isActive !== false ? <ToggleRight className="w-3.5 h-3.5" /> : <ToggleLeft className="w-3.5 h-3.5" />}
+                        <span>{pkg.isActive !== false ? 'تعطيل' : 'تفعيل'}</span>
+                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => {
+                            setEditCoinPkgId(pkg.id);
+                            setPkgCoinsInput(String(pkg.coins));
+                            setPkgPriceInput(String(pkg.priceEGP));
+                            setPkgPopularInput(Boolean(pkg.popular));
+                            setPkgActiveInput(pkg.isActive !== false);
+                            setShowCoinPkgModal(true);
+                          }}
+                          className="bg-purple-900/70 hover:bg-purple-800 text-purple-200 text-xs px-2.5 py-1 rounded-lg"
+                          title="تعديل الباقة"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteCoinPackage(pkg.id)}
+                          className="bg-red-950/60 hover:bg-red-900 text-red-300 text-xs px-2.5 py-1 rounded-lg"
+                          title="حذف الباقة"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1845,9 +1977,25 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                         </span>
                         <div className="flex items-center gap-2 mt-1">
                           <span className={`text-[9px] px-1.5 py-0.2 rounded font-bold ${
-                            u.role === 'owner' ? 'bg-amber-500/20 text-amber-300' : u.role === 'agent' ? 'bg-purple-500/20 text-purple-300' : 'bg-gray-800 text-gray-300'
+                            u.role === 'owner'
+                              ? 'bg-amber-500/20 text-amber-300'
+                              : u.role === 'supervisor'
+                              ? 'bg-cyan-500/20 text-cyan-300'
+                              : (u.role === 'charging_agent' || u.role === 'distributor_agent' || u.role === 'agent')
+                              ? 'bg-purple-500/20 text-purple-300'
+                              : 'bg-gray-800 text-gray-300'
                           }`}>
-                            {u.role === 'owner' ? 'المالك الرسمي' : u.role === 'agent' ? 'وكيل معتمد' : 'مستخدم عادي'}
+                            {u.role === 'owner'
+                              ? 'المالك الرسمي'
+                              : u.role === 'supervisor'
+                              ? 'مشرف نظام'
+                              : u.role === 'charging_agent'
+                              ? 'وكيل شحن'
+                              : u.role === 'distributor_agent'
+                              ? 'وكيل موزعين'
+                              : u.role === 'agent'
+                              ? 'وكيل معتمد'
+                              : 'مستخدم عادي'}
                           </span>
                           <span className="text-[10px] text-purple-300 font-digits">
                             الرصيد: {u.coins.toLocaleString()}
@@ -2055,7 +2203,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                             <div className="flex items-center gap-2">
                               <h3 className="font-black text-sm text-white">{selectedSupportUser.displayName}</h3>
                               {selectedSupportUser.isVerified && <span className="text-xs text-blue-400">✓ موثق</span>}
-                              {selectedSupportUser.agencyRole === 'charging_agent' && (
+                              {(selectedSupportUser.role === 'charging_agent' || selectedSupportUser.agencyType === 'charging_agent') && (
                                 <span className="text-[9px] bg-amber-500/20 text-amber-300 border border-amber-500/40 px-1.5 py-0.2 rounded font-bold">⚡ وكيل شحن</span>
                               )}
                             </div>
@@ -2105,7 +2253,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                                         src={msg.mediaUrl}
                                         alt="مرفق"
                                         className="max-h-48 w-full object-cover cursor-pointer hover:opacity-90"
-                                        onClick={() => window.open(msg.mediaUrl, '_blank')}
+                                        onClick={() => setZoomedReceiptUrl(msg.mediaUrl || null)}
                                       />
                                     </div>
                                   )}
@@ -2211,10 +2359,10 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                           <span className="text-[11px] text-purple-300">رقم المحفظة / الحساب:</span>
                           <span className="text-xs font-digits font-black text-amber-400">{pm.accountNumber}</span>
                         </div>
-                        {pm.accountHolderName && (
+                        {pm.accountHolder && (
                           <div className="flex items-center justify-between">
                             <span className="text-[11px] text-purple-300">اسم صاحب الحساب:</span>
-                            <span className="text-xs font-bold text-white">{pm.accountHolderName}</span>
+                            <span className="text-xs font-bold text-white">{pm.accountHolder}</span>
                           </div>
                         )}
                       </div>
@@ -2242,7 +2390,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                             setPaymentType(pm.type);
                             setPaymentTitle(pm.title);
                             setPaymentAccountNum(pm.accountNumber);
-                            setPaymentHolderName(pm.accountHolderName || '');
+                            setPaymentHolderName(pm.accountHolder || '');
                             setPaymentInstructions(pm.instructions || '');
                             setPaymentIsDefault(pm.isDefault || false);
                             setShowAddPaymentModal(true);
@@ -2305,7 +2453,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                             {code.code}
                           </td>
                           <td className="p-3 font-digits font-bold text-yellow-300">
-                            {code.coinsAmount.toLocaleString()} كوينز
+                            {code.coins.toLocaleString()} كوينز
                           </td>
                           <td className="p-3 font-digits">
                             {code.usedCount} / {code.maxUses}
@@ -2318,7 +2466,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                             </span>
                           </td>
                           <td className="p-3 text-purple-300 text-[11px] font-digits">
-                            {code.redeemedByUids?.length ? `${code.redeemedByUids.length} حساب` : 'لم يُستخدم بعد'}
+                            {code.usedByUids?.length ? `${code.usedByUids.length} حساب` : 'لم يُستخدم بعد'}
                           </td>
                           <td className="p-3 text-center">
                             <button
@@ -2362,7 +2510,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                         <img src={req.userAvatar} alt="" className="w-12 h-12 rounded-full border border-purple-500 object-cover" />
                         <div>
                           <div className="flex items-center gap-2">
-                            <h4 className="font-bold text-sm text-white">{req.displayName}</h4>
+                            <h4 className="font-bold text-sm text-white">@{req.username}</h4>
                             <span className="text-xs font-digits text-amber-400">UID: {req.uid}</span>
                             <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
                               req.status === 'approved' ? 'bg-green-500/20 text-green-300' : req.status === 'pending' ? 'bg-amber-500/20 text-amber-300' : 'bg-red-500/20 text-red-300'
@@ -2371,15 +2519,15 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                             </span>
                           </div>
                           <p className="text-xs text-purple-300 mt-1">
-                            المدة: <strong className="text-white">{req.monthsCount} شهر</strong> • الرسوم: <strong className="text-amber-400 font-digits">{req.priceCoins?.toLocaleString()} كوينز</strong> • هاتف التحويل: {req.paymentPhone}
+                            المدة: <strong className="text-white">{req.monthsCount} شهر</strong> • الرسوم: <strong className="text-amber-400 font-digits">{req.priceEGP?.toLocaleString()} ج.م</strong> • هاتف التحويل: {req.paymentPhone}
                           </p>
                         </div>
                       </div>
 
                       <div className="flex items-center gap-2">
-                        {req.receiptImageUrl && (
+                        {req.receiptUrl && (
                           <button
-                            onClick={() => setZoomedVerificationReceiptUrl(req.receiptImageUrl!)}
+                            onClick={() => setZoomedVerificationReceiptUrl(req.receiptUrl)}
                             className="bg-purple-900/80 hover:bg-purple-800 text-purple-200 text-xs px-3 py-1.5 rounded-xl font-bold flex items-center gap-1"
                           >
                             <ZoomIn className="w-3.5 h-3.5" />
@@ -2391,8 +2539,8 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                           <>
                             <button
                               onClick={() => {
-                                livoStore.reviewVerificationRequest(req.id, 'approved', 'livo.admin@gmail.com');
-                                showToast(`تم توثيق حساب ${req.displayName} بالعلامة الزرقاء بنجاح ✓`);
+                                livoStore.reviewVerificationRequest(req.id, 'approved', activeAdminEmail || 'livo.admin@gmail.com');
+                                showToast(`تم توثيق حساب @${req.username} بالعلامة الزرقاء بنجاح ✓`);
                               }}
                               className="bg-green-600 hover:bg-green-500 text-white text-xs px-3 py-1.5 rounded-xl font-bold flex items-center gap-1"
                             >
@@ -2496,7 +2644,14 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                   </p>
                 </div>
                 <button
-                  onClick={() => setShowAddGiftModal(true)}
+                  onClick={() => {
+                    setEditGiftId(null);
+                    setNewGiftName('');
+                    setNewGiftPrice('');
+                    setNewGiftIcon('🎁');
+                    setNewGiftAnimation('heart');
+                    setShowAddGiftModal(true);
+                  }}
                   className="bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 text-black font-extrabold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow transition-all shrink-0"
                 >
                   <Plus className="w-4 h-4" />
@@ -2514,22 +2669,51 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                   {giftsList.map((gift) => (
                     <div
                       key={gift.id}
-                      className="bg-[#170b2c] p-3 rounded-2xl border border-purple-800/40 flex flex-col items-center text-center justify-between relative group"
+                      className={`bg-[#170b2c] p-3 rounded-2xl border flex flex-col items-center text-center justify-between relative ${
+                        gift.isActive !== false ? 'border-purple-800/50' : 'border-red-900/40 opacity-60'
+                      }`}
                     >
-                      <button
-                        onClick={() => handleDeleteGift(gift.id)}
-                        className="absolute top-2 left-2 text-red-400 opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:text-red-300"
-                        title="حذف الهدية"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      <div className="w-full flex items-center justify-between mb-1">
+                        <button
+                          onClick={() => handleToggleGiftStatus(gift)}
+                          className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
+                            gift.isActive !== false ? 'bg-green-500/20 text-green-300' : 'bg-red-500/20 text-red-300'
+                          }`}
+                          title={gift.isActive !== false ? 'تعطيل' : 'تفعيل'}
+                        >
+                          {gift.isActive !== false ? 'نشط' : 'معطل'}
+                        </button>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => {
+                              setEditGiftId(gift.id);
+                              setNewGiftName(gift.name);
+                              setNewGiftPrice(String(gift.coins));
+                              setNewGiftIcon(gift.icon);
+                              setNewGiftAnimation(gift.animationType);
+                              setShowAddGiftModal(true);
+                            }}
+                            className="text-purple-300 hover:text-amber-300 p-1"
+                            title="تعديل الهدية"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteGift(gift.id)}
+                            className="text-red-400 hover:text-red-300 p-1"
+                            title="حذف الهدية"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
                       <span className="text-4xl filter drop-shadow my-1">{gift.icon}</span>
                       <h4 className="font-bold text-xs text-white mt-1">{gift.name}</h4>
                       <span className="text-xs font-digits font-bold text-amber-300 mt-0.5">
-                        {gift.priceCoins.toLocaleString()} كوينز
+                        {gift.coins.toLocaleString()} كوينز
                       </span>
                       <span className="text-[9px] text-purple-400 mt-0.5">
-                        تأثير: {gift.animationType || 'قياسي'}
+                        تأثير: {gift.animationType}
                       </span>
                     </div>
                   ))}
@@ -2750,65 +2934,204 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
             </div>
           )}
 
-          {/* SECTION 10: SUPERVISORS */}
+          {/* SECTION 10: SUPERVISORS (REAL FIRESTORE CRUD VIA LIVOSTORE) */}
           {activeSection === 'supervisors' && (
-            <div className="space-y-4 max-w-2xl">
+            <div className="space-y-4 max-w-3xl">
               <div>
-                <h2 className="text-lg font-black text-white">إدارة صلاحيات المشرفين</h2>
+                <h2 className="text-lg font-black text-white">إدارة صلاحيات المشرفين الحقيقية</h2>
                 <p className="text-xs text-purple-300">
-                  صلاحيات يحددها المالك حصراً • المشرف لا يمتلك صلاحية تغيير المالك
+                  تتم المزامنة مباشرة مع Firebase • المشرف المفعّل يستطيع دخول لوحة الإدارة بحسابه المعتمد
                 </p>
               </div>
 
               <div className="bg-[#170b2c] p-4 rounded-2xl border border-purple-800/50 space-y-3">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <input
                     type="text"
                     value={newSupervisorUid}
                     onChange={(e) => setNewSupervisorUid(e.target.value)}
-                    placeholder="UID المشرف (مثال: 10245)"
-                    className="bg-[#120824] border border-purple-800/60 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                    placeholder="UID المستخدم (اختياري)"
+                    className="bg-[#120824] border border-purple-800/60 rounded-xl px-3 py-2 text-xs text-white font-digits outline-none focus:border-amber-400"
+                  />
+                  <input
+                    type="text"
+                    value={newSupervisorName}
+                    onChange={(e) => setNewSupervisorName(e.target.value)}
+                    placeholder="الاسم الكامل للمشرف"
+                    className="bg-[#120824] border border-purple-800/60 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-amber-400"
                   />
                   <input
                     type="email"
                     value={newSupervisorEmail}
                     onChange={(e) => setNewSupervisorEmail(e.target.value)}
-                    placeholder="البريد الإلكتروني للمشرف"
-                    className="bg-[#120824] border border-purple-800/60 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                    placeholder="البريد الإلكتروني (Gmail) *"
+                    className="bg-[#120824] border border-purple-800/60 rounded-xl px-3 py-2 text-xs text-white font-digits outline-none focus:border-amber-400"
                   />
                 </div>
+
+                <div>
+                  <span className="text-[11px] font-bold text-purple-200 block mb-1.5">الصلاحيات الممنوحة:</span>
+                  <div className="flex flex-wrap gap-2">
+                    {SUPERVISOR_PERMISSIONS_OPTIONS.map((perm) => {
+                      const checked = newSupervisorPermissions.includes(perm.id);
+                      return (
+                        <button
+                          key={perm.id}
+                          type="button"
+                          onClick={() =>
+                            setNewSupervisorPermissions(prev =>
+                              checked ? prev.filter(p => p !== perm.id) : [...prev, perm.id]
+                            )
+                          }
+                          className={`text-[11px] px-2.5 py-1 rounded-lg border font-bold transition-all ${
+                            checked
+                              ? 'bg-amber-500/20 border-amber-400 text-amber-300'
+                              : 'bg-[#120824] border-purple-800/60 text-purple-400'
+                          }`}
+                        >
+                          {checked ? '✓ ' : '+ '}{perm.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
                 <button
                   onClick={() => {
-                    if (!newSupervisorUid.trim()) return;
-                    setSupervisors(prev => [
-                      ...prev,
-                      {
-                        uid: newSupervisorUid.trim(),
-                        name: `مشرف ${newSupervisorUid}`,
-                        email: newSupervisorEmail || 'supervisor@livo.live',
-                        permissions: ['recharges', 'moderation']
-                      }
-                    ]);
+                    const cleanEmail = newSupervisorEmail.trim().toLowerCase();
+                    if (!cleanEmail || !cleanEmail.includes('@')) {
+                      showToast('يرجى إدخال بريد إلكتروني صحيح للمشرف');
+                      return;
+                    }
+                    livoStore.addSupervisor({
+                      uid: newSupervisorUid.trim() || undefined,
+                      name: newSupervisorName.trim() || cleanEmail.split('@')[0],
+                      email: cleanEmail,
+                      permissions: newSupervisorPermissions
+                    });
                     setNewSupervisorUid('');
+                    setNewSupervisorName('');
                     setNewSupervisorEmail('');
-                    showToast('تمت إضافة المشرف بنجاح');
+                    setNewSupervisorPermissions(['recharges', 'bans', 'rooms']);
+                    showToast('تمت إضافة المشرف وحفظ صلاحياته في قاعدة البيانات ✓');
                   }}
-                  className="w-full py-2 bg-purple-700 hover:bg-purple-600 text-white font-bold text-xs rounded-xl"
+                  className="w-full py-2.5 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 text-black font-black text-xs rounded-xl shadow"
                 >
-                  إضافة مشرف جديد
+                  إضافة وتفعيل المشرف في قاعدة البيانات
                 </button>
               </div>
 
-              <div className="space-y-2">
-                {supervisors.map(s => (
-                  <div key={s.uid} className="bg-[#170b2c] p-3 rounded-xl border border-purple-800/40 flex items-center justify-between">
-                    <div>
-                      <span className="font-bold text-xs text-white block">{s.name} (UID: {s.uid})</span>
-                      <span className="text-[10px] text-purple-400">{s.email} • الصلاحيات: {s.permissions.join(', ')}</span>
-                    </div>
-                    <span className="text-[10px] bg-green-500/20 text-green-300 px-2 py-0.5 rounded font-bold">نشط</span>
+              <div className="space-y-2.5">
+                {supervisors.length === 0 ? (
+                  <div className="bg-[#170b2c] p-6 rounded-2xl border border-purple-800/40 text-center text-xs text-purple-400">
+                    لا يوجد مشرفون مضافون حالياً
                   </div>
-                ))}
+                ) : (
+                  supervisors.map((s) => (
+                    <div key={s.id} className="bg-[#170b2c] p-3.5 rounded-2xl border border-purple-800/50 space-y-2.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-xs text-white">{s.name}</span>
+                            <span className="text-[11px] text-amber-400 font-digits">UID: {s.uid}</span>
+                            <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${
+                              s.isActive ? 'bg-green-500/20 text-green-300' : 'bg-red-500/20 text-red-300'
+                            }`}>
+                              {s.isActive ? 'نشط ومفعّل' : 'موقوف'}
+                            </span>
+                          </div>
+                          <span className="text-[11px] text-purple-300 font-digits block mt-0.5">{s.email}</span>
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => {
+                              if (editingSupervisorId === s.id) {
+                                setEditingSupervisorId(null);
+                              } else {
+                                setEditingSupervisorId(s.id);
+                                setEditingSupervisorPerms([...s.permissions]);
+                              }
+                            }}
+                            className="text-xs px-2.5 py-1.5 rounded-xl bg-purple-900/60 hover:bg-purple-800 text-purple-200 font-bold"
+                          >
+                            الصلاحيات
+                          </button>
+                          <button
+                            onClick={() => {
+                              livoStore.toggleSupervisorActive(s.id);
+                              showToast(`تم ${s.isActive ? 'تعطيل' : 'تفعيل'} المشرف ${s.name}`);
+                            }}
+                            className={`text-xs px-2.5 py-1.5 rounded-xl font-bold ${
+                              s.isActive ? 'bg-amber-900/40 text-amber-300' : 'bg-green-900/40 text-green-300'
+                            }`}
+                          >
+                            {s.isActive ? 'تعطيل' : 'تفعيل'}
+                          </button>
+                          <button
+                            onClick={() => {
+                              livoStore.removeSupervisor(s.id);
+                              showToast('تم إزالة المشرف وسحب صلاحياته من النظام');
+                            }}
+                            className="text-xs px-2.5 py-1.5 rounded-xl bg-red-950/60 hover:bg-red-900 text-red-300"
+                            title="حذف المشرف"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {editingSupervisorId === s.id ? (
+                        <div className="pt-2 border-t border-purple-800/40 space-y-2">
+                          <div className="flex flex-wrap gap-1.5">
+                            {SUPERVISOR_PERMISSIONS_OPTIONS.map((perm) => {
+                              const checked = editingSupervisorPerms.includes(perm.id);
+                              return (
+                                <button
+                                  key={perm.id}
+                                  type="button"
+                                  onClick={() =>
+                                    setEditingSupervisorPerms(prev =>
+                                      checked ? prev.filter(p => p !== perm.id) : [...prev, perm.id]
+                                    )
+                                  }
+                                  className={`text-[10px] px-2 py-1 rounded-lg border font-bold ${
+                                    checked
+                                      ? 'bg-amber-500/20 border-amber-400 text-amber-300'
+                                      : 'bg-[#120824] border-purple-800/50 text-purple-400'
+                                  }`}
+                                >
+                                  {checked ? '✓ ' : '+ '}{perm.label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          <button
+                            onClick={() => {
+                              livoStore.updateSupervisorPermissions(s.id, editingSupervisorPerms);
+                              setEditingSupervisorId(null);
+                              showToast('تم حفظ تعديلات الصلاحيات ✓');
+                            }}
+                            className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg"
+                          >
+                            حفظ الصلاحيات
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap gap-1">
+                          {s.permissions.map((pId) => {
+                            const found = SUPERVISOR_PERMISSIONS_OPTIONS.find(o => o.id === pId);
+                            return (
+                              <span key={pId} className="text-[10px] bg-purple-950 text-purple-200 border border-purple-800/40 px-2 py-0.5 rounded-md">
+                                {found?.label || pId}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           )}
@@ -3193,7 +3516,8 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                   <option value="orange_cash">أورنج كاش (Orange Cash)</option>
                   <option value="etisalat_cash">اتصالات كاش (Etisalat Cash)</option>
                   <option value="we_pay">محفظة وي باي (WE Pay)</option>
-                  <option value="bank_account">حساب بنكي رسمي</option>
+                  <option value="bank_transfer">حساب بنكي رسمي</option>
+                  <option value="other">وسيلة أخرى</option>
                 </select>
               </div>
 
@@ -3356,14 +3680,19 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
         </div>
       )}
 
-      {/* MODAL: ADD STORE GIFT */}
+      {/* MODAL: ADD / EDIT STORE GIFT */}
       {showAddGiftModal && (
         <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-[#170b2c] w-full max-w-sm rounded-2xl border border-amber-500/60 p-5 space-y-4 text-white">
             <div className="flex items-center justify-between pb-2 border-b border-purple-800/50">
-              <h3 className="font-bold text-sm text-white">إضافة هدية جديدة للمتجر</h3>
+              <h3 className="font-bold text-sm text-white">
+                {editGiftId ? 'تعديل بيانات الهدية' : 'إضافة هدية جديدة للمتجر'}
+              </h3>
               <button
-                onClick={() => setShowAddGiftModal(false)}
+                onClick={() => {
+                  setShowAddGiftModal(false);
+                  setEditGiftId(null);
+                }}
                 className="text-purple-400 hover:text-white"
               >
                 <X className="w-4 h-4" />
@@ -3425,14 +3754,17 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                 <label className="block text-xs font-semibold text-purple-200 mb-1">نوع التأثير في الغرفة:</label>
                 <select
                   value={newGiftAnimation}
-                  onChange={(e: any) => setNewGiftAnimation(e.target.value)}
+                  onChange={(e) => setNewGiftAnimation(e.target.value as GiftItem['animationType'])}
                   className="w-full bg-[#120824] border border-purple-800/60 rounded-xl p-2.5 text-xs text-white outline-none"
                 >
-                  <option value="standard">قياسي (Standard)</option>
+                  <option value="heart">قلب متوهج (Heart)</option>
+                  <option value="rose">وردة (Rose)</option>
+                  <option value="diamond">ألماسة متلألئة (Diamond)</option>
+                  <option value="rocket">صاروخ ناري (Rocket)</option>
                   <option value="lion">أسد ذهبي يزأر (Lion Roar)</option>
                   <option value="car">سيارة رياضية فاخرة (Supercar)</option>
                   <option value="dragon">تنين أسطوري (Dragon Flight)</option>
-                  <option value="fireworks">ألعاب نارية متفجرة (Fireworks)</option>
+                  <option value="castle">قصر ملكي (Castle)</option>
                 </select>
               </div>
 
@@ -3441,11 +3773,104 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                   type="submit"
                   className="flex-1 py-2.5 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 text-black font-extrabold text-xs rounded-xl shadow"
                 >
-                  إضافة للمتجر
+                  {editGiftId ? 'حفظ التعديلات' : 'إضافة للمتجر'}
                 </button>
                 <button
                   type="button"
-                  onClick={() => setShowAddGiftModal(false)}
+                  onClick={() => {
+                    setShowAddGiftModal(false);
+                    setEditGiftId(null);
+                  }}
+                  className="px-4 py-2.5 bg-purple-900 text-white text-xs rounded-xl"
+                >
+                  إلغاء
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: ADD / EDIT COIN PACKAGE */}
+      {showCoinPkgModal && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#170b2c] w-full max-w-sm rounded-2xl border border-amber-500/60 p-5 space-y-4 text-white">
+            <div className="flex items-center justify-between pb-2 border-b border-purple-800/50">
+              <h3 className="font-bold text-sm text-white">
+                {editCoinPkgId ? 'تعديل باقة الشحن' : 'إضافة باقة شحن جديدة'}
+              </h3>
+              <button
+                onClick={() => {
+                  setShowCoinPkgModal(false);
+                  setEditCoinPkgId(null);
+                }}
+                className="text-purple-400 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveCoinPackage} className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-purple-200 mb-1">عدد الكوينز:</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={pkgCoinsInput}
+                  onChange={(e) => setPkgCoinsInput(e.target.value)}
+                  placeholder="مثال: 1000"
+                  className="w-full bg-[#120824] border border-purple-800/60 rounded-xl p-2.5 text-xs text-white font-digits outline-none focus:border-amber-400"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-purple-200 mb-1">السعر بالجنيه المصري (EGP):</label>
+                <input
+                  type="number"
+                  min={1}
+                  step="any"
+                  value={pkgPriceInput}
+                  onChange={(e) => setPkgPriceInput(e.target.value)}
+                  placeholder="مثال: 350"
+                  className="w-full bg-[#120824] border border-purple-800/60 rounded-xl p-2.5 text-xs text-white font-digits outline-none focus:border-amber-400"
+                  required
+                />
+              </div>
+
+              <label className="flex items-center gap-2 text-xs text-purple-200 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={pkgPopularInput}
+                  onChange={(e) => setPkgPopularInput(e.target.checked)}
+                  className="w-4 h-4 accent-amber-500 rounded"
+                />
+                <span>تمييز كباقة شائعة (الأكثر طلباً)</span>
+              </label>
+
+              <label className="flex items-center gap-2 text-xs text-purple-200 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={pkgActiveInput}
+                  onChange={(e) => setPkgActiveInput(e.target.checked)}
+                  className="w-4 h-4 accent-emerald-500 rounded"
+                />
+                <span>متاحة ومفعلة في شاشة الشحن للعملاء</span>
+              </label>
+
+              <div className="flex items-center gap-2 pt-2">
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 text-black font-extrabold text-xs rounded-xl shadow"
+                >
+                  {editCoinPkgId ? 'حفظ التعديلات' : 'إضافة الباقة'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowCoinPkgModal(false);
+                    setEditCoinPkgId(null);
+                  }}
                   className="px-4 py-2.5 bg-purple-900 text-white text-xs rounded-xl"
                 >
                   إلغاء

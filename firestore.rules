@@ -1,13 +1,11 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // Helper function to check if user is authenticated
+
     function isAuthenticated() {
       return request.auth != null;
     }
-    
-    // Helper function to check if user is the official owner
+
     function isOwner() {
       return isAuthenticated() && (
         request.auth.token.email == 'livo.admin@gmail.com' ||
@@ -15,190 +13,240 @@ service cloud.firestore {
         request.auth.token.role == 'owner'
       );
     }
-    
-    // Helper function to check if user is supervisor or owner
+
     function isAdminOrSupervisor() {
       return isOwner() || (isAuthenticated() && request.auth.token.role == 'supervisor');
     }
-    
-    // Users Collection
+
+    function validRole(role) {
+      return role in ['owner', 'supervisor', 'agent', 'charging_agent', 'distributor_agent', 'user'];
+    }
+
+    // Users Collection (keyed by 5-digit LIVO UID, bound via authUid == request.auth.uid)
     match /users/{userId} {
-      // Anyone authenticated can read user profiles
       allow read: if isAuthenticated();
-      
-      // Regular user cannot grant themselves admin or alter coins directly!
-      // New user registration must have role 'user' and coins: 0
-      allow create: if isAuthenticated() && 
-                    request.resource.data.role == 'user' && 
-                    request.resource.data.coins == 0;
-                    
-      // Profile updates (avatar, displayName, bio) allowed by owner of profile,
-      // but role, coins, and verification can ONLY be altered by server/owner!
-      allow update: if isOwner() || (
-        isAuthenticated() && 
-        request.auth.uid == userId &&
-        request.resource.data.role == resource.data.role &&
-        request.resource.data.coins == resource.data.coins &&
-        request.resource.data.isVerified == resource.data.isVerified
+
+      allow create: if isOwner() || (
+        isAuthenticated() &&
+        request.resource.data.uid is string &&
+        request.resource.data.authUid == request.auth.uid &&
+        request.resource.data.role == 'user' &&
+        request.resource.data.coins == 0 &&
+        request.resource.data.isVerified == false
       );
-      
+
+      allow update: if isOwner() || (
+        isAuthenticated() &&
+        validRole(request.resource.data.role) &&
+        request.resource.data.role == resource.data.role &&
+        request.resource.data.isVerified == resource.data.isVerified &&
+        request.resource.data.coins is number &&
+        request.resource.data.coins >= 0
+      );
+
       allow delete: if isOwner();
     }
-    
-    // Recharge Requests Collection (Item 10)
-    match /recharge_requests/{requestId} {
-      // User can read their own requests; Admins can read all
-      allow read: if isAuthenticated() && (
-        resource.data.uid == request.auth.uid || 
-        isAdminOrSupervisor()
-      );
-      
-      // Customer creates pending request with mandatory receipt image
-      allow create: if isAuthenticated() &&
-                    request.resource.data.uid == request.auth.uid &&
-                    request.resource.data.status == 'pending' &&
-                    request.resource.data.receiptUrl != null;
-                    
-      // ONLY Admin can approve/reject request
-      allow update: if isAdminOrSupervisor();
-      
-      // Permanent audit: deletion forbidden!
-      allow delete: if false;
-    }
-    
-    // Financial Audit Logs (Item 9 & 10)
-    match /coin_audits/{auditId} {
-      allow read: if isAdminOrSupervisor();
-      // Only server / Cloud Functions can write audit logs
-      allow create: if isAdminOrSupervisor();
-      allow update, delete: if false;
-    }
-    
-    // Direct Private Messages (Item 2)
+
+    // Direct Private Messages (bound via senderAuthUid / receiverAuthUid)
     match /messages/{messageId} {
       allow read: if isAuthenticated() && (
-        resource.data.senderUid == request.auth.uid || 
-        resource.data.receiverUid == request.auth.uid ||
-        isOwner()
+        isOwner() ||
+        resource.data.senderAuthUid == request.auth.uid ||
+        resource.data.receiverAuthUid == request.auth.uid ||
+        resource.data.senderUid == request.auth.uid ||
+        resource.data.receiverUid == request.auth.uid
       );
-      
+
       allow create: if isAuthenticated() &&
-                    request.resource.data.senderUid == request.auth.uid;
-                    
+        request.resource.data.senderUid is string &&
+        request.resource.data.receiverUid is string &&
+        request.resource.data.content is string &&
+        request.resource.data.content.size() <= 4000 &&
+        (
+          isOwner() ||
+          request.resource.data.senderAuthUid == request.auth.uid ||
+          request.resource.data.senderUid == request.auth.uid
+        );
+
       allow update: if isAuthenticated() && (
-        resource.data.receiverUid == request.auth.uid // for marking as read
+        isOwner() ||
+        resource.data.receiverAuthUid == request.auth.uid ||
+        resource.data.senderAuthUid == request.auth.uid
       );
-      
-      // Delete allowed only by sender or receiver
-      allow delete: if isAuthenticated() && (
-        resource.data.senderUid == request.auth.uid || 
-        isOwner()
-      );
-    }
-    
-    // Voice Rooms & Official Room (Item 4 & 5)
-    match /rooms/{roomId} {
-      allow read: if isAuthenticated();
-      
-      // Official Room is strictly managed by Owner
-      allow create: if isAuthenticated();
-      allow update: if isOwner() || (
-        resource.data.isOfficial == false && 
-        resource.data.ownerUid == request.auth.uid
-      );
+
       allow delete: if isOwner() || (
-        resource.data.isOfficial == false && 
-        resource.data.ownerUid == request.auth.uid
+        isAuthenticated() &&
+        resource.data.senderAuthUid == request.auth.uid
       );
     }
-    
-    // Ban Records (Item 13)
+
+    // Message Requests (pending / accepted / rejected / suspended)
+    match /message_requests/{requestId} {
+      allow read: if isAuthenticated() && (
+        isOwner() ||
+        resource.data.senderAuthUid == request.auth.uid ||
+        resource.data.receiverAuthUid == request.auth.uid
+      );
+
+      allow create: if isAuthenticated() &&
+        request.resource.data.senderUid is string &&
+        request.resource.data.receiverUid is string &&
+        request.resource.data.introMessage is string &&
+        request.resource.data.introMessage.size() <= 1000 &&
+        request.resource.data.status in ['pending', 'accepted', 'rejected', 'suspended'] &&
+        (
+          isOwner() ||
+          request.resource.data.senderAuthUid == request.auth.uid
+        );
+
+      allow update: if isAuthenticated() &&
+        request.resource.data.status in ['pending', 'accepted', 'rejected', 'suspended'] &&
+        (
+          isOwner() ||
+          resource.data.senderAuthUid == request.auth.uid ||
+          resource.data.receiverAuthUid == request.auth.uid
+        );
+
+      allow delete: if isOwner();
+    }
+
+    // Voice Rooms & Official Room
+    match /rooms/{roomId} {
+      allow read: if true;
+      allow create, update: if isAuthenticated();
+      allow delete: if isOwner() || (
+        isAuthenticated() &&
+        resource.data.isOfficial == false
+      );
+    }
+
+    // Recharge Requests Collection
+    match /recharge_requests/{requestId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() &&
+        request.resource.data.status == 'pending' &&
+        request.resource.data.receiptUrl is string;
+      allow update: if isAdminOrSupervisor();
+      allow delete: if false;
+    }
+
+    // Financial Audit Logs
+    match /coin_audits/{auditId} {
+      allow read: if isAdminOrSupervisor() || isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if false;
+    }
+
+    // Ban Records
     match /bans/{banId} {
-      allow read: if isAdminOrSupervisor();
-      allow create, update: if isAdminOrSupervisor();
-      allow delete: if false; // Ban logs must never be deleted
+      allow read: if isAuthenticated();
+      allow create, update: if isAdminOrSupervisor() || isOwner();
+      allow delete: if false;
     }
-    
-    // Agency Applications (Item 7)
+
+    // Agency Applications
     match /agencies/{agencyId} {
-      allow read: if isAuthenticated() && (
-        resource.data.uid == request.auth.uid || 
-        isAdminOrSupervisor()
-      );
-      allow create: if isAuthenticated() && request.resource.data.uid == request.auth.uid;
-      allow update: if isAdminOrSupervisor();
+      allow read, create: if isAuthenticated();
+      allow update: if isAdminOrSupervisor() || isAuthenticated();
       allow delete: if isOwner();
     }
-    
-    // Blue Verification Requests (Item 15)
+
+    // Blue Verification Requests
     match /verifications/{verId} {
-      allow read: if isAuthenticated() && (
-        resource.data.uid == request.auth.uid || 
-        isAdminOrSupervisor()
-      );
-      allow create: if isAuthenticated() && request.resource.data.uid == request.auth.uid;
-      allow update: if isAdminOrSupervisor();
+      allow read, create: if isAuthenticated();
+      allow update: if isAdminOrSupervisor() || isOwner();
       allow delete: if isOwner();
     }
-    
-    // Withdrawal Requests (Item 16)
+
+    // Withdrawal Requests
     match /withdrawals/{wthId} {
-      allow read: if isAuthenticated() && (
-        resource.data.uid == request.auth.uid || 
-        isAdminOrSupervisor()
-      );
-      allow create: if isAuthenticated() && request.resource.data.uid == request.auth.uid;
-      allow update: if isAdminOrSupervisor();
+      allow read, create: if isAuthenticated();
+      allow update: if isAdminOrSupervisor() || isOwner();
       allow delete: if false;
     }
 
     // Advertisements Collection
     match /advertisements/{adId} {
-      // Anyone authenticated can read active ads
-      allow read: if isAuthenticated();
-      // Only Admin / Owner can create, update, or delete ads
-      allow create, update, delete: if isOwner() || isAdminOrSupervisor();
+      allow read: if true;
+      allow create, delete: if isAdminOrSupervisor();
+      allow update: if isAuthenticated();
     }
 
-    // Central Support Tickets / Admin Inbox
+    // Central Support Tickets
     match /support_tickets/{ticketId} {
-      // User can read their own tickets; Admin can read all
-      allow read: if isAuthenticated() && (
-        resource.data.uid == request.auth.uid || 
-        isAdminOrSupervisor()
-      );
-      // Authenticated users can create tickets
-      allow create: if isAuthenticated() && request.resource.data.uid == request.auth.uid;
-      // Admin can update/reply; user cannot alter tickets once submitted
-      allow update: if isAdminOrSupervisor();
-      // Only Owner can delete tickets
+      allow read, create: if isAuthenticated();
+      allow update: if isAdminOrSupervisor() || isOwner();
       allow delete: if isOwner();
     }
 
-    // Payment Methods Collection (Vodafone Cash, InstaPay, Wallets)
+    // Payment Methods Collection
     match /payment_methods/{methodId} {
-      allow read: if isAuthenticated();
-      allow create, update, delete: if isOwner() || isAdminOrSupervisor();
+      allow read: if true;
+      allow create, update, delete: if isAdminOrSupervisor();
     }
 
     // Animated Gifts Collection
     match /gifts/{giftId} {
-      allow read: if isAuthenticated();
-      allow create, update, delete: if isOwner() || isAdminOrSupervisor();
+      allow read: if true;
+      allow create, update, delete: if isAdminOrSupervisor();
     }
 
-    // Store Items Collection (Frames and Entrances)
+    // Store Items Collection
     match /store_items/{itemId} {
-      allow read: if isAuthenticated();
-      allow create, update, delete: if isOwner() || isAdminOrSupervisor();
+      allow read: if true;
+      allow create, update, delete: if isAdminOrSupervisor();
     }
 
     // Recharge Voucher Codes
     match /recharge_codes/{codeId} {
       allow read: if isAuthenticated();
-      allow create, delete: if isOwner() || isAdminOrSupervisor();
-      // Redemption updates allowed by authenticated user or admin
+      allow create, delete: if isAdminOrSupervisor();
       allow update: if isAuthenticated();
+    }
+
+    // Coin Packages
+    match /coin_packages/{pkgId} {
+      allow read: if true;
+      allow create, update, delete: if isAdminOrSupervisor();
+    }
+
+    // Supervisors Management
+    match /supervisors/{supId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isOwner();
+    }
+
+    // Genuine User Videos
+    match /videos/{videoId} {
+      allow read: if true;
+      allow create, update: if isAuthenticated();
+      allow delete: if isAuthenticated();
+    }
+
+    // Level Configs & Promotions
+    match /level_configs/{levelId} {
+      allow read: if true;
+      allow create, update, delete: if isAdminOrSupervisor();
+    }
+
+    match /level_promotions/{promoId} {
+      allow read, create: if isAuthenticated();
+      allow update, delete: if isOwner();
+    }
+
+    // Distributors & Agent Transfers
+    match /distributors/{distId} {
+      allow read, create, update, delete: if isAuthenticated();
+    }
+
+    match /agent_transfers/{transferId} {
+      allow read, create: if isAuthenticated();
+      allow update, delete: if false;
+    }
+
+    // Connection health check doc
+    match /test/{docId} {
+      allow read: if true;
     }
   }
 }

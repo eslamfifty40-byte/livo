@@ -1,24 +1,29 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Users,
-  Flame,
   Gift,
   Send,
   Trophy,
   Swords,
   RotateCcw,
-  Volume2,
-  Heart,
-  Crown
+  Crown,
+  X,
+  Video,
+  VideoOff,
+  Mic,
+  MicOff,
+  RefreshCw
 } from 'lucide-react';
-import { UserProfile, GiftItem, StreamSupporter } from '../../types';
-import { INITIAL_GIFTS } from '../../data/initialData';
+import { UserProfile, GiftItem, StreamSupporter, VoiceRoom } from '../../types';
 import { livoStore } from '../../services/livoStore';
 import { GiftAnimationOverlay } from './GiftAnimationOverlay';
 
 interface LiveStreamViewProps {
   currentUser: UserProfile;
+  room?: VoiceRoom;
+  isHost?: boolean;
   onOpenRecharge: () => void;
+  onClose?: () => void;
 }
 
 interface PKState {
@@ -30,158 +35,217 @@ interface PKState {
   roundNumber: number;
 }
 
-export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ currentUser, onOpenRecharge }) => {
+export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
+  currentUser,
+  room,
+  isHost = false,
+  onOpenRecharge,
+  onClose
+}) => {
+  const [gifts, setGifts] = useState<GiftItem[]>(livoStore.getActiveGifts());
   const [showGiftModal, setShowGiftModal] = useState(false);
   const [activeGiftAnimation, setActiveGiftAnimation] = useState<GiftItem | null>(null);
   const [lastSenderName, setLastSenderName] = useState('');
   const [commentText, setCommentText] = useState('');
-  const [comments, setComments] = useState<Array<{ id: string; user: string; text: string; isGift?: boolean }>>([
-    { id: '1', user: 'أحمد شاهين', text: 'منورين يا شباب! لايف ناري الليلة 🔥' },
-    { id: '2', user: 'سارة نور', text: 'يلا التحدي بدأ شدوا حيلكم يا جيش الليدر 💪' },
-    { id: '3', user: 'طارق المصري', text: 'تم إرسال الدعم للطرفين بالتوفيق 🚀' },
-  ]);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [comments, setComments] = useState<Array<{ id: string; user: string; text: string; isGift?: boolean }>>([]);
+  const [topSupporters, setTopSupporters] = useState<StreamSupporter[]>([]);
 
-  // PK Challenge State (Default 5 minutes = 300 seconds)
+  // Real Camera & Mic state
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const [isCameraOn, setIsCameraOn] = useState(isHost);
+  const [isMicOn, setIsMicOn] = useState(isHost);
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [showEndConfirm, setShowEndConfirm] = useState(false);
+
   const [pk, setPk] = useState<PKState>({
-    isActive: true,
-    challenger1Coins: 4200,
-    challenger2Coins: 3800,
-    secondsRemaining: 215, // ongoing in countdown
+    isActive: false,
+    challenger1Coins: 0,
+    challenger2Coins: 0,
+    secondsRemaining: 300,
     winner: null,
     roundNumber: 1
   });
 
-  // Top 3 Real Supporters
-  const [topSupporters, setTopSupporters] = useState<StreamSupporter[]>([
-    {
-      rank: 1,
-      uid: '10247',
-      username: 'tariq_agency',
-      avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100&h=100&fit=crop',
-      supportedCoins: 5000
-    },
-    {
-      rank: 2,
-      uid: '10245',
-      username: 'ahmed_king',
-      avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&h=100&fit=crop',
-      supportedCoins: 2200
-    },
-    {
-      rank: 3,
-      uid: '10246',
-      username: 'sara_live',
-      avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&h=100&fit=crop',
-      supportedCoins: 800
-    }
-  ]);
-
-  // PK Timer Countdown
   useEffect(() => {
-    let timer: any;
-    if (pk.isActive && pk.secondsRemaining > 0) {
-      timer = setInterval(() => {
-        setPk(prev => {
-          if (prev.secondsRemaining <= 1) {
-            let win: 'host' | 'guest' | 'draw' = 'draw';
-            if (prev.challenger1Coins > prev.challenger2Coins) win = 'host';
-            else if (prev.challenger2Coins > prev.challenger1Coins) win = 'guest';
+    const unsub = livoStore.subscribe(() => {
+      setGifts(livoStore.getActiveGifts());
+      if (room?.id) {
+        const latestRoom = livoStore.getRoomById(room.id);
+        if (latestRoom?.messages) {
+          setComments(
+            latestRoom.messages.map(m => ({
+              id: m.id,
+              user: m.user,
+              text: m.text,
+              isGift: m.isVip
+            }))
+          );
+        }
+      }
+    });
+    return () => unsub();
+  }, [room?.id]);
 
-            return {
-              ...prev,
-              secondsRemaining: 0,
-              isActive: false,
-              winner: win
-            };
-          }
-          return { ...prev, secondsRemaining: prev.secondsRemaining - 1 };
+  // Activate real WebRTC camera & mic for host
+  useEffect(() => {
+    if (!isHost) return;
+
+    const startMedia = async () => {
+      try {
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach(t => t.stop());
+        }
+        const mediaStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode },
+          audio: true
         });
-      }, 1000);
+        streamRef.current = mediaStream;
+        setCameraError(null);
+        if (videoRef.current) {
+          videoRef.current.srcObject = mediaStream;
+        }
+        mediaStream.getVideoTracks().forEach(t => {
+          t.enabled = isCameraOn;
+        });
+        mediaStream.getAudioTracks().forEach(t => {
+          t.enabled = isMicOn;
+        });
+      } catch {
+        setCameraError('يرجى السماح بصلاحية الكاميرا والميكروفون من المتصفح لبدء البث المباشر.');
+      }
+    };
+
+    startMedia();
+
+    return () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(t => t.stop());
+        streamRef.current = null;
+      }
+    };
+  }, [isHost, facingMode]);
+
+  useEffect(() => {
+    if (streamRef.current) {
+      streamRef.current.getVideoTracks().forEach(t => {
+        t.enabled = isCameraOn;
+      });
+      streamRef.current.getAudioTracks().forEach(t => {
+        t.enabled = isMicOn;
+      });
     }
+  }, [isCameraOn, isMicOn]);
+
+  // PK Countdown
+  useEffect(() => {
+    if (!pk.isActive || pk.secondsRemaining <= 0) return;
+    const timer = setInterval(() => {
+      setPk(prev => {
+        if (prev.secondsRemaining <= 1) {
+          let win: 'host' | 'guest' | 'draw' = 'draw';
+          if (prev.challenger1Coins > prev.challenger2Coins) win = 'host';
+          else if (prev.challenger2Coins > prev.challenger1Coins) win = 'guest';
+          return { ...prev, secondsRemaining: 0, isActive: false, winner: win };
+        }
+        return { ...prev, secondsRemaining: prev.secondsRemaining - 1 };
+      });
+    }, 1000);
     return () => clearInterval(timer);
   }, [pk.isActive, pk.secondsRemaining]);
 
-  // Start New PK Challenge without leaving live stream
+  const showToast = (msg: string) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(null), 2500);
+  };
+
   const handleStartNewPK = () => {
-    setPk({
+    setPk(prev => ({
       isActive: true,
       challenger1Coins: 0,
       challenger2Coins: 0,
-      secondsRemaining: 300, // 5 minutes fresh round
+      secondsRemaining: 300,
       winner: null,
-      roundNumber: pk.roundNumber + 1
-    });
-
-    setComments(prev => [
-      ...prev,
-      { id: String(Date.now()), user: 'نظام LIVO', text: `⚔️ انطلق التحدي الجديد الجولة #${pk.roundNumber + 1}! أظهروا دعمكم!` }
-    ]);
+      roundNumber: prev.roundNumber + 1
+    }));
+    if (room?.id) {
+      livoStore.appendRoomMessage(room.id, {
+        uid: currentUser.uid,
+        user: 'نظام البث',
+        text: '⚔️ بدأت جولة تحدي PK جديدة!'
+      });
+    }
   };
 
-  // Calculate PK Bar percentage (starts 50/50 when both 0 or equal)
   const totalPKCoins = pk.challenger1Coins + pk.challenger2Coins;
-  let challenger1Percent = 50;
-  let challenger2Percent = 50;
+  const challenger1Percent = totalPKCoins > 0 ? Math.round((pk.challenger1Coins / totalPKCoins) * 100) : 50;
+  const challenger2Percent = 100 - challenger1Percent;
 
-  if (totalPKCoins > 0) {
-    challenger1Percent = Math.round((pk.challenger1Coins / totalPKCoins) * 100);
-    challenger2Percent = 100 - challenger1Percent;
-  }
-
-  // Format seconds to MM:SS
   const formatTime = (secs: number) => {
     const mins = Math.floor(secs / 60);
     const s = secs % 60;
     return `${mins}:${s < 10 ? '0' : ''}${s}`;
   };
 
-  // Send Gift Handler
   const handleSendGift = (gift: GiftItem, targetChallenger: 1 | 2 = 1) => {
     if (currentUser.coins < gift.coins) {
-      alert('رصيدك من الكوينز غير كافٍ. يرجى الشحن أولاً!');
+      showToast('رصيد الكوينز غير كافٍ، يرجى الشحن');
       onOpenRecharge();
       return;
     }
 
-    // Deduct coins from user
-    const newCoins = currentUser.coins - gift.coins;
-    livoStore.updateUserProfile(currentUser.uid, { coins: newCoins });
+    livoStore.adjustUserCoins(
+      currentUser.uid,
+      'deduct',
+      gift.coins,
+      `إرسال هدية ${gift.name} في البث المباشر`,
+      currentUser.displayName
+    );
 
-    // Update PK Challenge points
-    setPk(prev => ({
-      ...prev,
-      challenger1Coins: targetChallenger === 1 ? prev.challenger1Coins + gift.coins : prev.challenger1Coins,
-      challenger2Coins: targetChallenger === 2 ? prev.challenger2Coins + gift.coins : prev.challenger2Coins
-    }));
+    if (pk.isActive) {
+      setPk(prev => ({
+        ...prev,
+        challenger1Coins: targetChallenger === 1 ? prev.challenger1Coins + gift.coins : prev.challenger1Coins,
+        challenger2Coins: targetChallenger === 2 ? prev.challenger2Coins + gift.coins : prev.challenger2Coins
+      }));
+    }
 
-    // Update Top Supporters
     setTopSupporters(prev => {
       const existing = prev.find(s => s.uid === currentUser.uid);
-      let updated: StreamSupporter[];
-      if (existing) {
-        updated = prev.map(s => s.uid === currentUser.uid ? { ...s, supportedCoins: s.supportedCoins + gift.coins } : s);
-      } else {
-        updated = [...prev, {
-          rank: 3,
-          uid: currentUser.uid,
-          username: currentUser.username,
-          avatar: currentUser.avatar,
-          supportedCoins: gift.coins
-        }];
-      }
+      const updated = existing
+        ? prev.map(s => s.uid === currentUser.uid ? { ...s, supportedCoins: s.supportedCoins + gift.coins } : s)
+        : [
+            ...prev,
+            {
+              rank: 3 as 1 | 2 | 3,
+              uid: currentUser.uid,
+              username: currentUser.displayName,
+              avatar: currentUser.avatar,
+              supportedCoins: gift.coins
+            }
+          ];
       return updated
         .sort((a, b) => b.supportedCoins - a.supportedCoins)
         .slice(0, 3)
         .map((s, idx) => ({ ...s, rank: (idx + 1) as 1 | 2 | 3 }));
     });
 
-    // Add live comment
-    setComments(prev => [
-      ...prev,
-      { id: String(Date.now()), user: currentUser.displayName, text: `أرسل ${gift.name} (${gift.icon}) لدعم التحدي!`, isGift: true }
-    ]);
+    if (room?.id) {
+      livoStore.appendRoomMessage(room.id, {
+        uid: currentUser.uid,
+        user: currentUser.displayName,
+        text: `أرسل هدية ${gift.name} ${gift.icon}!`,
+        isVip: true
+      });
+    } else {
+      setComments(prev => [
+        ...prev,
+        { id: String(Date.now()), user: currentUser.displayName, text: `أرسل ${gift.name} (${gift.icon})!`, isGift: true }
+      ]);
+    }
 
-    // Trigger Animated Overlay
     setLastSenderName(currentUser.displayName);
     setActiveGiftAnimation(gift);
     setShowGiftModal(false);
@@ -190,188 +254,168 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ currentUser, onO
   const handleSendComment = (e: React.FormEvent) => {
     e.preventDefault();
     if (!commentText.trim()) return;
-
-    setComments(prev => [
-      ...prev,
-      { id: String(Date.now()), user: currentUser.displayName, text: commentText.trim() }
-    ]);
+    if (room?.id) {
+      livoStore.appendRoomMessage(room.id, {
+        uid: currentUser.uid,
+        user: currentUser.displayName,
+        text: commentText.trim(),
+        isVerified: currentUser.isVerified
+      });
+    } else {
+      setComments(prev => [
+        ...prev,
+        { id: String(Date.now()), user: currentUser.displayName, text: commentText.trim() }
+      ]);
+    }
     setCommentText('');
   };
 
+  const hostName = room?.ownerName || currentUser.displayName;
+  const hostAvatar = room?.ownerAvatar || currentUser.avatar;
+
   return (
-    <div className="relative w-full h-[620px] bg-[#0c0517] overflow-hidden flex flex-col justify-between text-white rounded-2xl border border-purple-900/50 shadow-2xl">
-      
-      {/* Gift Animation Overlay */}
+    <div className="relative w-full h-full min-h-[600px] bg-black overflow-hidden flex flex-col justify-between text-white">
       <GiftAnimationOverlay
         gift={activeGiftAnimation}
         senderName={lastSenderName}
         onFinished={() => setActiveGiftAnimation(null)}
       />
 
-      {/* Top Stream Header: Streamer Info & Top 3 Supporters */}
-      <div className="relative z-20 p-3 flex items-center justify-between bg-gradient-to-b from-black/80 via-black/40 to-transparent">
-        {/* Streamer Profile Pill */}
-        <div className="flex items-center gap-2 bg-black/50 backdrop-blur-md px-2.5 py-1 rounded-full border border-purple-600/40">
-          <div className="relative">
-            <img
-              src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=80&h=80&fit=crop"
-              alt="Host"
-              className="w-8 h-8 rounded-full border border-amber-400"
-            />
-            <span className="absolute -bottom-1 -right-1 w-3.5 h-3.5 bg-red-600 rounded-full border border-white flex items-center justify-center text-[8px] font-bold">
-              ●
-            </span>
-          </div>
-          <div>
-            <div className="flex items-center gap-1">
-              <span className="text-xs font-bold text-white">LIVO Official</span>
-              <span className="text-[10px] text-amber-300">★</span>
-            </div>
-            <div className="flex items-center gap-1.5 text-[10px] text-purple-300">
-              <Users className="w-3 h-3 text-purple-400" />
-              <span className="font-digits">1,482</span>
-            </div>
-          </div>
+      {toastMsg && (
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-50 bg-[#FFE600] text-black px-4 py-1.5 rounded-full text-xs font-black shadow-lg">
+          {toastMsg}
         </div>
+      )}
 
-        {/* Top 3 Supporters with Ranks 1, 2, 3 */}
-        <div className="flex items-center gap-1.5 bg-black/40 backdrop-blur-md px-2 py-1 rounded-full border border-purple-800/40">
-          <Crown className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-          <div className="flex items-center -space-x-1 space-x-reverse">
-            {topSupporters.map(supporter => (
-              <div
-                key={supporter.uid}
-                className="relative group cursor-pointer"
-                title={`${supporter.username} (دعم: ${supporter.supportedCoins.toLocaleString()} كوينز)`}
-              >
-                <img
-                  src={supporter.avatar}
-                  alt={supporter.username}
-                  className={`w-6 h-6 rounded-full border-2 ${
-                    supporter.rank === 1
-                      ? 'border-amber-400 ring-1 ring-amber-400/50'
-                      : supporter.rank === 2
-                      ? 'border-slate-300'
-                      : 'border-amber-700'
-                  }`}
-                />
-                <span
-                  className={`absolute -bottom-1 -right-0.5 w-3 h-3 rounded-full flex items-center justify-center text-[8px] font-black font-digits text-black ${
-                    supporter.rank === 1 ? 'bg-amber-400' : supporter.rank === 2 ? 'bg-slate-200' : 'bg-amber-600 text-white'
-                  }`}
-                >
-                  {supporter.rank}
-                </span>
-              </div>
-            ))}
+      {/* Real Video Background */}
+      <div className="absolute inset-0 z-0 bg-gradient-to-b from-[#160b2c] to-black flex items-center justify-center">
+        {isHost && isCameraOn && !cameraError ? (
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            className={`w-full h-full object-cover ${facingMode === 'user' ? 'scale-x-[-1]' : ''}`}
+          />
+        ) : (
+          <div className="flex flex-col items-center justify-center p-6 text-center space-y-3">
+            <img
+              src={hostAvatar}
+              alt={hostName}
+              className="w-28 h-28 rounded-full border-4 border-[#FFE600] object-cover shadow-2xl"
+            />
+            {cameraError && (
+              <p className="text-xs text-amber-300 bg-black/70 px-4 py-2 rounded-2xl max-w-xs">
+                {cameraError}
+              </p>
+            )}
           </div>
-        </div>
+        )}
+        <div className="absolute inset-0 bg-gradient-to-b from-black/70 via-transparent to-black/85 pointer-events-none" />
       </div>
 
-      {/* PK Challenge Bar at Top */}
-      <div className="relative z-20 px-3 py-1">
-        <div className="bg-black/60 backdrop-blur-md rounded-2xl border border-purple-700/40 p-2 shadow-lg">
-          <div className="flex items-center justify-between text-xs mb-1">
-            {/* Challenger 1 (Host) */}
-            <div className="flex items-center gap-1.5">
-              <span className="font-bold text-blue-400 text-xs">أنا (المضيف)</span>
-              <span className="font-digits font-extrabold text-amber-300 text-xs">
-                {pk.challenger1Coins.toLocaleString()}
+      {/* Top Stream Header */}
+      <div className="relative z-20 p-3 pt-5 flex items-center justify-between">
+        <div className="flex items-center gap-2 bg-black/50 backdrop-blur-md px-2.5 py-1 rounded-full border border-white/15">
+          <img
+            src={hostAvatar}
+            alt={hostName}
+            className="w-8 h-8 rounded-full border border-[#FFE600] object-cover"
+          />
+          <div>
+            <div className="flex items-center gap-1">
+              <span className="text-xs font-bold text-white truncate max-w-[110px]">{hostName}</span>
+              <span className="bg-red-600 text-white text-[8px] font-black px-1.5 rounded-full animate-pulse">
+                LIVE
               </span>
             </div>
-
-            {/* Timer & PK Tag */}
-            <div className="flex items-center gap-1 bg-purple-950/80 px-2.5 py-0.5 rounded-full border border-purple-600/50">
-              <Swords className="w-3 h-3 text-red-400" />
-              <span className="font-digits text-xs font-bold text-white tracking-widest">
-                {pk.isActive ? formatTime(pk.secondsRemaining) : 'انتهى'}
-              </span>
-            </div>
-
-            {/* Challenger 2 (Guest) */}
-            <div className="flex items-center gap-1.5">
-              <span className="font-digits font-extrabold text-amber-300 text-xs">
-                {pk.challenger2Coins.toLocaleString()}
-              </span>
-              <span className="font-bold text-red-400 text-xs">المنافس</span>
+            <div className="flex items-center gap-1 text-[10px] text-gray-300">
+              <Users className="w-3 h-3 text-[#FFE600]" />
+              <span className="font-digits">{room?.viewersCount || 1}</span>
             </div>
           </div>
+        </div>
 
-          {/* Dynamic 50/50 Bar (never exceeds 100%) */}
-          <div className="relative w-full h-3 bg-gray-900 rounded-full overflow-hidden flex shadow-inner">
-            <div
-              className="h-full bg-gradient-to-r from-blue-600 to-indigo-500 transition-all duration-500"
-              style={{ width: `${challenger1Percent}%` }}
-            />
-            <div
-              className="h-full bg-gradient-to-l from-red-600 to-pink-500 transition-all duration-500"
-              style={{ width: `${challenger2Percent}%` }}
-            />
-            <div className="absolute inset-0 flex items-center justify-between px-2 text-[9px] font-digits font-black text-white pointer-events-none drop-shadow">
-              <span>{challenger1Percent}%</span>
-              <span>{challenger2Percent}%</span>
+        <div className="flex items-center gap-1.5">
+          {topSupporters.length > 0 && (
+            <div className="flex items-center gap-1 bg-black/50 backdrop-blur-md px-2 py-1 rounded-full border border-white/15">
+              <Crown className="w-3.5 h-3.5 text-amber-400" />
+              {topSupporters.map(s => (
+                <img
+                  key={s.uid}
+                  src={s.avatar}
+                  alt={s.username}
+                  className="w-5 h-5 rounded-full border border-amber-400 object-cover"
+                />
+              ))}
             </div>
-          </div>
+          )}
 
-          {/* PK End Result & New Challenge Button */}
-          {!pk.isActive && (
-            <div className="mt-2 pt-2 border-t border-purple-800/40 flex items-center justify-between">
-              <div className="flex items-center gap-1.5 text-xs">
-                <Trophy className="w-4 h-4 text-amber-400" />
-                <span className="font-bold">
-                  {pk.winner === 'host' ? '🎉 فوز المضيف في الجولة!' : pk.winner === 'guest' ? '🎉 فوز المنافس في الجولة!' : '🤝 تعادل في الجولة!'}
-                </span>
-              </div>
-              <button
-                onClick={handleStartNewPK}
-                className="flex items-center gap-1 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black font-extrabold text-[11px] px-3 py-1 rounded-lg shadow transition-all"
-              >
-                <RotateCcw className="w-3 h-3" />
-                <span>بدء تحدٍ جديد</span>
-              </button>
-            </div>
+          {isHost && (
+            <button
+              onClick={handleStartNewPK}
+              className="px-2.5 py-1 rounded-full bg-amber-500 text-black text-[10px] font-black flex items-center gap-1"
+            >
+              <Swords className="w-3 h-3" />
+              <span>تحدي PK</span>
+            </button>
+          )}
+
+          {onClose && (
+            <button
+              onClick={() => (isHost ? setShowEndConfirm(true) : onClose())}
+              className="w-8 h-8 rounded-full bg-red-600/80 hover:bg-red-600 flex items-center justify-center text-white"
+            >
+              <X className="w-4 h-4" />
+            </button>
           )}
         </div>
       </div>
 
-      {/* Main Stream Dual-Screen (Challenger 1 & Challenger 2) */}
-      <div className="relative flex-1 grid grid-cols-2 gap-1 p-2 min-h-0">
-        {/* Host Side */}
-        <div className="relative rounded-xl overflow-hidden bg-gradient-to-b from-purple-950/60 to-black border border-blue-500/30 flex items-center justify-center">
-          <img
-            src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500&fit=crop"
-            alt="Host Stream"
-            className="w-full h-full object-cover opacity-85"
-          />
-          <div className="absolute bottom-2 left-2 bg-black/60 backdrop-blur-sm px-2 py-0.5 rounded text-[10px] text-blue-300 font-bold">
-            المضيف
+      {/* Optional PK Bar when started */}
+      {(pk.isActive || pk.winner) && (
+        <div className="relative z-20 px-3">
+          <div className="bg-black/60 backdrop-blur-md rounded-2xl border border-purple-700/40 p-2">
+            <div className="flex items-center justify-between text-xs mb-1">
+              <span className="font-bold text-blue-400">{pk.challenger1Coins.toLocaleString()}</span>
+              <span className="font-digits text-[11px] font-black text-white">
+                {pk.isActive ? formatTime(pk.secondsRemaining) : 'انتهى'}
+              </span>
+              <span className="font-bold text-red-400">{pk.challenger2Coins.toLocaleString()}</span>
+            </div>
+            <div className="w-full h-2.5 bg-gray-900 rounded-full overflow-hidden flex">
+              <div className="h-full bg-blue-500 transition-all" style={{ width: `${challenger1Percent}%` }} />
+              <div className="h-full bg-pink-500 transition-all" style={{ width: `${challenger2Percent}%` }} />
+            </div>
+            {!pk.isActive && pk.winner && (
+              <div className="mt-1.5 flex items-center justify-between text-[11px]">
+                <span className="flex items-center gap-1 font-bold text-amber-300">
+                  <Trophy className="w-3.5 h-3.5" />
+                  انتهى التحدي
+                </span>
+                <button
+                  onClick={handleStartNewPK}
+                  className="bg-amber-400 text-black font-black px-2.5 py-0.5 rounded-full flex items-center gap-1"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  <span>جولة جديدة</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
+      )}
 
-        {/* Guest Side */}
-        <div className="relative rounded-xl overflow-hidden bg-gradient-to-b from-purple-950/60 to-black border border-red-500/30 flex items-center justify-center">
-          <img
-            src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=500&fit=crop"
-            alt="Guest Stream"
-            className="w-full h-full object-cover opacity-85"
-          />
-          <div className="absolute bottom-2 right-2 bg-black/60 backdrop-blur-sm px-2 py-0.5 rounded text-[10px] text-red-300 font-bold">
-            المنافس (أحمد)
-          </div>
-        </div>
-      </div>
-
-      {/* Live Comments Stream & Action Bar */}
-      <div className="relative z-20 p-3 bg-gradient-to-t from-black via-black/90 to-transparent space-y-2">
-        {/* Comments Box */}
-        <div className="h-28 overflow-y-auto space-y-1.5 pr-1">
-          {comments.slice(-5).map(c => (
+      {/* Bottom Live Comments & Controls */}
+      <div className="relative z-20 p-3 space-y-2.5 mt-auto">
+        <div className="h-28 overflow-y-auto space-y-1.5 pr-1 flex flex-col justify-end">
+          {comments.slice(-6).map(c => (
             <div
               key={c.id}
-              className={`text-xs px-2.5 py-1 rounded-xl max-w-[85%] backdrop-blur-sm ${
+              className={`text-xs px-3 py-1 rounded-2xl w-fit max-w-[85%] backdrop-blur-sm ${
                 c.isGift
-                  ? 'bg-amber-500/20 border border-amber-400/40 text-amber-200 font-bold'
-                  : 'bg-black/40 text-white/90 border border-purple-900/40'
+                  ? 'bg-amber-500/25 border border-amber-400/50 text-amber-200 font-bold'
+                  : 'bg-black/45 text-white border border-white/10'
               }`}
             >
               <span className="font-bold text-amber-400 ml-1.5">{c.user}:</span>
@@ -380,25 +424,53 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ currentUser, onO
           ))}
         </div>
 
-        {/* Input & Gift Buttons */}
         <div className="flex items-center gap-2">
-          <form onSubmit={handleSendComment} className="flex-1 flex items-center bg-[#170b2c]/90 border border-purple-800/60 rounded-full px-3 py-1.5">
+          <form onSubmit={handleSendComment} className="flex-1 flex items-center bg-white/10 backdrop-blur-md border border-white/15 rounded-full px-3 py-1.5">
             <input
               type="text"
               value={commentText}
               onChange={(e) => setCommentText(e.target.value)}
               placeholder="اكتب تعليقاً في اللايف..."
-              className="w-full bg-transparent text-xs text-white placeholder-purple-400/50 outline-none"
+              className="w-full bg-transparent text-xs text-white placeholder-gray-300 outline-none"
             />
-            <button type="submit" className="text-purple-300 hover:text-amber-400 p-1">
+            <button type="submit" className="text-amber-400 p-1">
               <Send className="w-3.5 h-3.5 rotate-180" />
             </button>
           </form>
 
-          {/* Quick Gift Trigger Button */}
+          {isHost && (
+            <>
+              <button
+                onClick={() => setFacingMode(f => (f === 'user' ? 'environment' : 'user'))}
+                className="w-9 h-9 rounded-full bg-white/15 flex items-center justify-center text-white"
+                title="تبديل الكاميرا"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => setIsCameraOn(v => !v)}
+                className={`w-9 h-9 rounded-full flex items-center justify-center ${
+                  isCameraOn ? 'bg-white/15 text-white' : 'bg-red-600 text-white'
+                }`}
+                title="تشغيل/إيقاف الكاميرا"
+              >
+                {isCameraOn ? <Video className="w-4 h-4" /> : <VideoOff className="w-4 h-4" />}
+              </button>
+              <button
+                onClick={() => setIsMicOn(m => !m)}
+                className={`w-9 h-9 rounded-full flex items-center justify-center ${
+                  isMicOn ? 'bg-emerald-600 text-white' : 'bg-red-600 text-white'
+                }`}
+                title="تشغيل/كتم المايك"
+              >
+                {isMicOn ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
+              </button>
+            </>
+          )}
+
           <button
             onClick={() => setShowGiftModal(true)}
-            className="w-10 h-10 rounded-full bg-gradient-to-tr from-amber-500 to-yellow-400 text-black flex items-center justify-center shadow-lg shadow-amber-500/30 hover:scale-105 transition-all shrink-0"
+            className="w-10 h-10 rounded-full bg-gradient-to-tr from-amber-500 to-yellow-400 text-black flex items-center justify-center shadow-lg shrink-0"
             title="إرسال هدية"
           >
             <Gift className="w-5 h-5" />
@@ -406,48 +478,64 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ currentUser, onO
         </div>
       </div>
 
-      {/* Gift Selection Modal Tray */}
+      {/* End Live Confirm Modal */}
+      {showEndConfirm && onClose && (
+        <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#1a0a2a] border border-purple-700/60 rounded-3xl p-5 w-full max-w-xs text-center space-y-3">
+            <h4 className="font-black text-sm text-white">إنهاء البث المباشر؟</h4>
+            <p className="text-xs text-purple-200">سيتم إغلاق الكاميرا وإنهاء البث لجميع المشاهدين.</p>
+            <div className="flex gap-2">
+              <button
+                onClick={onClose}
+                className="flex-1 py-2.5 rounded-xl bg-red-600 text-white font-black text-xs"
+              >
+                إنهاء البث
+              </button>
+              <button
+                onClick={() => setShowEndConfirm(false)}
+                className="flex-1 py-2.5 rounded-xl bg-white/10 text-white font-bold text-xs"
+              >
+                استمرار
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Dynamic Gifts Modal */}
       {showGiftModal && (
         <div className="absolute inset-0 z-40 bg-black/75 backdrop-blur-sm flex flex-col justify-end animate-in fade-in">
           <div className="bg-[#170b2c] rounded-t-3xl border-t border-purple-800 p-4 space-y-3 shadow-2xl">
             <div className="flex items-center justify-between border-b border-purple-800/40 pb-2">
               <div className="flex items-center gap-2">
                 <Gift className="w-4 h-4 text-amber-400" />
-                <span className="text-xs font-bold text-white">اختر هدية لدعم التحدي</span>
+                <span className="text-xs font-bold text-white">إرسال هدية للبث المباشر</span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-xs text-purple-300">
-                  رصيدك: <strong className="font-digits text-amber-300">{currentUser.coins.toLocaleString()}</strong> كوينز
+                <span className="text-xs font-digits text-amber-300 font-bold">
+                  {currentUser.coins.toLocaleString()} 🪙
                 </span>
                 <button
                   onClick={onOpenRecharge}
-                  className="text-[10px] bg-amber-500/20 border border-amber-500/40 text-amber-300 px-2 py-0.5 rounded-full font-bold hover:bg-amber-500/30"
+                  className="text-[10px] bg-amber-500/20 border border-amber-500/40 text-amber-300 px-2 py-0.5 rounded-full font-bold"
                 >
                   شحن
                 </button>
-                <button
-                  onClick={() => setShowGiftModal(false)}
-                  className="text-purple-400 hover:text-white mr-1 text-xs"
-                >
-                  ✕
+                <button onClick={() => setShowGiftModal(false)} className="text-purple-300 hover:text-white">
+                  <X className="w-4 h-4" />
                 </button>
               </div>
             </div>
 
-            {/* Gifts Grid */}
-            <div className="grid grid-cols-4 gap-2">
-              {INITIAL_GIFTS.map(gift => (
+            <div className="grid grid-cols-4 gap-2 max-h-60 overflow-y-auto">
+              {gifts.map(gift => (
                 <button
                   key={gift.id}
                   onClick={() => handleSendGift(gift, 1)}
                   className="bg-[#120824] hover:bg-purple-900/40 border border-purple-800/50 hover:border-amber-400 p-2 rounded-xl flex flex-col items-center justify-center transition-all group"
                 >
-                  <span className="text-2xl mb-1 group-hover:scale-125 transition-transform">
-                    {gift.icon}
-                  </span>
-                  <span className="text-[10px] font-bold text-white truncate w-full text-center">
-                    {gift.name}
-                  </span>
+                  <span className="text-2xl mb-1 group-hover:scale-125 transition-transform">{gift.icon}</span>
+                  <span className="text-[10px] font-bold text-white truncate w-full text-center">{gift.name}</span>
                   <span className="text-[9px] font-digits font-extrabold text-amber-400 mt-0.5">
                     {gift.coins.toLocaleString()}
                   </span>

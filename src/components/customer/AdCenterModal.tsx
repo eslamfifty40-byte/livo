@@ -27,6 +27,8 @@ export const AdCenterModal: React.FC<AdCenterModalProps> = ({ isOpen, onClose, c
   });
   const [placement, setPlacement] = useState<'banner' | 'popup' | 'feed'>('banner');
   const [errorMsg, setErrorMsg] = useState('');
+  const [deleteAdConfirmId, setDeleteAdConfirmId] = useState<string | null>(null);
+  const [adLinkNotice, setAdLinkNotice] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
@@ -73,10 +75,14 @@ export const AdCenterModal: React.FC<AdCenterModalProps> = ({ isOpen, onClose, c
   };
 
   const handleDeleteAd = (id: string) => {
-    if (confirm('هل أنت متأكد من حذف هذا الإعلان؟')) {
-      livoStore.deleteAdvertisement(id);
-      setAds(livoStore.getAdvertisements(false));
-    }
+    setDeleteAdConfirmId(id);
+  };
+
+  const confirmDeleteAd = () => {
+    if (!deleteAdConfirmId) return;
+    livoStore.deleteAdvertisement(deleteAdConfirmId);
+    setAds(livoStore.getAdvertisements(false));
+    setDeleteAdConfirmId(null);
   };
 
   const handleToggleStatus = (ad: Advertisement) => {
@@ -88,7 +94,8 @@ export const AdCenterModal: React.FC<AdCenterModalProps> = ({ isOpen, onClose, c
   const handleAdClick = (ad: Advertisement) => {
     livoStore.recordAdClick(ad.id);
     if (ad.targetUrl) {
-      window.open(ad.targetUrl, '_blank');
+      navigator.clipboard?.writeText(ad.targetUrl);
+      setAdLinkNotice(ad.targetUrl);
     }
   };
 
@@ -370,6 +377,49 @@ export const AdCenterModal: React.FC<AdCenterModalProps> = ({ isOpen, onClose, c
           )}
         </div>
       </div>
+
+      {/* In-app Delete Confirm Modal */}
+      {deleteAdConfirmId && (
+        <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-5 w-full max-w-xs text-center space-y-3 text-gray-900">
+            <h4 className="font-black text-sm">تأكيد حذف الإعلان</h4>
+            <p className="text-xs text-gray-600">هل أنت متأكد من حذف هذا الإعلان نهائياً؟</p>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => setDeleteAdConfirmId(null)}
+                className="py-2 rounded-xl bg-gray-100 text-gray-800 font-bold text-xs"
+              >
+                إلغاء
+              </button>
+              <button
+                onClick={confirmDeleteAd}
+                className="py-2 rounded-xl bg-red-600 text-white font-black text-xs"
+              >
+                حذف الآن
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* In-app Ad Target Link Info Modal (replaces window.open) */}
+      {adLinkNotice && (
+        <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-5 w-full max-w-sm text-center space-y-3 text-gray-900">
+            <h4 className="font-black text-sm">رابط العرض الترويجي</h4>
+            <p className="text-xs text-gray-600 break-all bg-gray-50 p-2 rounded-xl border border-gray-200 font-mono">
+              {adLinkNotice}
+            </p>
+            <p className="text-[11px] text-emerald-700 font-bold">تم نسخ الرابط للحافظة تلقائياً ✓</p>
+            <button
+              onClick={() => setAdLinkNotice(null)}
+              className="w-full py-2 rounded-xl bg-[#FFE600] text-black font-black text-xs"
+            >
+              حسناً
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

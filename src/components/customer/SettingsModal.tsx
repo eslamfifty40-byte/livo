@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { ArrowRight, ChevronLeft, ShieldCheck, Check, Bell, Lock, Activity, HardDrive, Trash2, Info, Users, LogOut, CheckCircle2 } from 'lucide-react';
+import { ArrowRight, ChevronLeft, Check, CheckCircle2, X, ShieldBan, Bell } from 'lucide-react';
 import { UserProfile } from '../../types';
+import { livoStore } from '../../services/livoStore';
 
 interface SettingsModalProps {
   user: UserProfile;
@@ -20,12 +21,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [cacheSize, setCacheSize] = useState('0.51M');
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [showBlockedModal, setShowBlockedModal] = useState(false);
+  const [publicBroadcast, setPublicBroadcast] = useState(true);
+  const [privateProfileOnly, setPrivateProfileOnly] = useState(false);
 
   if (!isOpen) return null;
 
   const showToast = (msg: string) => {
     setToastMsg(msg);
     setTimeout(() => setToastMsg(null), 2500);
+  };
+
+  const notificationsOn = user.notificationsEnabled !== false;
+  const blockedUids = user.blockedUids || [];
+
+  const handleToggleNotifications = () => {
+    const nextVal = !notificationsOn;
+    livoStore.updateUserProfile(user.uid, { notificationsEnabled: nextVal });
+    showToast(nextVal ? 'تم تفعيل إشعارات الرسائل والتنبيهات ✓' : 'تم كتم الإشعارات مؤقتاً');
   };
 
   const handleClearCache = () => {
@@ -38,7 +51,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       
       {/* Toast Feedback */}
       {toastMsg && (
-        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-50 bg-black text-[#FFE600] px-4 py-2 rounded-full text-xs font-black shadow-lg animate-in fade-in slide-in-from-top-2 flex items-center gap-1.5">
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-50 bg-black text-[#FFE600] px-4 py-2 rounded-full text-xs font-black shadow-lg animate-in fade-in slide-in-from-top-2 flex items-center gap-1.5 whitespace-nowrap">
           <CheckCircle2 className="w-4 h-4 text-green-400" />
           <span>{toastMsg}</span>
         </div>
@@ -63,39 +76,66 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         {/* GROUP 1: الإشعارات والخصوصية والأمان */}
         <div className="bg-white my-2 divide-y divide-gray-50 border-y border-gray-100">
           <div
-            onClick={() => showToast('إشعارات الرسائل: مفعلة وتستقبل التنبيهات الفورية')}
+            onClick={handleToggleNotifications}
             className="px-5 py-3.5 flex items-center justify-between hover:bg-gray-50 cursor-pointer"
           >
-            <span className="font-bold text-xs text-gray-900">إشعار الرسائل والتنبيهات</span>
-            <ChevronLeft className="w-4 h-4 text-gray-400" />
+            <div className="flex items-center gap-2">
+              <Bell className="w-4 h-4 text-gray-600" />
+              <span className="font-bold text-xs text-gray-900">إشعار الرسائل والتنبيهات</span>
+            </div>
+            <span className={`text-[10px] font-black px-2.5 py-0.5 rounded-full ${
+              notificationsOn ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-600'
+            }`}>
+              {notificationsOn ? 'مفعل' : 'متوقف'}
+            </span>
           </div>
 
           <div
-            onClick={() => showToast('قائمة المحظورين: لا توجد حسابات محظورة من قبلك')}
+            onClick={() => setShowBlockedModal(true)}
             className="px-5 py-3.5 flex items-center justify-between hover:bg-gray-50 cursor-pointer"
           >
-            <span className="font-bold text-xs text-gray-900">قائمة المحظورين</span>
-            <ChevronLeft className="w-4 h-4 text-gray-400" />
+            <div className="flex items-center gap-2">
+              <ShieldBan className="w-4 h-4 text-gray-600" />
+              <span className="font-bold text-xs text-gray-900">قائمة المحظورين</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-digits font-bold text-gray-500">{blockedUids.length}</span>
+              <ChevronLeft className="w-4 h-4 text-gray-400" />
+            </div>
           </div>
 
           <div
-            onClick={() => showToast('إخطار البث العام: مفعل')}
+            onClick={() => {
+              const next = !publicBroadcast;
+              setPublicBroadcast(next);
+              showToast(next ? 'تم تفعيل إخطار البث العام ✓' : 'تم إيقاف إخطار البث العام');
+            }}
             className="px-5 py-3.5 flex items-center justify-between hover:bg-gray-50 cursor-pointer"
           >
             <span className="font-bold text-xs text-gray-900">إخطار البث العام</span>
-            <ChevronLeft className="w-4 h-4 text-gray-400" />
+            <span className={`text-[10px] font-black px-2.5 py-0.5 rounded-full ${
+              publicBroadcast ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-600'
+            }`}>
+              {publicBroadcast ? 'مفعل' : 'متوقف'}
+            </span>
           </div>
 
           <div
-            onClick={() => showToast('الخصوصية: حسابك محمي بالكامل ويظهر للأصدقاء في المنصة')}
+            onClick={() => {
+              const next = !privateProfileOnly;
+              setPrivateProfileOnly(next);
+              showToast(next ? 'الخصوصية: الظهور للأصدقاء فقط' : 'الخصوصية: الظهور للجميع في LIVO');
+            }}
             className="px-5 py-3.5 flex items-center justify-between hover:bg-gray-50 cursor-pointer"
           >
             <span className="font-bold text-xs text-gray-900">الخصوصية والظهور</span>
-            <ChevronLeft className="w-4 h-4 text-gray-400" />
+            <span className="text-[10px] font-bold text-gray-600 bg-gray-100 px-2.5 py-0.5 rounded-full">
+              {privateProfileOnly ? 'الأصدقاء فقط' : 'متاح للجميع'}
+            </span>
           </div>
 
           <div
-            onClick={() => showToast('مركز الأمان: حسابك محمي برمز UID ذري معتمد')}
+            onClick={() => showToast(`حسابك (${user.uid}) مربوط ومؤمّن بالكامل ✓`)}
             className="px-5 py-3.5 flex items-center justify-between hover:bg-gray-50 cursor-pointer"
           >
             <span className="font-bold text-xs text-gray-900">مركز الأمان</span>
@@ -112,7 +152,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         {/* GROUP 2: الشبكة والتخزين */}
         <div className="bg-white my-2 divide-y divide-gray-50 border-y border-gray-100">
           <div
-            onClick={() => showToast('تشخيص الاتصال: متصل بقاعدة بيانات Firebase الموحدة')}
+            onClick={() => showToast('تشخيص الاتصال: متصل بقاعدة بيانات Firebase الموحدة ✓')}
             className="px-5 py-3.5 flex items-center justify-between hover:bg-gray-50 cursor-pointer"
           >
             <span className="font-bold text-xs text-gray-900">تشخيص الشبكة والاتصال</span>
@@ -131,7 +171,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
 
           <div
-            onClick={() => showToast('منظومة LIVO الموحدة — الإصدار الرسمي المعتمد 2026')}
+            onClick={() => showToast(`منظومة LIVO الموحدة — UID: ${user.uid}`)}
             className="px-5 py-3.5 flex items-center justify-between hover:bg-gray-50 cursor-pointer"
           >
             <span className="font-bold text-xs text-gray-900">عن المنظومة وإصدار التطبيق</span>
@@ -161,6 +201,51 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Blocked Users Modal */}
+      {showBlockedModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white rounded-3xl w-full max-w-sm p-5 shadow-2xl space-y-3 text-gray-900">
+            <div className="flex items-center justify-between border-b border-gray-100 pb-2">
+              <h3 className="font-black text-sm">قائمة المحظورين ({blockedUids.length})</h3>
+              <button onClick={() => setShowBlockedModal(false)} className="text-gray-400 hover:text-black">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            {blockedUids.length === 0 ? (
+              <p className="text-xs text-gray-500 text-center py-6">لا توجد حسابات محظورة من قبلك حالياً.</p>
+            ) : (
+              <div className="space-y-2 max-h-60 overflow-y-auto">
+                {blockedUids.map(targetUid => {
+                  const target = livoStore.getUserByUid(targetUid);
+                  return (
+                    <div key={targetUid} className="flex items-center justify-between p-2.5 rounded-2xl bg-gray-50 border border-gray-100">
+                      <div className="flex items-center gap-2">
+                        {target?.avatar && (
+                          <img src={target.avatar} alt={target.displayName} className="w-8 h-8 rounded-full object-cover" />
+                        )}
+                        <div>
+                          <span className="text-xs font-bold block">{target?.displayName || `مستخدم ${targetUid}`}</span>
+                          <span className="text-[10px] text-gray-500 font-digits">UID: {targetUid}</span>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => {
+                          livoStore.toggleBlockUser(user.uid, targetUid);
+                          showToast('تم إلغاء الحظر بنجاح ✓');
+                        }}
+                        className="text-xs font-bold px-3 py-1 rounded-full bg-[#FFE600] text-black"
+                      >
+                        إلغاء الحظر
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Logout Confirm Modal */}
       {showLogoutConfirm && (
@@ -194,3 +279,4 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     </div>
   );
 };
+

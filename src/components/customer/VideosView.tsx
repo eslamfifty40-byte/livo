@@ -1,14 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Heart,
   MessageCircle,
   Share2,
   Plus,
   Trash2,
-  Upload,
-  Check,
   Video,
-  X
+  X,
+  CheckCircle2
 } from 'lucide-react';
 import { UserProfile, VideoPost } from '../../types';
 import { livoStore } from '../../services/livoStore';
@@ -18,54 +17,82 @@ interface VideosViewProps {
 }
 
 export const VideosView: React.FC<VideosViewProps> = ({ currentUser }) => {
-  const videos = livoStore.getVideos();
+  const [videos, setVideos] = useState<VideoPost[]>(() => livoStore.getVideos());
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [caption, setCaption] = useState('');
   const [videoUrl, setVideoUrl] = useState('');
+  const [uploadError, setUploadError] = useState('');
   const [likedVideoIds, setLikedVideoIds] = useState<Set<string>>(new Set());
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    const sync = () => setVideos([...livoStore.getVideos()]);
+    const unsub = livoStore.subscribe(sync);
+    return () => unsub();
+  }, []);
+
+  const showToast = (msg: string) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(null), 2400);
+  };
 
   const handleToggleLike = (id: string) => {
-    setLikedVideoIds(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+    if (!likedVideoIds.has(id)) {
+      livoStore.likeVideo(id);
+      setLikedVideoIds(prev => {
+        const next = new Set(prev);
+        next.add(id);
+        return next;
+      });
+    }
   };
 
   const handleUploadSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setUploadError('');
     if (!caption.trim()) {
-      alert('يرجى كتابة وصف للفيديو');
+      setUploadError('يرجى كتابة وصف للفيديو');
       return;
     }
-
-    const defaultSampleVideos = [
-      'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-      'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyBlazes.mp4',
-      'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4'
-    ];
-    const finalUrl = videoUrl.trim() || defaultSampleVideos[Math.floor(Math.random() * defaultSampleVideos.length)];
+    if (!videoUrl.trim()) {
+      setUploadError('يرجى إدخال رابط فيديو مباشر (.mp4) أو اختيار ملف فيديو');
+      return;
+    }
 
     livoStore.uploadVideo({
       authorUid: currentUser.uid,
       caption: caption.trim(),
-      videoUrl: finalUrl
+      videoUrl: videoUrl.trim()
     });
 
     setCaption('');
     setVideoUrl('');
     setShowUploadModal(false);
+    showToast('تم نشر المقطع في ساحة LIVO بنجاح ✓');
   };
 
-  const handleDelete = (videoId: string) => {
-    if (confirm('هل أنت متأكد من حذف هذا الفيديو؟')) {
-      livoStore.deleteVideo(videoId, currentUser.uid);
-    }
+  const handleVideoFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        setVideoUrl(reader.result);
+      }
+    };
+    reader.readAsDataURL(file);
   };
 
   return (
     <div className="relative flex flex-col h-[620px] bg-[#090314] rounded-2xl border border-purple-900/50 overflow-hidden text-white shadow-2xl">
+      {toastMsg && (
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-50 bg-[#FFE600] text-black px-4 py-1.5 rounded-full text-xs font-black shadow-lg flex items-center gap-1.5">
+          <CheckCircle2 className="w-3.5 h-3.5" />
+          <span>{toastMsg}</span>
+        </div>
+      )}
+
       {/* Top Header */}
       <div className="p-3 border-b border-purple-800/40 flex items-center justify-between bg-[#170b2c]/80 backdrop-blur-md">
         <div>
@@ -99,7 +126,6 @@ export const VideosView: React.FC<VideosViewProps> = ({ currentUser }) => {
                 key={video.id}
                 className="bg-[#150a28] rounded-2xl border border-purple-800/40 overflow-hidden shadow-lg"
               >
-                {/* Author Info */}
                 <div className="p-3 flex items-center justify-between">
                   <div className="flex items-center gap-2.5">
                     <div className="relative">
@@ -124,7 +150,7 @@ export const VideosView: React.FC<VideosViewProps> = ({ currentUser }) => {
 
                   {canDelete && (
                     <button
-                      onClick={() => handleDelete(video.id)}
+                      onClick={() => setDeleteTargetId(video.id)}
                       className="text-purple-400 hover:text-red-400 p-1 rounded-lg"
                       title="حذف المقطع"
                     >
@@ -133,7 +159,6 @@ export const VideosView: React.FC<VideosViewProps> = ({ currentUser }) => {
                   )}
                 </div>
 
-                {/* Video Player */}
                 <div className="relative bg-black w-full h-72 flex items-center justify-center">
                   <video
                     src={video.videoUrl}
@@ -143,7 +168,6 @@ export const VideosView: React.FC<VideosViewProps> = ({ currentUser }) => {
                   />
                 </div>
 
-                {/* Caption & Interaction */}
                 <div className="p-3 space-y-2">
                   <p className="text-xs text-purple-100 leading-relaxed">
                     {video.caption}
@@ -157,7 +181,7 @@ export const VideosView: React.FC<VideosViewProps> = ({ currentUser }) => {
                       }`}
                     >
                       <Heart className={`w-4 h-4 ${isLiked ? 'fill-current' : ''}`} />
-                      <span className="font-digits">{video.likesCount + (isLiked ? 1 : 0)}</span>
+                      <span className="font-digits">{video.likesCount}</span>
                     </button>
 
                     <div className="flex items-center gap-1.5">
@@ -166,7 +190,10 @@ export const VideosView: React.FC<VideosViewProps> = ({ currentUser }) => {
                     </div>
 
                     <button
-                      onClick={() => alert('تم نسخ رابط الفيديو')}
+                      onClick={() => {
+                        navigator.clipboard?.writeText(video.videoUrl);
+                        showToast('تم نسخ رابط المقطع ✓');
+                      }}
                       className="flex items-center gap-1 hover:text-white"
                     >
                       <Share2 className="w-4 h-4" />
@@ -179,6 +206,34 @@ export const VideosView: React.FC<VideosViewProps> = ({ currentUser }) => {
           })
         )}
       </div>
+
+      {/* Delete Confirm Modal */}
+      {deleteTargetId && (
+        <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-[#170b2c] border border-purple-800 rounded-2xl p-5 w-full max-w-xs text-center space-y-3">
+            <h3 className="font-black text-sm text-white">تأكيد حذف الفيديو</h3>
+            <p className="text-xs text-purple-200">هل أنت متأكد من رغبتك في حذف هذا المقطع نهائياً؟</p>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => setDeleteTargetId(null)}
+                className="py-2 rounded-xl bg-purple-900/60 text-purple-200 text-xs font-bold"
+              >
+                إلغاء
+              </button>
+              <button
+                onClick={() => {
+                  livoStore.deleteVideo(deleteTargetId, currentUser.uid);
+                  setDeleteTargetId(null);
+                  showToast('تم حذف الفيديو');
+                }}
+                className="py-2 rounded-xl bg-red-600 text-white text-xs font-black"
+              >
+                حذف الآن
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Upload Video Modal */}
       {showUploadModal && (
@@ -207,15 +262,23 @@ export const VideosView: React.FC<VideosViewProps> = ({ currentUser }) => {
               </div>
 
               <div>
-                <label className="block text-xs text-purple-200 mb-1">رابط الفيديو (اختياري، يترك فارغاً لاستخدام العينة):</label>
+                <label className="block text-xs text-purple-200 mb-1">رابط الفيديو المباشر (.mp4) أو اختر ملفاً:</label>
                 <input
                   type="url"
                   value={videoUrl}
                   onChange={(e) => setVideoUrl(e.target.value)}
                   placeholder="https://example.com/video.mp4"
-                  className="w-full bg-[#120824] border border-purple-800/60 rounded-xl px-3 py-2 text-xs text-white placeholder-purple-400/50 outline-none font-digits"
+                  className="w-full bg-[#120824] border border-purple-800/60 rounded-xl px-3 py-2 text-xs text-white placeholder-purple-400/50 outline-none font-digits mb-2"
                 />
+                <label className="block text-center py-2 rounded-xl border border-dashed border-purple-600 text-[11px] text-purple-300 hover:border-amber-400 cursor-pointer">
+                  <input type="file" accept="video/*" onChange={handleVideoFileSelect} className="hidden" />
+                  اختيار ملف فيديو من الجهاز
+                </label>
               </div>
+
+              {uploadError && (
+                <p className="text-xs text-red-400 font-bold">{uploadError}</p>
+              )}
 
               <button
                 type="submit"
@@ -230,3 +293,4 @@ export const VideosView: React.FC<VideosViewProps> = ({ currentUser }) => {
     </div>
   );
 };
+

@@ -32,6 +32,7 @@ import {
 import { UserProfile, VideoPost } from '../../types';
 import { LivoVerifiedBadge } from '../common/LivoVerifiedBadge';
 import { EditProfileModal } from './EditProfileModal';
+import { VideosView } from './VideosView';
 import { livoStore } from '../../services/livoStore';
 
 interface HagoProfileViewProps {
@@ -74,6 +75,7 @@ export const HagoProfileView: React.FC<HagoProfileViewProps> = ({
   const [copiedUid, setCopiedUid] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [showSquareModal, setShowSquareModal] = useState(false);
   const [infoNotice, setInfoNotice] = useState<string | null>(null);
 
   // User's genuine videos
@@ -367,12 +369,12 @@ export const HagoProfileView: React.FC<HagoProfileViewProps> = ({
         <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-2xs">
           {/* 1. الساحة */}
           <div
-            onClick={() => setInfoNotice('الساحة: استعراض مشاركات ولحظات الأصدقاء في LIVO')}
+            onClick={() => setShowSquareModal(true)}
             className="px-4 py-3 flex items-center justify-between hover:bg-gray-50 cursor-pointer transition-colors"
           >
             <div className="flex items-center gap-3">
               <Globe className="w-5 h-5 text-gray-700 stroke-[1.8]" />
-              <span className="font-bold text-xs text-gray-900">الساحة</span>
+              <span className="font-bold text-xs text-gray-900">الساحة (الفيديوهات)</span>
             </div>
             <ChevronLeft className="w-4 h-4 text-gray-400" />
           </div>
@@ -584,6 +586,22 @@ export const HagoProfileView: React.FC<HagoProfileViewProps> = ({
         isOpen={showEditProfileModal}
         onClose={() => setShowEditProfileModal(false)}
       />
+
+      {/* الساحة (Videos Feed Modal) */}
+      {showSquareModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 animate-in fade-in">
+          <div className="w-full max-w-md relative">
+            <button
+              onClick={() => setShowSquareModal(false)}
+              className="absolute top-2 left-2 z-50 w-8 h-8 rounded-full bg-white/15 hover:bg-white/25 text-white flex items-center justify-center"
+              title="إغلاق"
+            >
+              <X className="w-4 h-4" />
+            </button>
+            <VideosView currentUser={user} />
+          </div>
+        </div>
+      )}
 
       {/* Info Notice Modal Sheet */}
       {infoNotice && (

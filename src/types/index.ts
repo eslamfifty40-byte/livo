@@ -38,9 +38,24 @@ export interface UserProfile {
     bannedBy: string;
   };
   deviceId?: string;
-  accountType?: 'personal' | 'business'; // Choice between standard and business account
+  country?: string;
+  voiceRoomBgUrl?: string;
+  accountType?: 'personal' | 'business'; // Legacy compatibility field (unified login)
   phoneNumber?: string;
   isPhoneVerified?: boolean;
+  followingUids?: string[];
+  blockedUids?: string[];
+  notificationsEnabled?: boolean;
+  createdAt: string;
+}
+
+export interface SupervisorRecord {
+  id: string;
+  uid: string;
+  name: string;
+  email: string;
+  permissions: string[];
+  isActive: boolean;
   createdAt: string;
 }
 
@@ -95,6 +110,8 @@ export interface CoinPackage {
   priceEGP: number;
   icon?: string;
   popular?: boolean;
+  isActive?: boolean;
+  updatedAt?: string;
 }
 
 export interface RechargeRequest {
@@ -120,7 +137,7 @@ export interface CoinAuditRecord {
   id: string;
   uid: string;
   username: string;
-  actionType: 'recharge_request' | 'admin_add' | 'admin_deduct' | 'admin_set' | 'gift_sent' | 'store_purchase' | 'agency_charge';
+  actionType: 'recharge_request' | 'admin_add' | 'admin_deduct' | 'admin_set' | 'gift_sent' | 'gift_received' | 'store_purchase' | 'agency_charge';
   coinsChange: number;
   balanceBefore: number;
   balanceAfter: number;
@@ -133,14 +150,35 @@ export interface DirectMessage {
   id: string;
   chatId: string;
   senderUid: string;
+  senderAuthUid?: string;
   senderName: string;
   senderAvatar: string;
   receiverUid: string;
+  receiverAuthUid?: string;
   content: string;
   type: 'text' | 'image' | 'voice' | 'video';
   mediaUrl?: string;
   createdAt: string;
   status: 'sent' | 'delivered' | 'read';
+}
+
+export type MessageRequestStatus = 'pending' | 'accepted' | 'rejected' | 'suspended';
+
+export interface MessageRequest {
+  id: string;
+  senderUid: string;
+  senderAuthUid?: string;
+  senderName: string;
+  senderAvatar: string;
+  senderVerified?: boolean;
+  receiverUid: string;
+  receiverAuthUid?: string;
+  receiverName?: string;
+  receiverAvatar?: string;
+  introMessage: string;
+  status: MessageRequestStatus;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface ChatThread {
@@ -155,6 +193,16 @@ export interface ChatThread {
   unreadCount: number;
 }
 
+export interface RoomMessage {
+  id: string;
+  uid: string;
+  user: string;
+  text: string;
+  isVip?: boolean;
+  isVerified?: boolean;
+  createdAt: string;
+}
+
 export interface VoiceRoom {
   id: string;
   title: string;
@@ -162,6 +210,10 @@ export interface VoiceRoom {
   ownerName: string;
   ownerAvatar: string;
   isOfficial: boolean; // "LIVO Admin" official room
+  roomType?: 'voice' | 'live';
+  coverImage?: string;
+  backgroundUrl?: string;
+  viewersCount?: number;
   status: 'open' | 'closed' | 'locked_by_admin';
   category: string;
   seats: RoomSeat[];
@@ -169,6 +221,7 @@ export interface VoiceRoom {
   bannedUsers: string[]; // uids banned from room
   allChatDisabled: boolean;
   announcement?: string;
+  messages?: RoomMessage[];
 }
 
 export interface RoomSeat {
@@ -176,8 +229,12 @@ export interface RoomSeat {
   occupiedByUid?: string;
   occupiedByName?: string;
   occupiedByAvatar?: string;
+  isVerified?: boolean;
   isMuted: boolean;
   isLocked: boolean;
+  isMicBlocked?: boolean;
+  isChatBlocked?: boolean;
+  points?: number;
 }
 
 export interface LiveStream {
@@ -229,6 +286,7 @@ export interface GiftItem {
   icon: string;
   animationType: 'lion' | 'car' | 'dragon' | 'castle' | 'diamond' | 'heart' | 'rose' | 'rocket';
   durationMs: number;
+  category?: string;
   imageUrl?: string;
   isActive?: boolean;
   updatedAt?: string;

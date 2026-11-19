@@ -33,6 +33,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ user, isOpen
   const [isUploading, setIsUploading] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [phoneNotice, setPhoneNotice] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
@@ -262,9 +263,10 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ user, isOpen
                         livoStore.updateUserPhone(user.uid, userPhone, true);
                         setIsPhoneChanged(false);
                         setShowPhoneOtpInput(false);
-                        alert('تم توثيق وتحديث رقم الهاتف بنجاح!');
+                        setErrorMsg('');
+                        setPhoneNotice('تم توثيق وتحديث رقم الهاتف بنجاح ✓');
                       } else {
-                        alert('رمز التحقق غير صحيح، يرجى كتابة 1234');
+                        setErrorMsg('رمز التحقق غير صحيح، يرجى كتابة 4 أرقام على الأقل');
                       }
                     }}
                     className="bg-green-600 hover:bg-green-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg"
@@ -272,6 +274,11 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ user, isOpen
                     تأكيد وتوثيق
                   </button>
                 </div>
+              </div>
+            )}
+            {phoneNotice && (
+              <div className="bg-green-50 text-green-700 border border-green-200 px-2.5 py-1.5 rounded-lg text-[11px] font-bold">
+                {phoneNotice}
               </div>
             )}
           </div>
