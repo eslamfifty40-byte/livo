@@ -91,7 +91,7 @@ export const CustomerApp: React.FC<CustomerAppProps> = ({ currentUser }) => {
   };
 
   const unreadCount = currentUser
-    ? livoStore.getChatThreads(currentUser.uid).reduce((acc, t) => acc + (t.unreadCount || 0), 0)
+    ? livoStore.getChatThreads(currentUser?.uid).reduce((acc, t) => acc + (t.unreadCount || 0), 0)
     : 0;
 
   return (

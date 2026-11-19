@@ -32,7 +32,7 @@ export const AdCenterModal: React.FC<AdCenterModalProps> = ({ isOpen, onClose, c
 
   if (!isOpen) return null;
 
-  const isOwner = currentUser.role === 'owner' || livoStore.isOwnerEmail(currentUser.email);
+  const isOwner = currentUser?.role === 'owner' || livoStore.isOwnerEmail(currentUser?.email);
 
   const handleSaveAd = (e: React.FormEvent) => {
     e.preventDefault();
@@ -61,7 +61,7 @@ export const AdCenterModal: React.FC<AdCenterModalProps> = ({ isOpen, onClose, c
         startDate: new Date(startDate).toISOString(),
         endDate: new Date(endDate).toISOString(),
         placement,
-        createdBy: currentUser.displayName || currentUser.username
+        createdBy: currentUser?.displayName || currentUser?.username
       });
     }
 

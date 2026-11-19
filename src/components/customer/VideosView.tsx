@@ -61,7 +61,7 @@ export const VideosView: React.FC<VideosViewProps> = ({ currentUser }) => {
     }
 
     livoStore.uploadVideo({
-      authorUid: currentUser.uid,
+      authorUid: currentUser?.uid,
       caption: caption.trim(),
       videoUrl: videoUrl.trim()
     });
@@ -119,7 +119,7 @@ export const VideosView: React.FC<VideosViewProps> = ({ currentUser }) => {
         ) : (
           videos.map(video => {
             const isLiked = likedVideoIds.has(video.id);
-            const canDelete = currentUser.role === 'owner' || video.authorUid === currentUser.uid;
+            const canDelete = currentUser?.role === 'owner' || video.authorUid === currentUser?.uid;
 
             return (
               <div
@@ -222,7 +222,7 @@ export const VideosView: React.FC<VideosViewProps> = ({ currentUser }) => {
               </button>
               <button
                 onClick={() => {
-                  livoStore.deleteVideo(deleteTargetId, currentUser.uid);
+                  livoStore.deleteVideo(deleteTargetId, currentUser?.uid);
                   setDeleteTargetId(null);
                   showToast('تم حذف الفيديو');
                 }}

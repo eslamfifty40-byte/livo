@@ -39,19 +39,19 @@ export const PrivateMessagesView: React.FC<PrivateMessagesViewProps> = ({ curren
 
   useEffect(() => {
     if (activePartner) {
-      livoStore.markThreadAsRead(currentUser.uid, activePartner.uid);
+      livoStore.markThreadAsRead(currentUser?.uid, activePartner.uid);
     }
-  }, [activePartner, currentUser.uid]);
+  }, [activePartner, currentUser?.uid]);
 
   const showToast = (msg: string) => {
     setToastMsg(msg);
     setTimeout(() => setToastMsg(null), 2600);
   };
 
-  const blockedSet = new Set(currentUser.blockedUids || []);
-  const threads = livoStore.getChatThreads(currentUser.uid);
+  const blockedSet = new Set(currentUser?.blockedUids || []);
+  const threads = livoStore.getChatThreads(currentUser?.uid);
   const allUsers = livoStore.getGenuineUsers().filter(
-    u => u.uid !== currentUser.uid && !blockedSet.has(u.uid)
+    u => u.uid !== currentUser?.uid && !blockedSet.has(u.uid)
   );
 
   const searchResults = searchQuery.trim()
@@ -63,15 +63,15 @@ export const PrivateMessagesView: React.FC<PrivateMessagesViewProps> = ({ curren
     : [];
 
   const canChatWithPartner = activePartner
-    ? livoStore.canChatPrivately(currentUser.uid, activePartner.uid)
+    ? livoStore.canChatPrivately(currentUser?.uid, activePartner.uid)
     : false;
 
   const existingRequest = activePartner
-    ? livoStore.getMessageRequestBetween(currentUser.uid, activePartner.uid)
+    ? livoStore.getMessageRequestBetween(currentUser?.uid, activePartner.uid)
     : undefined;
 
   const activeMessages = activePartner && canChatWithPartner
-    ? livoStore.getChatMessages(currentUser.uid, activePartner.uid)
+    ? livoStore.getChatMessages(currentUser?.uid, activePartner.uid)
     : [];
 
   const handleSendMessage = (e: React.FormEvent, type: 'text' | 'image' | 'voice' = 'text', mediaUrl?: string) => {
@@ -85,7 +85,7 @@ export const PrivateMessagesView: React.FC<PrivateMessagesViewProps> = ({ curren
     if (!content && type === 'text') return;
 
     livoStore.sendDirectMessage({
-      senderUid: currentUser.uid,
+      senderUid: currentUser?.uid,
       receiverUid: activePartner.uid,
       content: content || (type === 'voice' ? 'تسجيل صوتي 🎙️' : 'صورة مرفقة 📷'),
       type,
@@ -119,7 +119,7 @@ export const PrivateMessagesView: React.FC<PrivateMessagesViewProps> = ({ curren
     e.preventDefault();
     if (!activePartner) return;
     const res = livoStore.sendMessageRequest(
-      currentUser.uid,
+      currentUser?.uid,
       activePartner.uid,
       requestIntroInput.trim() || 'مرحباً، أود التواصل معك عبر الرسائل الخاصة'
     );
@@ -176,7 +176,7 @@ export const PrivateMessagesView: React.FC<PrivateMessagesViewProps> = ({ curren
 
           {!canChatWithPartner ? (
             <div className="flex-1 p-5 flex flex-col items-center justify-center text-center space-y-4">
-              {existingRequest && existingRequest.receiverUid === currentUser.uid && (existingRequest.status === 'pending' || existingRequest.status === 'suspended') ? (
+              {existingRequest && existingRequest.receiverUid === currentUser?.uid && (existingRequest.status === 'pending' || existingRequest.status === 'suspended') ? (
                 <div className="w-full max-w-sm bg-[#170b2c] border border-purple-700/60 rounded-2xl p-4 space-y-3">
                   <h4 className="font-black text-sm text-amber-300">طلب مراسلة وارد</h4>
                   <p className="text-xs text-purple-200 bg-[#120824] p-3 rounded-xl border border-purple-800/40">
@@ -185,7 +185,7 @@ export const PrivateMessagesView: React.FC<PrivateMessagesViewProps> = ({ curren
                   <div className="grid grid-cols-3 gap-2">
                     <button
                       onClick={() => {
-                        const res = livoStore.respondToMessageRequest(existingRequest.id, 'accepted', currentUser.uid);
+                        const res = livoStore.respondToMessageRequest(existingRequest.id, 'accepted', currentUser?.uid);
                         showToast(res.message);
                       }}
                       className="py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black"
@@ -194,7 +194,7 @@ export const PrivateMessagesView: React.FC<PrivateMessagesViewProps> = ({ curren
                     </button>
                     <button
                       onClick={() => {
-                        const res = livoStore.respondToMessageRequest(existingRequest.id, 'suspended', currentUser.uid);
+                        const res = livoStore.respondToMessageRequest(existingRequest.id, 'suspended', currentUser?.uid);
                         showToast(res.message);
                       }}
                       className="py-2 rounded-xl bg-amber-500/20 border border-amber-500/50 text-amber-300 text-xs font-bold"
@@ -203,7 +203,7 @@ export const PrivateMessagesView: React.FC<PrivateMessagesViewProps> = ({ curren
                     </button>
                     <button
                       onClick={() => {
-                        const res = livoStore.respondToMessageRequest(existingRequest.id, 'rejected', currentUser.uid);
+                        const res = livoStore.respondToMessageRequest(existingRequest.id, 'rejected', currentUser?.uid);
                         showToast(res.message);
                       }}
                       className="py-2 rounded-xl bg-red-600/80 hover:bg-red-600 text-white text-xs font-bold"
@@ -212,7 +212,7 @@ export const PrivateMessagesView: React.FC<PrivateMessagesViewProps> = ({ curren
                     </button>
                   </div>
                 </div>
-              ) : existingRequest && existingRequest.senderUid === currentUser.uid && (existingRequest.status === 'pending' || existingRequest.status === 'suspended') ? (
+              ) : existingRequest && existingRequest.senderUid === currentUser?.uid && (existingRequest.status === 'pending' || existingRequest.status === 'suspended') ? (
                 <div className="w-full max-w-sm bg-[#170b2c] border border-purple-700/60 rounded-2xl p-5 space-y-2.5">
                   <Clock className="w-9 h-9 text-amber-400 mx-auto" />
                   <h4 className="font-black text-sm text-white">طلب المراسلة قيد الانتظار</h4>
@@ -258,7 +258,7 @@ export const PrivateMessagesView: React.FC<PrivateMessagesViewProps> = ({ curren
                   </div>
                 ) : (
                   activeMessages.map(msg => {
-                    const isMe = msg.senderUid === currentUser.uid;
+                    const isMe = msg.senderUid === currentUser?.uid;
                     return (
                       <div
                         key={msg.id}
@@ -362,7 +362,7 @@ export const PrivateMessagesView: React.FC<PrivateMessagesViewProps> = ({ curren
                 <p className="text-xs text-purple-400 text-center py-2">لا يوجد مستخدم مطابق للمعرف أو الاسم</p>
               ) : (
                 searchResults.map(user => {
-                  const canChat = livoStore.canChatPrivately(currentUser.uid, user.uid);
+                  const canChat = livoStore.canChatPrivately(currentUser?.uid, user.uid);
                   return (
                     <button
                       key={user.uid}
@@ -464,7 +464,7 @@ export const PrivateMessagesView: React.FC<PrivateMessagesViewProps> = ({ curren
               <button
                 onClick={() => {
                   livoStore.submitSupportTicket({
-                    uid: currentUser.uid,
+                    uid: currentUser?.uid,
                     category: 'report',
                     subject: `بلاغ عن المحادثة مع UID: ${activePartner.uid}`,
                     message: `تم الإبلاغ عن المستخدم ${activePartner.displayName} (${activePartner.uid}) من المحادثات الخاصة.`,
@@ -479,7 +479,7 @@ export const PrivateMessagesView: React.FC<PrivateMessagesViewProps> = ({ curren
               </button>
               <button
                 onClick={() => {
-                  livoStore.toggleBlockUser(currentUser.uid, activePartner.uid);
+                  livoStore.toggleBlockUser(currentUser?.uid, activePartner.uid);
                   setShowReportModal(false);
                   setActivePartner(null);
                   showToast('تم حظر المستخدم بنجاح ✓');

@@ -10,7 +10,7 @@ interface SupportTicketsModalProps {
 }
 
 export const SupportTicketsModal: React.FC<SupportTicketsModalProps> = ({ isOpen, onClose, currentUser }) => {
-  const [tickets, setTickets] = useState<SupportTicket[]>(() => livoStore.getSupportTickets(currentUser.uid));
+  const [tickets, setTickets] = useState<SupportTicket[]>(() => livoStore.getSupportTickets(currentUser?.uid));
   const [isCreating, setIsCreating] = useState(false);
   const [category, setCategory] = useState<'complaint' | 'inquiry' | 'report' | 'technical' | 'financial'>('inquiry');
   const [priority, setPriority] = useState<'normal' | 'high' | 'urgent'>('normal');
@@ -26,7 +26,7 @@ export const SupportTicketsModal: React.FC<SupportTicketsModalProps> = ({ isOpen
     if (!subject.trim() || !message.trim()) return;
 
     livoStore.submitSupportTicket({
-      uid: currentUser.uid,
+      uid: currentUser?.uid,
       category,
       subject: subject.trim(),
       message: message.trim(),
@@ -34,7 +34,7 @@ export const SupportTicketsModal: React.FC<SupportTicketsModalProps> = ({ isOpen
       priority
     });
 
-    setTickets(livoStore.getSupportTickets(currentUser.uid));
+    setTickets(livoStore.getSupportTickets(currentUser?.uid));
     setIsCreating(false);
     setSubject('');
     setMessage('');

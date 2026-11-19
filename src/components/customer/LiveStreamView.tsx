@@ -172,7 +172,7 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
     }));
     if (room?.id) {
       livoStore.appendRoomMessage(room.id, {
-        uid: currentUser.uid,
+        uid: currentUser?.uid,
         user: 'نظام البث',
         text: '⚔️ بدأت جولة تحدي PK جديدة!'
       });
@@ -190,18 +190,18 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
   };
 
   const handleSendGift = (gift: GiftItem, targetChallenger: 1 | 2 = 1) => {
-    if (currentUser.coins < gift.coins) {
+    if (currentUser?.coins < gift.coins) {
       showToast('رصيد الكوينز غير كافٍ، يرجى الشحن');
       onOpenRecharge();
       return;
     }
 
     livoStore.adjustUserCoins(
-      currentUser.uid,
+      currentUser?.uid,
       'deduct',
       gift.coins,
       `إرسال هدية ${gift.name} في البث المباشر`,
-      currentUser.displayName
+      currentUser?.displayName
     );
 
     if (pk.isActive) {
@@ -213,16 +213,16 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
     }
 
     setTopSupporters(prev => {
-      const existing = prev.find(s => s.uid === currentUser.uid);
+      const existing = prev.find(s => s.uid === currentUser?.uid);
       const updated = existing
-        ? prev.map(s => s.uid === currentUser.uid ? { ...s, supportedCoins: s.supportedCoins + gift.coins } : s)
+        ? prev.map(s => s.uid === currentUser?.uid ? { ...s, supportedCoins: s.supportedCoins + gift.coins } : s)
         : [
             ...prev,
             {
               rank: 3 as 1 | 2 | 3,
-              uid: currentUser.uid,
-              username: currentUser.displayName,
-              avatar: currentUser.avatar,
+              uid: currentUser?.uid,
+              username: currentUser?.displayName,
+              avatar: currentUser?.avatar,
               supportedCoins: gift.coins
             }
           ];
@@ -234,19 +234,19 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
 
     if (room?.id) {
       livoStore.appendRoomMessage(room.id, {
-        uid: currentUser.uid,
-        user: currentUser.displayName,
+        uid: currentUser?.uid,
+        user: currentUser?.displayName,
         text: `أرسل هدية ${gift.name} ${gift.icon}!`,
         isVip: true
       });
     } else {
       setComments(prev => [
         ...prev,
-        { id: String(Date.now()), user: currentUser.displayName, text: `أرسل ${gift.name} (${gift.icon})!`, isGift: true }
+        { id: String(Date.now()), user: currentUser?.displayName, text: `أرسل ${gift.name} (${gift.icon})!`, isGift: true }
       ]);
     }
 
-    setLastSenderName(currentUser.displayName);
+    setLastSenderName(currentUser?.displayName);
     setActiveGiftAnimation(gift);
     setShowGiftModal(false);
   };
@@ -256,22 +256,22 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
     if (!commentText.trim()) return;
     if (room?.id) {
       livoStore.appendRoomMessage(room.id, {
-        uid: currentUser.uid,
-        user: currentUser.displayName,
+        uid: currentUser?.uid,
+        user: currentUser?.displayName,
         text: commentText.trim(),
-        isVerified: currentUser.isVerified
+        isVerified: currentUser?.isVerified
       });
     } else {
       setComments(prev => [
         ...prev,
-        { id: String(Date.now()), user: currentUser.displayName, text: commentText.trim() }
+        { id: String(Date.now()), user: currentUser?.displayName, text: commentText.trim() }
       ]);
     }
     setCommentText('');
   };
 
-  const hostName = room?.ownerName || currentUser.displayName;
-  const hostAvatar = room?.ownerAvatar || currentUser.avatar;
+  const hostName = room?.ownerName || currentUser?.displayName;
+  const hostAvatar = room?.ownerAvatar || currentUser?.avatar;
 
   return (
     <div className="relative w-full h-full min-h-[600px] bg-black overflow-hidden flex flex-col justify-between text-white">
@@ -513,7 +513,7 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-xs font-digits text-amber-300 font-bold">
-                  {currentUser.coins.toLocaleString()} 🪙
+                  {currentUser?.coins.toLocaleString()} 🪙
                 </span>
                 <button
                   onClick={onOpenRecharge}

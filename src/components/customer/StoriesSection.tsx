@@ -19,9 +19,9 @@ export const StoriesSection: React.FC<StoriesSectionProps> = ({ currentUser }) =
     return () => unsub();
   }, []);
 
-  const blockedSet = new Set(currentUser.blockedUids || []);
+  const blockedSet = new Set(currentUser?.blockedUids || []);
   const realStories = genuineUsers
-    .filter(u => u.uid !== currentUser.uid && !blockedSet.has(u.uid) && Boolean(u.bio))
+    .filter(u => u.uid !== currentUser?.uid && !blockedSet.has(u.uid) && Boolean(u.bio))
     .slice(0, 10)
     .map(u => ({
       id: u.uid,
@@ -41,7 +41,7 @@ export const StoriesSection: React.FC<StoriesSectionProps> = ({ currentUser }) =
           className="flex flex-col items-center gap-1 cursor-pointer shrink-0"
         >
           <div className="relative w-14 h-14 rounded-full border-2 border-dashed border-purple-500/80 p-0.5 flex items-center justify-center bg-purple-950/40 hover:border-amber-400 transition-colors">
-            <img src={currentUser.avatar} alt={currentUser.displayName} className="w-full h-full rounded-full object-cover opacity-80" />
+            <img src={currentUser?.avatar} alt={currentUser?.displayName} className="w-full h-full rounded-full object-cover opacity-80" />
             <span className="absolute bottom-0 right-0 w-4 h-4 rounded-full bg-gradient-to-r from-amber-500 to-yellow-500 text-black flex items-center justify-center text-[10px] font-black border border-black shadow">
               +
             </span>

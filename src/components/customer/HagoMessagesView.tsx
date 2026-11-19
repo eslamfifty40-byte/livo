@@ -107,8 +107,8 @@ export const HagoMessagesView: React.FC<HagoMessagesViewProps> = ({
   // Mark incoming messages read whenever opening/viewing an active conversation
   useEffect(() => {
     if (!activeChatTarget || !currentUser) return;
-    if (livoStore.canChatPrivately(currentUser.uid, activeChatTarget.id)) {
-      livoStore.markThreadAsRead(currentUser.uid, activeChatTarget.id);
+    if (livoStore.canChatPrivately(currentUser?.uid, activeChatTarget.id)) {
+      livoStore.markThreadAsRead(currentUser?.uid, activeChatTarget.id);
     }
   }, [activeChatTarget, currentUser?.uid, messages.length]);
 
@@ -162,22 +162,22 @@ export const HagoMessagesView: React.FC<HagoMessagesViewProps> = ({
     );
   }
 
-  const blockedSet = new Set(currentUser.blockedUids || []);
-  const followingSet = new Set(currentUser.followingUids || []);
+  const blockedSet = new Set(currentUser?.blockedUids || []);
+  const followingSet = new Set(currentUser?.followingUids || []);
   const otherUsers = genuineUsers.filter(
-    u => u.uid !== currentUser.uid && !blockedSet.has(u.uid)
+    u => u.uid !== currentUser?.uid && !blockedSet.has(u.uid)
   );
 
   const {
     incomingPending,
     incomingSuspended,
     outgoing
-  } = livoStore.getMessageRequestsForUser(currentUser.uid);
+  } = livoStore.getMessageRequestsForUser(currentUser?.uid);
 
   // Official Support Thread
   const supportMsgs = messages.filter(
-    m => (m.senderUid === currentUser.uid && m.receiverUid === '10000') ||
-         (m.senderUid === '10000' && m.receiverUid === currentUser.uid)
+    m => (m.senderUid === currentUser?.uid && m.receiverUid === '10000') ||
+         (m.senderUid === '10000' && m.receiverUid === currentUser?.uid)
   );
   const lastSupportMsg = supportMsgs[supportMsgs.length - 1];
 
@@ -196,20 +196,20 @@ export const HagoMessagesView: React.FC<HagoMessagesViewProps> = ({
       lastMessage: lastSupportMsg
         ? lastSupportMsg.content
         : 'أهلاً بك في منصة LIVO! الدعم الفني وخدمة العملاء جاهزة لمساعدتك دائماً 🛡️',
-      unreadCount: supportMsgs.filter(m => m.receiverUid === currentUser.uid && m.status !== 'read').length,
+      unreadCount: supportMsgs.filter(m => m.receiverUid === currentUser?.uid && m.status !== 'read').length,
       isOnline: true,
       isAccepted: true
     },
     ...otherUsers.map(u => {
       const reqBetween = msgRequests.find(
-        r => (r.senderUid === currentUser.uid && r.receiverUid === u.uid) ||
-             (r.senderUid === u.uid && r.receiverUid === currentUser.uid)
+        r => (r.senderUid === currentUser?.uid && r.receiverUid === u.uid) ||
+             (r.senderUid === u.uid && r.receiverUid === currentUser?.uid)
       );
       const isAccepted = reqBetween?.status === 'accepted';
       const userMsgs = isAccepted
         ? messages.filter(
-            m => (m.senderUid === currentUser.uid && m.receiverUid === u.uid) ||
-                 (m.senderUid === u.uid && m.receiverUid === currentUser.uid)
+            m => (m.senderUid === currentUser?.uid && m.receiverUid === u.uid) ||
+                 (m.senderUid === u.uid && m.receiverUid === currentUser?.uid)
           )
         : [];
       const lastMsg = userMsgs[userMsgs.length - 1];
@@ -218,7 +218,7 @@ export const HagoMessagesView: React.FC<HagoMessagesViewProps> = ({
         : isAccepted
         ? 'تم قبول طلب المراسلة — ابدأ المحادثة الآن 💬'
         : reqBetween?.status === 'pending'
-        ? reqBetween.senderUid === currentUser.uid
+        ? reqBetween.senderUid === currentUser?.uid
           ? 'طلب مراسلة مُرسل — بانتظار القبول'
           : 'طلب مراسلة جديد بانتظار موافقتك'
         : reqBetween?.status === 'suspended'
@@ -244,7 +244,7 @@ export const HagoMessagesView: React.FC<HagoMessagesViewProps> = ({
           ? new Date(lastMsg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
           : `UID: ${u.uid}`,
         lastMessage: subtitle,
-        unreadCount: userMsgs.filter(m => m.receiverUid === currentUser.uid && m.status !== 'read').length,
+        unreadCount: userMsgs.filter(m => m.receiverUid === currentUser?.uid && m.status !== 'read').length,
         isOnline: isAccepted && userMsgs.length > 0,
         isAccepted,
         requestStatus: reqBetween?.status
@@ -277,11 +277,11 @@ export const HagoMessagesView: React.FC<HagoMessagesViewProps> = ({
   };
 
   const canDirectChat = activeChatTarget
-    ? livoStore.canChatPrivately(currentUser.uid, activeChatTarget.id)
+    ? livoStore.canChatPrivately(currentUser?.uid, activeChatTarget.id)
     : false;
 
   const activePairRequest = activeChatTarget && !activeChatTarget.isBot
-    ? livoStore.getMessageRequestBetween(currentUser.uid, activeChatTarget.id)
+    ? livoStore.getMessageRequestBetween(currentUser?.uid, activeChatTarget.id)
     : undefined;
 
   const handleSendReply = (e: React.FormEvent) => {
@@ -293,7 +293,7 @@ export const HagoMessagesView: React.FC<HagoMessagesViewProps> = ({
     }
 
     livoStore.sendDirectMessage({
-      senderUid: currentUser.uid,
+      senderUid: currentUser?.uid,
       receiverUid: activeChatTarget.id,
       content: chatReply.trim()
     });
@@ -305,7 +305,7 @@ export const HagoMessagesView: React.FC<HagoMessagesViewProps> = ({
     e.preventDefault();
     if (!activeChatTarget || activeChatTarget.isBot) return;
     const res = livoStore.sendMessageRequest(
-      currentUser.uid,
+      currentUser?.uid,
       activeChatTarget.id,
       requestIntroMsg.trim() || 'مرحباً، أود إرسال رسالة خاصة لك'
     );
@@ -320,10 +320,10 @@ export const HagoMessagesView: React.FC<HagoMessagesViewProps> = ({
     action: 'accepted' | 'rejected' | 'suspended',
     openOnAccept?: MessageRequest
   ) => {
-    const res = livoStore.respondToMessageRequest(requestId, action, currentUser.uid);
+    const res = livoStore.respondToMessageRequest(requestId, action, currentUser?.uid);
     showToast(res.message);
     if (res.success && action === 'accepted' && openOnAccept) {
-      const otherUid = openOnAccept.senderUid === currentUser.uid ? openOnAccept.receiverUid : openOnAccept.senderUid;
+      const otherUid = openOnAccept.senderUid === currentUser?.uid ? openOnAccept.receiverUid : openOnAccept.senderUid;
       const otherUser = livoStore.getUserByUid(otherUid);
       setActiveTab('chats');
       setActiveChatTarget({
@@ -338,8 +338,8 @@ export const HagoMessagesView: React.FC<HagoMessagesViewProps> = ({
   const activeConversationMessages = activeChatTarget && canDirectChat
     ? messages
         .filter(
-          m => (m.senderUid === currentUser.uid && m.receiverUid === activeChatTarget.id) ||
-               (m.senderUid === activeChatTarget.id && m.receiverUid === currentUser.uid)
+          m => (m.senderUid === currentUser?.uid && m.receiverUid === activeChatTarget.id) ||
+               (m.senderUid === activeChatTarget.id && m.receiverUid === currentUser?.uid)
         )
         .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
     : [];
@@ -820,7 +820,7 @@ export const HagoMessagesView: React.FC<HagoMessagesViewProps> = ({
               ) : (
                 filteredFriendResults.map(u => {
                   const isFollowed = followingSet.has(u.uid);
-                  const canChat = livoStore.canChatPrivately(currentUser.uid, u.uid);
+                  const canChat = livoStore.canChatPrivately(currentUser?.uid, u.uid);
                   return (
                     <div key={u.uid} className="flex items-center justify-between p-2.5 rounded-2xl border border-gray-100 bg-gray-50/70">
                       <div className="flex items-center gap-2.5 min-w-0">
@@ -832,7 +832,7 @@ export const HagoMessagesView: React.FC<HagoMessagesViewProps> = ({
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
                         <button
-                          onClick={() => livoStore.toggleFollowUser(currentUser.uid, u.uid)}
+                          onClick={() => livoStore.toggleFollowUser(currentUser?.uid, u.uid)}
                           className={`px-2.5 py-1 rounded-full text-[11px] font-bold ${
                             isFollowed ? 'bg-gray-200 text-gray-700' : 'bg-[#FFE600] text-black'
                           }`}
@@ -897,7 +897,7 @@ export const HagoMessagesView: React.FC<HagoMessagesViewProps> = ({
                       </div>
                     </div>
                     <span className="text-xs font-bold text-purple-600">
-                      {livoStore.canChatPrivately(currentUser.uid, u.uid) ? 'فتح الدردشة' : 'طلب مراسلة'}
+                      {livoStore.canChatPrivately(currentUser?.uid, u.uid) ? 'فتح الدردشة' : 'طلب مراسلة'}
                     </span>
                   </div>
                 ))
@@ -924,16 +924,16 @@ export const HagoMessagesView: React.FC<HagoMessagesViewProps> = ({
               type="text"
               value={quickRoomTitle}
               onChange={(e) => setQuickRoomTitle(e.target.value)}
-              placeholder={`غرفة ${currentUser.displayName}`}
+              placeholder={`غرفة ${currentUser?.displayName}`}
               className="w-full bg-gray-100 rounded-xl px-3 py-2.5 text-xs text-gray-900 outline-none focus:ring-1 focus:ring-[#FFE600]"
             />
             <button
               onClick={() => {
                 livoStore.createRoom({
-                  title: quickRoomTitle.trim() || `غرفة ${currentUser.displayName}`,
+                  title: quickRoomTitle.trim() || `غرفة ${currentUser?.displayName}`,
                   category: 'عام',
                   roomType: 'voice',
-                  ownerUid: currentUser.uid
+                  ownerUid: currentUser?.uid
                 });
                 setQuickRoomTitle('');
                 setShowQuickRoomModal(false);
@@ -1009,7 +1009,7 @@ export const HagoMessagesView: React.FC<HagoMessagesViewProps> = ({
               {!activeChatTarget.isBot && (
                 <button
                   onClick={() => {
-                    livoStore.toggleBlockUser(currentUser.uid, activeChatTarget.id);
+                    livoStore.toggleBlockUser(currentUser?.uid, activeChatTarget.id);
                     setActiveChatTarget(null);
                     showToast('تم حظر المستخدم بنجاح');
                   }}
@@ -1026,7 +1026,7 @@ export const HagoMessagesView: React.FC<HagoMessagesViewProps> = ({
             /* Message Request Gate View */
             <div className="flex-1 overflow-y-auto p-5 bg-[#F8F9FA] flex flex-col items-center justify-center text-center">
               {activePairRequest &&
-              activePairRequest.receiverUid === currentUser.uid &&
+              activePairRequest.receiverUid === currentUser?.uid &&
               (activePairRequest.status === 'pending' || activePairRequest.status === 'suspended') ? (
                 <div className="w-full max-w-sm bg-white border border-gray-200 rounded-3xl p-5 shadow-sm space-y-3">
                   <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center mx-auto">
@@ -1066,7 +1066,7 @@ export const HagoMessagesView: React.FC<HagoMessagesViewProps> = ({
                   </div>
                 </div>
               ) : activePairRequest &&
-                activePairRequest.senderUid === currentUser.uid &&
+                activePairRequest.senderUid === currentUser?.uid &&
                 (activePairRequest.status === 'pending' || activePairRequest.status === 'suspended') ? (
                 <div className="w-full max-w-sm bg-white border border-gray-200 rounded-3xl p-5 shadow-sm space-y-3">
                   <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center mx-auto">
@@ -1127,12 +1127,12 @@ export const HagoMessagesView: React.FC<HagoMessagesViewProps> = ({
                     <div
                       key={msg.id}
                       className={`flex flex-col ${
-                        msg.senderUid === currentUser.uid ? 'items-end' : 'items-start'
+                        msg.senderUid === currentUser?.uid ? 'items-end' : 'items-start'
                       }`}
                     >
                       <div
                         className={`max-w-[78%] px-3.5 py-2 rounded-2xl text-xs font-medium shadow-2xs ${
-                          msg.senderUid === currentUser.uid
+                          msg.senderUid === currentUser?.uid
                             ? 'bg-[#FFE600] text-black rounded-tl-2xs'
                             : 'bg-white text-gray-900 border border-gray-100 rounded-tr-2xs'
                         }`}
@@ -1179,7 +1179,7 @@ export const HagoMessagesView: React.FC<HagoMessagesViewProps> = ({
                       reader.onload = () => {
                         const base64 = reader.result as string;
                         livoStore.sendDirectMessage({
-                          senderUid: currentUser.uid,
+                          senderUid: currentUser?.uid,
                           receiverUid: activeChatTarget.id,
                           content: '📷 صورة مرفقة',
                           type: 'image',

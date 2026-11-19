@@ -37,7 +37,7 @@ export const VoiceRoomsView: React.FC<VoiceRoomsViewProps> = ({ currentUser }) =
     setTimeout(() => setToastMsg(null), 2500);
   };
 
-  const isOwnerOrAdmin = currentUser.role === 'owner' || currentUser.role === 'supervisor';
+  const isOwnerOrAdmin = currentUser?.role === 'owner' || currentUser?.role === 'supervisor';
   const officialRoom = rooms.find(r => r.isOfficial || r.id === 'room-official-livo') || rooms[0];
   const activeRoom = activeRoomId ? rooms.find(r => r.id === activeRoomId) || null : null;
 
@@ -46,7 +46,7 @@ export const VoiceRoomsView: React.FC<VoiceRoomsViewProps> = ({ currentUser }) =
     const seat = activeRoom.seats[seatIndex];
     if (!seat) return;
 
-    if (seat.occupiedByUid === currentUser.uid) {
+    if (seat.occupiedByUid === currentUser?.uid) {
       const muted = livoStore.toggleSeatMute(activeRoom.id, seatIndex);
       showToast(muted ? 'تم كتم المايك 🔇' : 'تم فتح المايك 🎙️');
       return;
@@ -58,7 +58,7 @@ export const VoiceRoomsView: React.FC<VoiceRoomsViewProps> = ({ currentUser }) =
     }
 
     if (!seat.occupiedByUid) {
-      const res = livoStore.joinRoomSeat(activeRoom.id, seatIndex, currentUser.uid);
+      const res = livoStore.joinRoomSeat(activeRoom.id, seatIndex, currentUser?.uid);
       showToast(res.message);
     }
   };
@@ -72,8 +72,8 @@ export const VoiceRoomsView: React.FC<VoiceRoomsViewProps> = ({ currentUser }) =
     }
 
     livoStore.appendRoomMessage(activeRoom.id, {
-      uid: currentUser.uid,
-      user: currentUser.displayName,
+      uid: currentUser?.uid,
+      user: currentUser?.displayName,
       text: roomChatText.trim(),
       isVip: isOwnerOrAdmin
     });
@@ -94,7 +94,7 @@ export const VoiceRoomsView: React.FC<VoiceRoomsViewProps> = ({ currentUser }) =
             <div className="flex items-center gap-2.5">
               <button
                 onClick={() => {
-                  livoStore.leaveRoomSeat(activeRoom.id, currentUser.uid);
+                  livoStore.leaveRoomSeat(activeRoom.id, currentUser?.uid);
                   setActiveRoomId(null);
                 }}
                 className="w-8 h-8 rounded-full bg-purple-900/40 hover:bg-purple-800 flex items-center justify-center text-purple-300"
@@ -135,7 +135,7 @@ export const VoiceRoomsView: React.FC<VoiceRoomsViewProps> = ({ currentUser }) =
           <div className="grid grid-cols-4 gap-2.5 my-2">
             {activeRoom.seats.slice(0, 12).map((seat, index) => {
               const isOccupied = !!seat.occupiedByUid;
-              const isMe = seat.occupiedByUid === currentUser.uid;
+              const isMe = seat.occupiedByUid === currentUser?.uid;
 
               return (
                 <div

@@ -63,7 +63,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({ currentUser, onStart
       onRequireAuth?.();
       return;
     }
-    livoStore.toggleFollowUser(currentUser.uid, targetUid);
+    livoStore.toggleFollowUser(currentUser?.uid, targetUid);
   };
 
   const handleOpenUserChat = (targetUid: string) => {

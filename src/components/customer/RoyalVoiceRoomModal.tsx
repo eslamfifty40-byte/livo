@@ -128,7 +128,7 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
 
   // Voice Room Background Customization State
   const [personalBg, setPersonalBg] = useState<string | undefined>(() =>
-    currentUser ? livoStore.getVoiceRoomPersonalBg(currentUser.uid) : undefined
+    currentUser ? livoStore.getVoiceRoomPersonalBg(currentUser?.uid) : undefined
   );
   const [showBgPicker, setShowBgPicker] = useState(false);
   const [bgPreviewValue, setBgPreviewValue] = useState<string>(ROOM_BG_PRESETS[0].value);
@@ -168,7 +168,7 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
         }
       }
       if (currentUser) {
-        setPersonalBg(livoStore.getVoiceRoomPersonalBg(currentUser.uid));
+        setPersonalBg(livoStore.getVoiceRoomPersonalBg(currentUser?.uid));
       }
       setGifts(livoStore.getActiveGifts());
     };
@@ -185,7 +185,7 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
     return existing || { seatIndex: idx, isMuted: false, isLocked: false };
   });
 
-  const mySeat = currentUser ? seats.find(s => s.occupiedByUid === currentUser.uid) || null : null;
+  const mySeat = currentUser ? seats.find(s => s.occupiedByUid === currentUser?.uid) || null : null;
   const isMyMicMuted = mySeat ? mySeat.isMuted : true;
 
   // Manage real WebRTC microphone hardware based on current user's seat & mute state
@@ -232,18 +232,18 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
 
   const isTopOwner = Boolean(
     currentUser &&
-      (currentUser.role === 'owner' ||
-        currentUser.role === 'supervisor' ||
-        livoStore.isOwnerEmail(currentUser.email) ||
-        liveRoom.ownerUid === currentUser.uid)
+      (currentUser?.role === 'owner' ||
+        currentUser?.role === 'supervisor' ||
+        livoStore.isOwnerEmail(currentUser?.email) ||
+        liveRoom.ownerUid === currentUser?.uid)
   );
 
   const isOwnerOrMod = Boolean(
-    currentUser && livoStore.isRoomModerator(liveRoom, currentUser.uid, currentUser)
+    currentUser && livoStore.isRoomModerator(liveRoom, currentUser?.uid, currentUser)
   );
 
   const isUserMutedInRoom = Boolean(
-    currentUser && liveRoom.mutedUsers?.includes(currentUser.uid)
+    currentUser && liveRoom.mutedUsers?.includes(currentUser?.uid)
   );
 
   const ensureAuthenticated = (): UserProfile | null => {
@@ -268,7 +268,7 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
         livoStore.closeAndRemoveRoom(liveRoom.id);
       }
     } else if (currentUser) {
-      livoStore.leaveRoomSeat(liveRoom.id, currentUser.uid);
+      livoStore.leaveRoomSeat(liveRoom.id, currentUser?.uid);
     }
     onClose();
   };
@@ -620,7 +620,7 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
           >
             {seats.map((seat, index) => {
               const isOccupied = Boolean(seat.occupiedByUid);
-              const isMe = Boolean(currentUser && seat.occupiedByUid === currentUser.uid);
+              const isMe = Boolean(currentUser && seat.occupiedByUid === currentUser?.uid);
               const seatNumber = index + 1;
               const avatarFrameSize = targetSeatCount === 6 ? 62 : 54;
               const isSeatMod = Boolean(
@@ -842,7 +842,7 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
           {mySeat && currentUser && (
             <button
               onClick={() => {
-                livoStore.leaveRoomSeat(liveRoom.id, currentUser.uid);
+                livoStore.leaveRoomSeat(liveRoom.id, currentUser?.uid);
                 showToast('نزلت من المايك');
               }}
               className="px-2.5 h-9 rounded-full bg-red-950/70 border border-red-700/60 text-red-200 text-[10px] font-bold shrink-0"
@@ -894,7 +894,7 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
                       key={countVal}
                       type="button"
                       onClick={() => {
-                        const res = livoStore.setRoomSeatCount(liveRoom.id, countVal as 6 | 12, currentUser.uid);
+                        const res = livoStore.setRoomSeatCount(liveRoom.id, countVal as 6 | 12, currentUser?.uid);
                         showToast(res.message);
                       }}
                       className={`py-2.5 rounded-xl font-black text-xs border transition-all ${
@@ -950,7 +950,7 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
                     <button
                       type="button"
                       onClick={() => {
-                        const res = livoStore.toggleRoomModerator(liveRoom.id, newModUidInput, currentUser.uid);
+                        const res = livoStore.toggleRoomModerator(liveRoom.id, newModUidInput, currentUser?.uid);
                         showToast(res.message);
                         if (res.success) setNewModUidInput('');
                       }}
@@ -974,7 +974,7 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
                                 key={s.occupiedByUid}
                                 type="button"
                                 onClick={() => {
-                                  const res = livoStore.toggleRoomModerator(liveRoom.id, s.occupiedByUid!, currentUser.uid);
+                                  const res = livoStore.toggleRoomModerator(liveRoom.id, s.occupiedByUid!, currentUser?.uid);
                                   showToast(res.message);
                                 }}
                                 className={`px-2.5 py-1 rounded-full text-[10px] font-bold flex items-center gap-1 border ${
@@ -1010,7 +1010,7 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
                             <button
                               type="button"
                               onClick={() => {
-                                const res = livoStore.toggleRoomModerator(liveRoom.id, modUid, currentUser.uid);
+                                const res = livoStore.toggleRoomModerator(liveRoom.id, modUid, currentUser?.uid);
                                 showToast(res.message);
                               }}
                               className="text-[10px] text-red-400 font-bold hover:underline"
@@ -1045,7 +1045,7 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
                         <button
                           type="button"
                           onClick={() => {
-                            const res = livoStore.unbanUserFromRoom(liveRoom.id, bUid, currentUser.uid);
+                            const res = livoStore.unbanUserFromRoom(liveRoom.id, bUid, currentUser?.uid);
                             showToast(res.message);
                           }}
                           className="px-2.5 py-1 rounded-lg bg-emerald-600 text-white font-bold text-[10px]"
@@ -1170,7 +1170,7 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
                     {isTopOwner && moderationSeat.occupiedByUid !== liveRoom.ownerUid && (
                       <button
                         onClick={() => {
-                          const res = livoStore.toggleRoomModerator(liveRoom.id, moderationSeat.occupiedByUid!, currentUser.uid);
+                          const res = livoStore.toggleRoomModerator(liveRoom.id, moderationSeat.occupiedByUid!, currentUser?.uid);
                           setModerationSeat(null);
                           showToast(res.message);
                         }}
@@ -1218,7 +1218,7 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] font-digits text-amber-300 font-bold">
-                    {currentUser ? `${currentUser.coins.toLocaleString()} 🪙` : 'سجّل الدخول للإرسال'}
+                    {currentUser ? `${currentUser?.coins.toLocaleString()} 🪙` : 'سجّل الدخول للإرسال'}
                   </span>
                   <button
                     onClick={() => setShowGiftsTray(false)}

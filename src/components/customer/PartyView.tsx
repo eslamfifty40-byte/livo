@@ -56,7 +56,7 @@ export const PartyView: React.FC<PartyViewProps> = ({ currentUser, onOpenRecharg
   };
 
   const isOwnerUser = Boolean(
-    currentUser && (currentUser.role === 'owner' || livoStore.isOwnerEmail(currentUser.email))
+    currentUser && (currentUser?.role === 'owner' || livoStore.isOwnerEmail(currentUser?.email))
   );
 
   // Official Room unified with 'room-official-livo'
@@ -69,7 +69,7 @@ export const PartyView: React.FC<PartyViewProps> = ({ currentUser, onOpenRecharg
     if (!isOfficialOpen) {
       if (isOwnerUser && currentUser) {
         livoStore.setOfficialRoomStatus('open');
-        livoStore.joinRoomSeat(officialRoom.id, 0, currentUser.uid);
+        livoStore.joinRoomSeat(officialRoom.id, 0, currentUser?.uid);
         setSelectedVoiceRoomId(officialRoom.id);
         return;
       }
@@ -78,9 +78,9 @@ export const PartyView: React.FC<PartyViewProps> = ({ currentUser, onOpenRecharg
     }
 
     if (isOwnerUser && currentUser) {
-      const alreadySeated = officialRoom.seats.some(s => s.occupiedByUid === currentUser.uid);
+      const alreadySeated = officialRoom.seats.some(s => s.occupiedByUid === currentUser?.uid);
       if (!alreadySeated) {
-        livoStore.joinRoomSeat(officialRoom.id, 0, currentUser.uid);
+        livoStore.joinRoomSeat(officialRoom.id, 0, currentUser?.uid);
       }
     }
     setSelectedVoiceRoomId(officialRoom.id);
@@ -104,10 +104,10 @@ export const PartyView: React.FC<PartyViewProps> = ({ currentUser, onOpenRecharg
       return;
     }
     const created = livoStore.createRoom({
-      title: newRoomTitle.trim() || (newRoomType === 'live' ? `بث ${currentUser.displayName} المباشر` : `غرفة ${currentUser.displayName}`),
+      title: newRoomTitle.trim() || (newRoomType === 'live' ? `بث ${currentUser?.displayName} المباشر` : `غرفة ${currentUser?.displayName}`),
       category: newRoomCategory,
       roomType: newRoomType,
-      ownerUid: currentUser.uid,
+      ownerUid: currentUser?.uid,
       seatCount: newRoomSeatCount
     });
     setShowCreateModal(false);
@@ -129,7 +129,7 @@ export const PartyView: React.FC<PartyViewProps> = ({ currentUser, onOpenRecharg
       if (!r.title.toLowerCase().includes(q) && !r.ownerName.toLowerCase().includes(q)) return false;
     }
     if (activeSubTab === 'follow') {
-      return Boolean(currentUser && (currentUser.followingUids || []).includes(r.ownerUid));
+      return Boolean(currentUser && (currentUser?.followingUids || []).includes(r.ownerUid));
     }
     if (activeSubTab === 'live') {
       return r.roomType === 'live';
@@ -575,10 +575,10 @@ export const PartyView: React.FC<PartyViewProps> = ({ currentUser, onOpenRecharg
             <LiveStreamView
               currentUser={currentUser}
               room={activeLiveRoom}
-              isHost={activeLiveRoom.ownerUid === currentUser.uid}
+              isHost={activeLiveRoom.ownerUid === currentUser?.uid}
               onOpenRecharge={onOpenRecharge}
               onClose={() => {
-                if (activeLiveRoom.ownerUid === currentUser.uid) {
+                if (activeLiveRoom.ownerUid === currentUser?.uid) {
                   livoStore.closeAndRemoveRoom(activeLiveRoom.id);
                 }
                 setActiveLiveRoomId(null);
