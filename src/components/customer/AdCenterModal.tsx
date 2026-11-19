@@ -32,7 +32,7 @@ export const AdCenterModal: React.FC<AdCenterModalProps> = ({ isOpen, onClose, c
 
   if (!isOpen) return null;
 
-  const isOwner = currentUser.role === 'owner' || currentUser.email === 'livo.admin@gmail.com';
+  const isOwner = currentUser.role === 'owner' || livoStore.isOwnerEmail(currentUser.email);
 
   const handleSaveAd = (e: React.FormEvent) => {
     e.preventDefault();

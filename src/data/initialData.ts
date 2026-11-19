@@ -229,3 +229,37 @@ export const INITIAL_ROOMS: VoiceRoom[] = [
 // Zero fake seeded videos — only real user uploads
 export const INITIAL_VIDEOS: VideoPost[] = [];
 
+export interface RoyalFramePreset {
+  id: string;
+  name: string;
+  url: string;
+  defaultGlow: string;
+  recommendedAnimated: boolean;
+}
+
+export const ROYAL_FRAME_PRESETS: RoyalFramePreset[] = [
+  { id: 'rf-01', name: 'أزرق أساسي', url: '/assets/frames/01_basic_blue.png', defaultGlow: 'rgba(59, 130, 246, 0.85)', recommendedAnimated: false },
+  { id: 'rf-02', name: 'أخضر أساسي', url: '/assets/frames/02_basic_green.png', defaultGlow: 'rgba(16, 185, 129, 0.85)', recommendedAnimated: false },
+  { id: 'rf-03', name: 'فضي أزرق متقدم', url: '/assets/frames/03_silver_blue.png', defaultGlow: 'rgba(56, 189, 248, 0.9)', recommendedAnimated: true },
+  { id: 'rf-04', name: 'الأجنحة الفضية', url: '/assets/frames/04_silver_wings.png', defaultGlow: 'rgba(148, 163, 184, 0.95)', recommendedAnimated: true },
+  { id: 'rf-05', name: 'الأجنحة الذهبية', url: '/assets/frames/05_gold_wings.png', defaultGlow: 'rgba(245, 158, 11, 0.95)', recommendedAnimated: true },
+  { id: 'rf-07', name: 'الألماس الأزرق', url: '/assets/frames/07_diamond_blue.png', defaultGlow: 'rgba(37, 99, 235, 0.95)', recommendedAnimated: true },
+  { id: 'rf-08', name: 'الزمرد الملكي', url: '/assets/frames/08_emerald.png', defaultGlow: 'rgba(16, 185, 129, 0.95)', recommendedAnimated: true },
+  { id: 'rf-10', name: 'الكريستال البنفسجي', url: '/assets/frames/10_crystal_purple.png', defaultGlow: 'rgba(168, 85, 247, 0.95)', recommendedAnimated: true },
+  { id: 'rf-12', name: 'VIP الذهبي', url: '/assets/frames/12_vip_gold.png', defaultGlow: 'rgba(250, 204, 21, 0.98)', recommendedAnimated: true },
+  { id: 'rf-13', name: 'الملكي الليموني', url: '/assets/frames/13_royal_lime.png', defaultGlow: 'rgba(132, 204, 22, 0.95)', recommendedAnimated: true },
+  { id: 'rf-14', name: 'تاج الفخامة 38', url: '/assets/frames/14_frame_38.png', defaultGlow: 'rgba(245, 158, 11, 0.92)', recommendedAnimated: true },
+  { id: 'rf-15', name: 'عرش الأسد الزمردي', url: '/assets/frames/15_royal_lion_emerald.png', defaultGlow: 'rgba(20, 184, 166, 0.95)', recommendedAnimated: true },
+  { id: 'rf-16', name: 'عرش الأسد القرمزي', url: '/assets/frames/16_royal_lion_crimson.png', defaultGlow: 'rgba(239, 68, 68, 0.95)', recommendedAnimated: true },
+  { id: 'rf-17', name: 'عرش الأسد الأرجواني', url: '/assets/frames/17_royal_lion_purple.png', defaultGlow: 'rgba(168, 85, 247, 0.95)', recommendedAnimated: true }
+];
+
+export const GLOW_COLOR_PRESETS = [
+  { id: 'none', label: 'بدون توهج', value: 'none', swatch: '#9ca3af' },
+  { id: 'rgba(250, 204, 21, 0.95)', label: 'ذهبي مشع', value: 'rgba(250, 204, 21, 0.95)', swatch: '#facc15' },
+  { id: 'rgba(56, 189, 248, 0.95)', label: 'سماوي نيون', value: 'rgba(56, 189, 248, 0.95)', swatch: '#38bdf8' },
+  { id: 'rgba(239, 68, 68, 0.95)', label: 'أحمر ملكي', value: 'rgba(239, 68, 68, 0.95)', swatch: '#ef4444' },
+  { id: 'rgba(168, 85, 247, 0.95)', label: 'أرجواني فاخر', value: 'rgba(168, 85, 247, 0.95)', swatch: '#a855f7' },
+  { id: 'rgba(16, 185, 129, 0.95)', label: 'زمردي متلألئ', value: 'rgba(16, 185, 129, 0.95)', swatch: '#10b981' }
+];
+

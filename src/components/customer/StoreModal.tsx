@@ -168,7 +168,15 @@ export const StoreModal: React.FC<StoreModalProps> = ({
                     }`}
                   >
                     <div className="flex items-start gap-3 mb-3">
-                      <span className="text-4xl filter drop-shadow-md">{item.image}</span>
+                      {item.imageUrl ? (
+                        <img
+                          src={item.imageUrl}
+                          alt={item.name}
+                          className="w-11 h-11 object-contain shrink-0 filter drop-shadow-md"
+                        />
+                      ) : (
+                        <span className="text-4xl filter drop-shadow-md">{item.image}</span>
+                      )}
                       <div className="flex-1">
                         <div className="flex items-center gap-1.5">
                           <span className="font-bold text-xs text-white">{item.name}</span>

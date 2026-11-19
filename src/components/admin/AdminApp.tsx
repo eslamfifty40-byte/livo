@@ -45,7 +45,12 @@ import {
   QrCode,
   Gift,
   Copy,
-  Edit2
+  Edit2,
+  Crown,
+  Upload,
+  Wand2,
+  KeyRound,
+  Zap
 } from 'lucide-react';
 import {
   UserProfile,
@@ -63,11 +68,16 @@ import {
   StoreItem,
   DirectMessage,
   CoinPackage,
-  SupervisorRecord
+  SupervisorRecord,
+  VoiceRoom
 } from '../../types';
 import { livoStore } from '../../services/livoStore';
 import { firebaseService } from '../../services/firebase';
 import { LivoAdminAppIcon } from '../../assets/appIcons';
+import { AvatarWithFrame } from '../common/AvatarWithFrame';
+import { LivoVerifiedBadge, VerifiedBadgeColor, VerifiedBadgeShape } from '../common/LivoVerifiedBadge';
+import { ROYAL_FRAME_PRESETS, GLOW_COLOR_PRESETS } from '../../data/initialData';
+import { removeImageBackgroundToPng } from '../../utils/imageTransparency';
 
 interface AdminAppProps {
   onLogoutAdmin?: () => void;
@@ -91,15 +101,17 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
   const [adminUsername, setAdminUsername] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
   const [authError, setAuthError] = useState('');
+  const [authInfo, setAuthInfo] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   // Active Admin Section Navigation
   const [activeSection, setActiveSection] = useState<
-    'dashboard' | 'direct_support_hub' | 'inbox' | 'ads' | 'recharges' | 'payment_settings' | 'recharge_codes' | 'manual_coins' | 'pricing' | 'users' | 'agencies' | 'verifications' | 'withdrawals' | 'store_items' | 'official_room' | 'bans' | 'supervisors' | 'financial_logs'
+    'dashboard' | 'direct_support_hub' | 'inbox' | 'ads' | 'recharges' | 'payment_settings' | 'recharge_codes' | 'manual_coins' | 'pricing' | 'users' | 'cosmetics_studio' | 'agencies' | 'verifications' | 'withdrawals' | 'store_items' | 'official_room' | 'bans' | 'supervisors' | 'financial_logs'
   >('dashboard');
 
   // Local state synced directly with livoStore & Firebase
   const [users, setUsers] = useState<UserProfile[]>(livoStore.getUsers());
+  const [rooms, setRooms] = useState<VoiceRoom[]>(livoStore.getRooms());
   const [recharges, setRecharges] = useState<RechargeRequest[]>(livoStore.getRechargeRequests());
   const [audits, setAudits] = useState<CoinAuditRecord[]>(livoStore.getCoinAudits());
   const [agencies, setAgencies] = useState<AgencyApplication[]>(livoStore.getAgencies());
@@ -114,6 +126,9 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
   const [storeItemsList, setStoreItemsList] = useState<StoreItem[]>(livoStore.getStoreItems());
   const [coinPackagesList, setCoinPackagesList] = useState<CoinPackage[]>(livoStore.getCoinPackages());
   const [allMessages, setAllMessages] = useState<DirectMessage[]>(livoStore.getMessages());
+
+  // Users directory search
+  const [usersDirectoryQuery, setUsersDirectoryQuery] = useState('');
 
   // Direct Support Hub State
   const [supportSearchQuery, setSupportSearchQuery] = useState('');
@@ -150,7 +165,32 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
   const [newGiftName, setNewGiftName] = useState('');
   const [newGiftPrice, setNewGiftPrice] = useState('');
   const [newGiftIcon, setNewGiftIcon] = useState('🎁');
+  const [newGiftImageUrl, setNewGiftImageUrl] = useState('');
+  const [isProcessingGiftImage, setIsProcessingGiftImage] = useState(false);
   const [newGiftAnimation, setNewGiftAnimation] = useState<GiftItem['animationType']>('heart');
+
+  // Live Gift Blaster (ضرب وإرسال الهدايا للغرف)
+  const [blastRoomId, setBlastRoomId] = useState('');
+  const [blastGiftId, setBlastGiftId] = useState('');
+  const [blastCount, setBlastCount] = useState<number>(5);
+  const [blastRecipientUid, setBlastRecipientUid] = useState('');
+  const [blastSenderName, setBlastSenderName] = useState('إدارة LIVO الملكية');
+
+  // VIP Cosmetics Studio (حصري للإدارة فقط)
+  const [cosmeticSearchQuery, setCosmeticSearchQuery] = useState('');
+  const [cosmeticTargetUser, setCosmeticTargetUser] = useState<UserProfile | null>(null);
+  const [cosIsVerified, setCosIsVerified] = useState(false);
+  const [cosBadgeColor, setCosBadgeColor] = useState<VerifiedBadgeColor>('blue');
+  const [cosBadgeShape, setCosBadgeShape] = useState<VerifiedBadgeShape>('rosette');
+  const [cosBadgeGlow, setCosBadgeGlow] = useState(true);
+  const [cosNameGlow, setCosNameGlow] = useState<NonNullable<UserProfile['nameGlowColor']>>('none');
+  const [cosFrameUrl, setCosFrameUrl] = useState('');
+  const [cosFrameGlow, setCosFrameGlow] = useState('rgba(250, 204, 21, 0.95)');
+  const [cosFrameAnimated, setCosFrameAnimated] = useState(true);
+  const [cosCustomIconUrl, setCosCustomIconUrl] = useState('');
+  const [cosCustomIconGlow, setCosCustomIconGlow] = useState('rgba(250, 204, 21, 0.95)');
+  const [cosCustomIconAnimated, setCosCustomIconAnimated] = useState(true);
+  const [isProcessingCosmeticImg, setIsProcessingCosmeticImg] = useState(false);
 
   // Verifications & Withdrawals Modals
   const [zoomedVerificationReceiptUrl, setZoomedVerificationReceiptUrl] = useState<string | null>(null);
@@ -255,6 +295,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
 
     const unsubscribe = livoStore.subscribe(() => {
       setUsers([...livoStore.getGenuineUsers()]);
+      setRooms([...livoStore.getRooms()]);
       setRecharges([...livoStore.getRechargeRequests()]);
       setAudits([...livoStore.getCoinAudits()]);
       setAgencies([...livoStore.getAgencies()]);
@@ -355,15 +396,48 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
     if (onLogoutAdmin) onLogoutAdmin();
   };
 
+  const handleAdminPasswordReset = async () => {
+    setAuthError('');
+    setAuthInfo('');
+    const cleanEmail = adminUsername.trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      setAuthError('اكتب بريدك الإلكتروني أولاً في الخانة ثم اضغط على استعادة كلمة المرور.');
+      return;
+    }
+    const res = await firebaseService.resetCustomerPassword(cleanEmail);
+    if (res.success) {
+      setAuthInfo(res.message);
+    } else {
+      setAuthError(res.message);
+    }
+  };
+
+  const selectUserForCosmetics = (target: UserProfile) => {
+    setCosmeticTargetUser(target);
+    setCosIsVerified(Boolean(target.isVerified));
+    setCosBadgeColor((target.verifiedBadgeColor as VerifiedBadgeColor) || 'blue');
+    setCosBadgeShape((target.verifiedBadgeShape as VerifiedBadgeShape) || 'rosette');
+    setCosBadgeGlow(target.verifiedBadgeGlow !== false);
+    setCosNameGlow(target.nameGlowColor || 'none');
+    setCosFrameUrl(target.equippedFrameUrl || '');
+    setCosFrameGlow(target.frameGlowColor || 'rgba(250, 204, 21, 0.95)');
+    setCosFrameAnimated(Boolean(target.frameAnimated));
+    setCosCustomIconUrl(target.customIconUrl || '');
+    setCosCustomIconGlow(target.customIconGlow || 'rgba(250, 204, 21, 0.95)');
+    setCosCustomIconAnimated(target.customIconAnimated !== false);
+  };
+
   // Recharges Handlers
+  const actorEmail = activeAdminEmail || 'livo.admin@gmail.com';
+
   const handleApproveRecharge = (reqId: string) => {
-    const res = livoStore.approveRechargeRequest(reqId, 'livo.admin@gmail.com');
+    const res = livoStore.approveRechargeRequest(reqId, actorEmail);
     showToast(res.message);
   };
 
   const handleConfirmRejectRecharge = () => {
     if (!rejectModalReqId) return;
-    const res = livoStore.rejectRechargeRequest(rejectModalReqId, rejectReason, 'livo.admin@gmail.com');
+    const res = livoStore.rejectRechargeRequest(rejectModalReqId, rejectReason, actorEmail);
     setRejectModalReqId(null);
     setRejectReason('');
     showToast(res.message);
@@ -383,7 +457,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
       coinActionType,
       parsedAmount,
       coinReasonInput,
-      'livo.admin@gmail.com'
+      actorEmail
     );
 
     setCoinActionFeedback(res);
@@ -413,7 +487,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
       duration: banDuration,
       durationDays: banDuration === 'temporary' ? parseInt(banDays, 10) || 7 : undefined,
       reason: banReason.trim(),
-      bannedBy: 'livo.admin@gmail.com'
+      bannedBy: actorEmail
     });
 
     showToast(res.message);
@@ -426,7 +500,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
 
   const handleExecuteUnban = () => {
     if (!unbanModalRecord) return;
-    const res = livoStore.unbanUser(unbanModalRecord.id, unbanReasonText, 'livo.admin@gmail.com');
+    const res = livoStore.unbanUser(unbanModalRecord.id, unbanReasonText, actorEmail);
     showToast(res.message);
     setUnbanModalRecord(null);
     setUnbanReasonText('');
@@ -442,7 +516,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
       selectedTicket.id,
       ticketReplyText,
       ticketReplyStatus,
-      'livo.admin@gmail.com'
+      actorEmail
     );
     if (success) {
       showToast('تم إرسال الرد للمستخدم وتحديث حالة التذكرة بنجاح ✓');
@@ -470,7 +544,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
       placement: newAdPlacement,
       startDate: newAdStartDate,
       endDate: newAdEndDate,
-      createdBy: 'livo.admin@gmail.com'
+      createdBy: actorEmail
     });
 
     showToast('تم نشر وتفعيل الإعلان في منظومة LIVO بنجاح ✓');
@@ -651,7 +725,26 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
     showToast('تم حذف كود الشحن بنجاح');
   };
 
-  // Gifts Handlers (Add + Edit + Toggle Active + Delete)
+  // Gifts Handlers (Add + Edit + PNG upload with BG removal + Toggle Active + Delete)
+  const handleUploadGiftImage = async (file: File) => {
+    setIsProcessingGiftImage(true);
+    try {
+      const transparentPng = await removeImageBackgroundToPng(file, { maxSize: 320, tolerance: 34 });
+      let finalUrl = transparentPng;
+      try {
+        finalUrl = await firebaseService.uploadImage(`gifts/gift_${Date.now()}.png`, transparentPng);
+      } catch {
+        finalUrl = transparentPng;
+      }
+      setNewGiftImageUrl(finalUrl);
+      showToast('تم رفع صورة الهدية وتفريغ خلفيتها إلى PNG شفاف ✓');
+    } catch {
+      showToast('تعذر معالجة صورة الهدية');
+    } finally {
+      setIsProcessingGiftImage(false);
+    }
+  };
+
   const handleSaveGift = (e: React.FormEvent) => {
     e.preventDefault();
     const parsedPrice = parseInt(newGiftPrice, 10);
@@ -665,6 +758,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
       name: newGiftName.trim(),
       coins: parsedPrice,
       icon: newGiftIcon.trim() || '🎁',
+      imageUrl: newGiftImageUrl.trim() || undefined,
       category: existingGift?.category || 'popular',
       animationType: newGiftAnimation,
       durationMs: existingGift?.durationMs || 3500,
@@ -678,6 +772,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
     setNewGiftName('');
     setNewGiftPrice('');
     setNewGiftIcon('🎁');
+    setNewGiftImageUrl('');
     setNewGiftAnimation('heart');
   };
 
@@ -698,7 +793,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
   // Verifications Handlers
   const handleConfirmRejectVerification = () => {
     if (!rejectVerificationId) return;
-    livoStore.reviewVerificationRequest(rejectVerificationId, 'rejected', 'livo.admin@gmail.com');
+    livoStore.reviewVerificationRequest(rejectVerificationId, 'rejected', actorEmail);
     showToast('تم رفض طلب التوثيق وإشعار المستخدم');
     setRejectVerificationId(null);
     setRejectVerificationReason('');
@@ -707,73 +802,90 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
   // Withdrawals Handlers
   const handleConfirmRejectWithdrawal = () => {
     if (!rejectWithdrawalId) return;
-    livoStore.reviewWithdrawalRequest(rejectWithdrawalId, 'rejected', undefined, 'livo.admin@gmail.com');
+    livoStore.reviewWithdrawalRequest(rejectWithdrawalId, 'rejected', undefined, actorEmail);
     showToast('تم رفض طلب السحب واسترجاع الكوينز لحساب المستخدم تلقائياً');
     setRejectWithdrawalId(null);
     setRejectWithdrawalReason('');
   };
 
-  // Login Screen
+  // Login Screen (Unified Bright LIVO Brand Theme)
   if (!isAdminLoggedIn) {
     return (
-      <div className="w-full max-w-md mx-auto my-8 bg-[#120824] rounded-3xl border border-purple-800/80 p-6 text-white shadow-2xl">
+      <div className="w-full max-w-md mx-auto my-8 bg-white rounded-3xl border border-gray-200 p-6 text-gray-900 shadow-xl light-surface">
         <div className="text-center space-y-3 mb-6">
           <div className="flex justify-center">
             <LivoAdminAppIcon size={68} />
           </div>
-          <h2 className="text-xl font-black text-white">تسجيل دخول تطبيق الإدارة (LIVO Admin)</h2>
-          <p className="text-xs text-purple-300">
-            التحقق المشفر من صلاحيات المالك عبر Firebase Authentication
+          <h2 className="text-xl font-black text-gray-900">تسجيل دخول إدارة LIVO</h2>
+          <p className="text-xs text-gray-500 font-medium">
+            التحقق الموثق لحسابات المالك والمشرفين عبر Firebase
           </p>
         </div>
 
         <form onSubmit={handleAdminLogin} className="space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-purple-200 mb-1">البريد الإلكتروني للمالك:</label>
+            <label className="block text-xs font-bold text-gray-700 mb-1">البريد الإلكتروني للإدارة:</label>
             <input
               type="email"
               value={adminUsername}
               onChange={(e) => setAdminUsername(e.target.value)}
-              placeholder="اكتب البريد الإلكتروني للمالك"
-              className="w-full bg-[#170b2c] border border-purple-800/60 rounded-xl px-3 py-2.5 text-xs text-white placeholder-purple-400/50 outline-none focus:border-amber-400 font-digits"
+              placeholder="livo.admin@gmail.com أو eslamfifty11@gmail.com"
+              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs text-gray-900 placeholder-gray-400 outline-none focus:border-[#FFE600] focus:ring-2 focus:ring-yellow-200 font-digits"
               required
             />
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-purple-200 mb-1">كلمة المرور:</label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-xs font-bold text-gray-700">كلمة المرور:</label>
+              <button
+                type="button"
+                onClick={handleAdminPasswordReset}
+                className="text-[11px] font-bold text-amber-700 hover:text-amber-800 flex items-center gap-1"
+              >
+                <KeyRound className="w-3 h-3" />
+                <span>نسيت كلمة المرور؟</span>
+              </button>
+            </div>
             <input
               type="password"
               value={adminPassword}
               onChange={(e) => setAdminPassword(e.target.value)}
               placeholder="اكتب كلمة المرور"
-              className="w-full bg-[#170b2c] border border-purple-800/60 rounded-xl px-3 py-2.5 text-xs text-white placeholder-purple-400/50 outline-none focus:border-amber-400 font-digits"
+              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs text-gray-900 placeholder-gray-400 outline-none focus:border-[#FFE600] focus:ring-2 focus:ring-yellow-200 font-digits"
               required
             />
           </div>
 
           {authError && (
-            <div className="bg-red-500/20 border border-red-500/40 text-red-300 p-2.5 rounded-xl text-xs flex items-center gap-1.5">
+            <div className="bg-red-50 border border-red-200 text-red-700 p-2.5 rounded-xl text-xs flex items-center gap-1.5 font-medium">
               <AlertTriangle className="w-4 h-4 shrink-0" />
               <span>{authError}</span>
+            </div>
+          )}
+
+          {authInfo && (
+            <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 p-2.5 rounded-xl text-xs flex items-center gap-1.5 font-bold">
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
+              <span>{authInfo}</span>
             </div>
           )}
 
           <button
             type="submit"
             disabled={isLoggingIn}
-            className="w-full py-3 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 text-black font-extrabold text-sm rounded-xl shadow-lg transition-all flex items-center justify-center gap-2"
+            className="w-full py-3 bg-[#FFE600] hover:bg-yellow-400 text-black font-black text-sm rounded-xl shadow-md transition-all flex items-center justify-center gap-2"
           >
             {isLoggingIn ? <RefreshCw className="w-4 h-4 animate-spin" /> : null}
             <span>تأكيد الدخول الآمن للوحة الإدارة</span>
           </button>
 
-          <div className="pt-2 border-t border-purple-800/40 space-y-2">
+          <div className="pt-3 border-t border-gray-100 space-y-2">
             <button
               type="button"
               onClick={handleGoogleLogin}
               disabled={isLoggingIn}
-              className="w-full py-2.5 bg-white hover:bg-slate-100 text-gray-900 font-bold text-xs rounded-xl shadow transition-all flex items-center justify-center gap-2"
+              className="w-full py-2.5 bg-gray-900 hover:bg-black text-white font-bold text-xs rounded-xl shadow transition-all flex items-center justify-center gap-2"
             >
               <svg className="w-4 h-4" viewBox="0 0 24 24">
                 <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
@@ -790,29 +902,29 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
   }
 
   return (
-    <div className="w-full max-w-6xl mx-auto bg-[#0d051a] text-white rounded-3xl border border-purple-800/60 shadow-2xl overflow-hidden flex flex-col min-h-[720px] relative">
+    <div className="w-full max-w-6xl mx-auto bg-[#FAFAFA] text-gray-900 rounded-3xl border border-gray-200 shadow-xl overflow-hidden flex flex-col min-h-[720px] relative light-surface">
       
       {/* Toast Feedback */}
       {toastMessage && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-[#FFE600] text-black px-4 py-2 rounded-full text-xs font-black shadow-2xl flex items-center gap-1.5 animate-in fade-in slide-in-from-top-2">
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-[#FFE600] text-black px-4 py-2 rounded-full text-xs font-black shadow-2xl border border-yellow-300 flex items-center gap-1.5 animate-in fade-in slide-in-from-top-2">
           <CheckCircle2 className="w-4 h-4" />
           <span>{toastMessage}</span>
         </div>
       )}
 
-      {/* Admin Top Header (STRICT: NO EMAIL DISPLAYED HERE per item 2) */}
-      <div className="bg-[#170b2c] border-b border-purple-800/50 px-4 sm:px-6 py-3 flex items-center justify-between">
+      {/* Admin Top Header */}
+      <div className="bg-white border-b border-gray-200 px-4 sm:px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <LivoAdminAppIcon size={34} />
+          <LivoAdminAppIcon size={36} />
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="font-extrabold text-sm sm:text-base text-white">منظومة LIVO — لوحة المالك الرسمية</h1>
-              <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-md font-bold">
+              <h1 className="font-black text-sm sm:text-base text-gray-900">منظومة LIVO — لوحة الإدارة الرسمية</h1>
+              <span className="text-[10px] bg-[#FFE600] text-black px-2 py-0.5 rounded-md font-black">
                 Owner Authority Active
               </span>
             </div>
-            <p className="text-[11px] text-purple-300">
-              قاعدة بيانات موحدة متصلة بـ Firebase ومزامنة لحظية
+            <p className="text-[11px] text-gray-500">
+              متصلة بقاعدة بيانات LIVO الموحدة والمزامنة اللحظية
             </p>
           </div>
         </div>
@@ -820,7 +932,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
         <div className="flex items-center gap-3">
           <button
             onClick={handleLogout}
-            className="flex items-center gap-1.5 bg-red-950/60 hover:bg-red-900/60 text-red-300 border border-red-800/50 text-xs px-3 py-1.5 rounded-xl transition-all font-bold"
+            className="flex items-center gap-1.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 text-xs px-3 py-1.5 rounded-xl transition-all font-bold"
           >
             <LogOut className="w-3.5 h-3.5" />
             <span>تسجيل الخروج</span>
@@ -832,12 +944,12 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
       <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
         
         {/* Navigation Sidebar */}
-        <div className="w-full md:w-64 bg-[#120824] border-b md:border-b-0 md:border-l border-purple-800/40 p-2.5 overflow-x-auto md:overflow-y-auto flex md:flex-col gap-1 shrink-0">
+        <div className="w-full md:w-64 bg-white border-b md:border-b-0 md:border-l border-gray-200 p-2.5 overflow-x-auto md:overflow-y-auto flex md:flex-col gap-1 shrink-0">
           
           <button
             onClick={() => setActiveSection('dashboard')}
             className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'dashboard' ? 'bg-amber-500 text-black shadow-md' : 'text-purple-300 hover:text-white hover:bg-purple-900/30'
+              activeSection === 'dashboard' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
             }`}
           >
             <Shield className="w-4 h-4" />
@@ -847,11 +959,11 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
           <button
             onClick={() => setActiveSection('direct_support_hub')}
             className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'direct_support_hub' ? 'bg-amber-500 text-black shadow-md' : 'text-purple-300 hover:text-white hover:bg-purple-900/30'
+              activeSection === 'direct_support_hub' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
             }`}
           >
             <div className="flex items-center gap-2">
-              <MessageSquare className="w-4 h-4 text-emerald-400" />
+              <MessageSquare className="w-4 h-4 text-emerald-600" />
               <span>مركز الإدارة والدعم المباشر</span>
             </div>
             {unreadSupportCount > 0 && (
@@ -864,11 +976,11 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
           <button
             onClick={() => setActiveSection('inbox')}
             className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'inbox' ? 'bg-amber-500 text-black shadow-md' : 'text-purple-300 hover:text-white hover:bg-purple-900/30'
+              activeSection === 'inbox' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
             }`}
           >
             <div className="flex items-center gap-2">
-              <Inbox className="w-4 h-4 text-amber-400" />
+              <Inbox className="w-4 h-4 text-amber-600" />
               <span>صندوق الوارد والشكاوى</span>
             </div>
             {pendingTicketsCount > 0 && (
@@ -881,15 +993,15 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
           <button
             onClick={() => setActiveSection('ads')}
             className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'ads' ? 'bg-amber-500 text-black shadow-md' : 'text-purple-300 hover:text-white hover:bg-purple-900/30'
+              activeSection === 'ads' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
             }`}
           >
             <div className="flex items-center gap-2">
-              <Megaphone className="w-4 h-4 text-yellow-300" />
+              <Megaphone className="w-4 h-4 text-amber-600" />
               <span>مركز إدارة الإعلانات</span>
             </div>
             {activeAdsCount > 0 && (
-              <span className="w-5 h-5 rounded-full bg-amber-500/30 text-amber-300 border border-amber-400/50 font-digits text-[10px] flex items-center justify-center font-black">
+              <span className="w-5 h-5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 font-digits text-[10px] flex items-center justify-center font-black">
                 {activeAdsCount}
               </span>
             )}
@@ -898,7 +1010,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
           <button
             onClick={() => setActiveSection('recharges')}
             className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'recharges' ? 'bg-amber-500 text-black shadow-md' : 'text-purple-300 hover:text-white hover:bg-purple-900/30'
+              activeSection === 'recharges' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
             }`}
           >
             <div className="flex items-center gap-2">
@@ -915,61 +1027,71 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
           <button
             onClick={() => setActiveSection('payment_settings')}
             className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'payment_settings' ? 'bg-amber-500 text-black shadow-md' : 'text-purple-300 hover:text-white hover:bg-purple-900/30'
+              activeSection === 'payment_settings' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
             }`}
           >
-            <Wallet className="w-4 h-4 text-amber-400" />
+            <Wallet className="w-4 h-4 text-amber-600" />
             <span>إعدادات الشحن ووسائل الدفع</span>
           </button>
 
           <button
             onClick={() => setActiveSection('recharge_codes')}
             className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'recharge_codes' ? 'bg-amber-500 text-black shadow-md' : 'text-purple-300 hover:text-white hover:bg-purple-900/30'
+              activeSection === 'recharge_codes' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
             }`}
           >
-            <QrCode className="w-4 h-4 text-pink-400" />
+            <QrCode className="w-4 h-4 text-pink-600" />
             <span>أكواد الشحن والقسائم ({rechargeCodes.length})</span>
           </button>
 
           <button
             onClick={() => setActiveSection('manual_coins')}
             className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'manual_coins' ? 'bg-amber-500 text-black shadow-md' : 'text-purple-300 hover:text-white hover:bg-purple-900/30'
+              activeSection === 'manual_coins' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
             }`}
           >
-            <Coins className="w-4 h-4" />
+            <Coins className="w-4 h-4 text-amber-600" />
             <span>شحن وتعديل رصيد UID</span>
           </button>
 
           <button
             onClick={() => setActiveSection('pricing')}
             className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'pricing' ? 'bg-amber-500 text-black shadow-md' : 'text-purple-300 hover:text-white hover:bg-purple-900/30'
+              activeSection === 'pricing' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
             }`}
           >
-            <BadgePercent className="w-4 h-4" />
+            <BadgePercent className="w-4 h-4 text-emerald-600" />
             <span>أسعار وباقات الكوينز</span>
           </button>
 
           <button
             onClick={() => setActiveSection('users')}
             className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'users' ? 'bg-amber-500 text-black shadow-md' : 'text-purple-300 hover:text-white hover:bg-purple-900/30'
+              activeSection === 'users' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
             }`}
           >
-            <Users className="w-4 h-4" />
+            <Users className="w-4 h-4 text-blue-600" />
             <span>الحسابات والمستخدمين ({users.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveSection('cosmetics_studio')}
+            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+              activeSection === 'cosmetics_studio' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+            }`}
+          >
+            <Crown className="w-4 h-4 text-amber-600" />
+            <span>استوديو الإطارات والتوثيق VIP</span>
           </button>
 
           <button
             onClick={() => setActiveSection('agencies')}
             className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'agencies' ? 'bg-amber-500 text-black shadow-md' : 'text-purple-300 hover:text-white hover:bg-purple-900/30'
+              activeSection === 'agencies' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
             }`}
           >
             <div className="flex items-center gap-2">
-              <Briefcase className="w-4 h-4" />
+              <Briefcase className="w-4 h-4 text-purple-600" />
               <span>الوكالات والوكلاء</span>
             </div>
             {approvedAgenciesCount > 0 && (
@@ -982,12 +1104,12 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
           <button
             onClick={() => setActiveSection('verifications')}
             className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'verifications' ? 'bg-amber-500 text-black shadow-md' : 'text-purple-300 hover:text-white hover:bg-purple-900/30'
+              activeSection === 'verifications' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
             }`}
           >
             <div className="flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-blue-400" />
-              <span>التوثيق الأزرق</span>
+              <CheckCircle2 className="w-4 h-4 text-blue-500" />
+              <span>التوثيق والشارات</span>
             </div>
             {verifications.filter(v => v.status === 'pending').length > 0 && (
               <span className="w-5 h-5 rounded-full bg-blue-500 text-white font-digits text-[10px] flex items-center justify-center">
@@ -999,11 +1121,11 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
           <button
             onClick={() => setActiveSection('withdrawals')}
             className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'withdrawals' ? 'bg-amber-500 text-black shadow-md' : 'text-purple-300 hover:text-white hover:bg-purple-900/30'
+              activeSection === 'withdrawals' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
             }`}
           >
             <div className="flex items-center gap-2">
-              <ArrowDownCircle className="w-4 h-4" />
+              <ArrowDownCircle className="w-4 h-4 text-emerald-600" />
               <span>طلبات السحب</span>
             </div>
             {pendingWithdrawalsCount > 0 && (
@@ -1016,107 +1138,142 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
           <button
             onClick={() => setActiveSection('store_items')}
             className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'store_items' ? 'bg-amber-500 text-black shadow-md' : 'text-purple-300 hover:text-white hover:bg-purple-900/30'
+              activeSection === 'store_items' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
             }`}
           >
-            <ShoppingBag className="w-4 h-4" />
-            <span>المتجر والهدايا والإطارات</span>
+            <ShoppingBag className="w-4 h-4 text-pink-600" />
+            <span>المتجر والهدايا وضرب الغرف</span>
           </button>
 
           <button
             onClick={() => setActiveSection('official_room')}
             className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'official_room' ? 'bg-amber-500 text-black shadow-md' : 'text-purple-300 hover:text-white hover:bg-purple-900/30'
+              activeSection === 'official_room' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
             }`}
           >
-            <Radio className="w-4 h-4" />
+            <Radio className="w-4 h-4 text-rose-600" />
             <span>الغرفة الرسمية والإعلانات</span>
           </button>
 
           <button
             onClick={() => setActiveSection('bans')}
             className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'bans' ? 'bg-amber-500 text-black shadow-md' : 'text-purple-300 hover:text-white hover:bg-purple-900/30'
+              activeSection === 'bans' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
             }`}
           >
-            <Slash className="w-4 h-4" />
+            <Slash className="w-4 h-4 text-red-600" />
             <span>إدارة الحظر والعقوبات</span>
           </button>
 
           <button
             onClick={() => setActiveSection('supervisors')}
             className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'supervisors' ? 'bg-amber-500 text-black shadow-md' : 'text-purple-300 hover:text-white hover:bg-purple-900/30'
+              activeSection === 'supervisors' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
             }`}
           >
-            <ShieldCheck className="w-4 h-4" />
+            <ShieldCheck className="w-4 h-4 text-indigo-600" />
             <span>صلاحيات المشرفين</span>
           </button>
 
           <button
             onClick={() => setActiveSection('financial_logs')}
             className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'financial_logs' ? 'bg-amber-500 text-black shadow-md' : 'text-purple-300 hover:text-white hover:bg-purple-900/30'
+              activeSection === 'financial_logs' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
             }`}
           >
-            <History className="w-4 h-4" />
+            <History className="w-4 h-4 text-gray-600" />
             <span>السجل المالي الدائم</span>
           </button>
         </div>
 
         {/* Content Area */}
-        <div className="flex-1 bg-[#0d051a] p-4 sm:p-6 overflow-y-auto">
+        <div className="flex-1 bg-[#FAFAFA] p-4 sm:p-6 overflow-y-auto light-surface">
           
           {/* SECTION 1: DASHBOARD */}
           {activeSection === 'dashboard' && (
             <div className="space-y-6">
               <div>
-                <h2 className="text-lg font-black text-white">نظرة عامة على المنظومة</h2>
-                <p className="text-xs text-purple-300">
+                <h2 className="text-lg font-black text-gray-900">نظرة عامة على المنظومة</h2>
+                <p className="text-xs text-gray-500">
                   إحصائيات حية مستمدة ومحدثة لحظياً من قاعدة بيانات Firebase
                 </p>
               </div>
 
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                <div className="bg-[#170b2c] p-4 rounded-2xl border border-purple-800/50">
-                  <span className="text-xs text-purple-300 block">إجمالي المستخدمين</span>
-                  <span className="text-2xl font-black font-digits text-white mt-1 block">
+                <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-xs">
+                  <span className="text-xs text-gray-500 font-bold block">إجمالي المستخدمين</span>
+                  <span className="text-2xl font-black font-digits text-gray-900 mt-1 block">
                     {totalUsersCount}
                   </span>
-                  <span className="text-[10px] text-green-400 font-bold mt-1 block">
+                  <span className="text-[10px] text-emerald-600 font-bold mt-1 block">
                     {activeUsersCount} نشط • 0 وهمي
                   </span>
                 </div>
 
-                <div className="bg-[#170b2c] p-4 rounded-2xl border border-purple-800/50">
-                  <span className="text-xs text-purple-300 block">طلبات شحن قيد الانتظار</span>
-                  <span className="text-2xl font-black font-digits text-amber-400 mt-1 block">
+                <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-xs">
+                  <span className="text-xs text-gray-500 font-bold block">طلبات شحن قيد الانتظار</span>
+                  <span className="text-2xl font-black font-digits text-amber-600 mt-1 block">
                     {pendingRechargesCount}
                   </span>
-                  <span className="text-[10px] text-purple-400 mt-1 block">
-                    تتطلب موافقة المالك
+                  <span className="text-[10px] text-gray-400 mt-1 block">
+                    تتطلب موافقة الإدارة
                   </span>
                 </div>
 
-                <div className="bg-[#170b2c] p-4 rounded-2xl border border-purple-800/50">
-                  <span className="text-xs text-purple-300 block">إجمالي مبيعات الشحن</span>
-                  <span className="text-2xl font-black font-digits text-green-400 mt-1 block">
+                <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-xs">
+                  <span className="text-xs text-gray-500 font-bold block">إجمالي مبيعات الشحن</span>
+                  <span className="text-2xl font-black font-digits text-emerald-600 mt-1 block">
                     {totalRechargedEGP.toLocaleString()} ج.م
                   </span>
-                  <span className="text-[10px] text-purple-400 mt-1 block">
+                  <span className="text-[10px] text-gray-400 mt-1 block">
                     مبيعات معتمدة بإيصالات
                   </span>
                 </div>
 
-                <div className="bg-[#170b2c] p-4 rounded-2xl border border-purple-800/50">
-                  <span className="text-xs text-purple-300 block">الكوينز المتداولة</span>
-                  <span className="text-2xl font-black font-digits text-yellow-300 mt-1 block">
+                <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-xs">
+                  <span className="text-xs text-gray-500 font-bold block">الكوينز المتداولة</span>
+                  <span className="text-2xl font-black font-digits text-amber-600 mt-1 block">
                     {totalCoinsInCirculation.toLocaleString()} 🪙
                   </span>
-                  <span className="text-[10px] text-purple-400 mt-1 block">
+                  <span className="text-[10px] text-gray-400 mt-1 block">
                     أرصدة حسابات فعلية
                   </span>
                 </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <button
+                  onClick={() => setActiveSection('cosmetics_studio')}
+                  className="bg-white hover:border-[#FFE600] p-3.5 rounded-2xl border border-gray-200 shadow-xs text-right transition-all group"
+                >
+                  <Crown className="w-5 h-5 text-amber-500 mb-1.5" />
+                  <span className="block text-xs font-black text-gray-900">استوديو الإطارات VIP</span>
+                  <span className="block text-[10px] text-gray-500">تخصيص الإطار والشارة والتوهج</span>
+                </button>
+                <button
+                  onClick={() => setActiveSection('store_items')}
+                  className="bg-white hover:border-[#FFE600] p-3.5 rounded-2xl border border-gray-200 shadow-xs text-right transition-all group"
+                >
+                  <Zap className="w-5 h-5 text-pink-500 mb-1.5" />
+                  <span className="block text-xs font-black text-gray-900">ضرب الهدايا للغرف</span>
+                  <span className="block text-[10px] text-gray-500">إرسال هدايا طائرة وإدارة المتجر</span>
+                </button>
+                <button
+                  onClick={() => setActiveSection('recharges')}
+                  className="bg-white hover:border-[#FFE600] p-3.5 rounded-2xl border border-gray-200 shadow-xs text-right transition-all group"
+                >
+                  <CreditCard className="w-5 h-5 text-emerald-600 mb-1.5" />
+                  <span className="block text-xs font-black text-gray-900">مراجعة الشحن ({pendingRechargesCount})</span>
+                  <span className="block text-[10px] text-gray-500">قبول ورفض الإيصالات</span>
+                </button>
+                <button
+                  onClick={() => setActiveSection('manual_coins')}
+                  className="bg-white hover:border-[#FFE600] p-3.5 rounded-2xl border border-gray-200 shadow-xs text-right transition-all group"
+                >
+                  <Coins className="w-5 h-5 text-amber-600 mb-1.5" />
+                  <span className="block text-xs font-black text-gray-900">شحن فوري برقم UID</span>
+                  <span className="block text-[10px] text-gray-500">تعديل رصيد أي حساب مباشرة</span>
+                </button>
               </div>
             </div>
           )}
@@ -1124,18 +1281,18 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
           {/* SECTION: CENTRAL ADMIN INBOX & USER TICKETS */}
           {activeSection === 'inbox' && (
             <div className="space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-purple-800/40">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-gray-200">
                 <div>
                   <div className="flex items-center gap-2">
-                    <Inbox className="w-5 h-5 text-amber-400" />
-                    <h2 className="text-base font-black text-white">صندوق الوارد المركزي والرسائل والدعم</h2>
+                    <Inbox className="w-5 h-5 text-amber-600" />
+                    <h2 className="text-base font-black text-gray-900">صندوق الوارد المركزي والرسائل والدعم</h2>
                     {pendingTicketsCount > 0 && (
-                      <span className="bg-red-500/20 text-red-300 border border-red-500/40 text-[10px] font-digits font-bold px-2 py-0.5 rounded-full">
+                      <span className="bg-red-50 text-red-600 border border-red-200 text-[10px] font-digits font-bold px-2 py-0.5 rounded-full">
                         {pendingTicketsCount} طلب بانتظار الرد
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-purple-300 mt-1">
+                  <p className="text-xs text-gray-500 mt-1">
                     استقبال مباشر ولحظي لرسائل المستخدمين، الشكاوى، البلاغات، والاستفسارات مع الرد الفوري الموثق
                   </p>
                 </div>
@@ -1145,7 +1302,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                   <select
                     value={ticketCategoryFilter}
                     onChange={(e: any) => setTicketCategoryFilter(e.target.value)}
-                    className="bg-[#170b2c] border border-purple-800/60 rounded-xl px-2.5 py-1.5 text-xs text-purple-200 outline-none"
+                    className="bg-white border border-gray-200 rounded-xl px-2.5 py-1.5 text-xs text-gray-800 outline-none"
                   >
                     <option value="all">جميع التصنيفات</option>
                     <option value="complaint">شكاوى ومشاكل</option>
@@ -1158,7 +1315,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                   <select
                     value={ticketStatusFilter}
                     onChange={(e: any) => setTicketStatusFilter(e.target.value)}
-                    className="bg-[#170b2c] border border-purple-800/60 rounded-xl px-2.5 py-1.5 text-xs text-purple-200 outline-none"
+                    className="bg-white border border-gray-200 rounded-xl px-2.5 py-1.5 text-xs text-gray-800 outline-none"
                   >
                     <option value="all">جميع الحالات</option>
                     <option value="pending">قيد الانتظار</option>
@@ -1171,11 +1328,11 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
 
               {/* Tickets List and Detail Drawer */}
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-                {/* Tickets Column (5 cols on lg) */}
+                {/* Tickets Column */}
                 <div className="lg:col-span-5 space-y-2 max-h-[600px] overflow-y-auto pr-1">
                   {filteredTickets.length === 0 ? (
-                    <div className="bg-[#170b2c] p-8 rounded-2xl border border-purple-800/40 text-center text-xs text-purple-400 space-y-2">
-                      <Inbox className="w-8 h-8 mx-auto opacity-40 text-purple-300" />
+                    <div className="bg-white p-8 rounded-2xl border border-gray-200 text-center text-xs text-gray-400 space-y-2">
+                      <Inbox className="w-8 h-8 mx-auto opacity-40 text-gray-400" />
                       <p>لا توجد رسائل أو تذاكر مطابقة لخيارات الفلترة</p>
                     </div>
                   ) : (
@@ -1189,8 +1346,8 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                         }}
                         className={`p-3 rounded-2xl border transition-all cursor-pointer ${
                           selectedTicket?.id === ticket.id
-                            ? 'bg-purple-900/50 border-amber-400 shadow-lg'
-                            : 'bg-[#170b2c] hover:bg-purple-950/40 border-purple-800/40'
+                            ? 'bg-yellow-50 border-[#FFE600] shadow-sm'
+                            : 'bg-white hover:bg-gray-50 border-gray-200'
                         }`}
                       >
                         <div className="flex items-start justify-between gap-2">
@@ -1198,14 +1355,14 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                             <img
                               src={ticket.userAvatar}
                               alt={ticket.username}
-                              className="w-8 h-8 rounded-full object-cover border border-purple-700"
+                              className="w-8 h-8 rounded-full object-cover border border-gray-200"
                             />
                             <div>
                               <div className="flex items-center gap-1.5">
-                                <span className="font-bold text-xs text-white">{ticket.username}</span>
-                                <span className="text-[10px] text-amber-300 font-digits font-bold">UID: {ticket.uid}</span>
+                                <span className="font-bold text-xs text-gray-900">{ticket.username}</span>
+                                <span className="text-[10px] text-amber-700 font-digits font-bold">UID: {ticket.uid}</span>
                               </div>
-                              <span className="text-[10px] text-purple-300 block font-digits">
+                              <span className="text-[10px] text-gray-400 block font-digits">
                                 {new Date(ticket.createdAt).toLocaleDateString('ar-EG')} - {new Date(ticket.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                               </span>
                             </div>
@@ -1214,29 +1371,29 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                           <div className="flex flex-col items-end gap-1">
                             <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${
                               ticket.status === 'pending'
-                                ? 'bg-red-500/20 text-red-300 border border-red-500/40 animate-pulse'
+                                ? 'bg-red-50 text-red-600 border border-red-200 animate-pulse'
                                 : ticket.status === 'in_progress'
-                                ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40'
+                                ? 'bg-blue-50 text-blue-600 border border-blue-200'
                                 : ticket.status === 'resolved'
-                                ? 'bg-green-500/20 text-green-300 border border-green-500/40'
-                                : 'bg-gray-700/40 text-gray-400'
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                : 'bg-gray-100 text-gray-500'
                             }`}>
                               {ticket.status === 'pending' ? 'جديد / بالانتظار' : ticket.status === 'in_progress' ? 'قيد المتابعة' : ticket.status === 'resolved' ? 'تم الرد والحل' : 'مغلق'}
                             </span>
 
                             <span className={`text-[8px] font-bold px-1.5 py-0.2 rounded ${
-                              ticket.priority === 'urgent' ? 'bg-red-950 text-red-400 border border-red-800' : ticket.priority === 'high' ? 'bg-amber-950 text-amber-300 border border-amber-800' : 'bg-purple-950 text-purple-300'
+                              ticket.priority === 'urgent' ? 'bg-red-100 text-red-700' : ticket.priority === 'high' ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-600'
                             }`}>
                               {ticket.priority === 'urgent' ? 'عاجل جداً' : ticket.priority === 'high' ? 'أولوية عالية' : 'عادي'}
                             </span>
                           </div>
                         </div>
 
-                        <div className="mt-2 pt-2 border-t border-purple-800/30">
-                          <h4 className="text-xs font-bold text-amber-200 line-clamp-1">{ticket.subject}</h4>
-                          <p className="text-[11px] text-purple-200 line-clamp-2 mt-0.5">{ticket.message}</p>
+                        <div className="mt-2 pt-2 border-t border-gray-100">
+                          <h4 className="text-xs font-bold text-gray-900 line-clamp-1">{ticket.subject}</h4>
+                          <p className="text-[11px] text-gray-500 line-clamp-2 mt-0.5">{ticket.message}</p>
                           {ticket.attachmentUrl && (
-                            <span className="inline-flex items-center gap-1 text-[9px] text-blue-300 mt-1 bg-blue-950/40 px-2 py-0.5 rounded">
+                            <span className="inline-flex items-center gap-1 text-[9px] text-blue-600 mt-1 bg-blue-50 px-2 py-0.5 rounded">
                               <Eye className="w-3 h-3" /> مرفق صورة
                             </span>
                           )}
@@ -1246,36 +1403,35 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                   )}
                 </div>
 
-                {/* Ticket Details & Real-Time Direct Reply Drawer (7 cols on lg) */}
+                {/* Ticket Details & Real-Time Direct Reply Drawer */}
                 <div className="lg:col-span-7">
                   {selectedTicket ? (
-                    <div className="bg-[#170b2c] p-4 sm:p-5 rounded-2xl border border-purple-800/60 shadow-xl space-y-4">
-                      {/* Ticket Header */}
-                      <div className="flex items-start justify-between pb-3 border-b border-purple-800/40">
+                    <div className="bg-white p-4 sm:p-5 rounded-2xl border border-gray-200 shadow-xs space-y-4">
+                      <div className="flex items-start justify-between pb-3 border-b border-gray-100">
                         <div className="flex items-center gap-3">
                           <img
                             src={selectedTicket.userAvatar}
                             alt={selectedTicket.username}
-                            className="w-10 h-10 rounded-full object-cover border-2 border-amber-400"
+                            className="w-10 h-10 rounded-full object-cover border-2 border-[#FFE600]"
                           />
                           <div>
                             <div className="flex items-center gap-2">
-                              <h3 className="font-extrabold text-sm text-white">{selectedTicket.username}</h3>
-                              <span className="bg-amber-400 text-black text-[10px] font-black px-2 py-0.5 rounded-full font-digits">
+                              <h3 className="font-extrabold text-sm text-gray-900">{selectedTicket.username}</h3>
+                              <span className="bg-[#FFE600] text-black text-[10px] font-black px-2 py-0.5 rounded-full font-digits">
                                 UID: {selectedTicket.uid}
                               </span>
                             </div>
-                            <span className="text-xs text-purple-300 font-digits">
+                            <span className="text-xs text-gray-500 font-digits">
                               تاريخ الإرسال: {new Date(selectedTicket.createdAt).toLocaleString('ar-EG')}
                             </span>
                           </div>
                         </div>
 
                         <span className={`text-[10px] font-bold px-2.5 py-1 rounded-xl ${
-                          selectedTicket.category === 'complaint' ? 'bg-red-500/20 text-red-300' :
-                          selectedTicket.category === 'financial' ? 'bg-amber-500/20 text-amber-300' :
-                          selectedTicket.category === 'report' ? 'bg-purple-500/20 text-purple-300' :
-                          'bg-blue-500/20 text-blue-300'
+                          selectedTicket.category === 'complaint' ? 'bg-red-50 text-red-700' :
+                          selectedTicket.category === 'financial' ? 'bg-amber-50 text-amber-800' :
+                          selectedTicket.category === 'report' ? 'bg-purple-50 text-purple-700' :
+                          'bg-blue-50 text-blue-700'
                         }`}>
                           {selectedTicket.category === 'complaint' ? 'شكوى رسمية' :
                            selectedTicket.category === 'financial' ? 'مشكلة شحن ورصيد' :
@@ -1284,23 +1440,21 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                         </span>
                       </div>
 
-                      {/* Subject & User Message */}
-                      <div className="bg-[#120824] p-3.5 rounded-xl border border-purple-800/40 space-y-2">
-                        <div className="flex items-center gap-2 text-amber-300 text-xs font-bold">
+                      <div className="bg-gray-50 p-3.5 rounded-xl border border-gray-200 space-y-2">
+                        <div className="flex items-center gap-2 text-amber-700 text-xs font-bold">
                           <MessageSquare className="w-4 h-4 shrink-0" />
                           <span>الموضوع: {selectedTicket.subject}</span>
                         </div>
-                        <p className="text-xs text-purple-100 leading-relaxed whitespace-pre-wrap">
+                        <p className="text-xs text-gray-800 leading-relaxed whitespace-pre-wrap">
                           {selectedTicket.message}
                         </p>
 
-                        {/* Attachment if present */}
                         {selectedTicket.attachmentUrl && (
-                          <div className="pt-2 border-t border-purple-800/30">
-                            <span className="text-[10px] text-purple-300 font-bold block mb-1">المرفق / لقطة الشاشة:</span>
+                          <div className="pt-2 border-t border-gray-200">
+                            <span className="text-[10px] text-gray-500 font-bold block mb-1">المرفق / لقطة الشاشة:</span>
                             <div
                               onClick={() => setZoomedTicketImageUrl(selectedTicket.attachmentUrl || null)}
-                              className="relative inline-block cursor-pointer rounded-lg overflow-hidden border border-purple-700/60 max-w-[200px] group"
+                              className="relative inline-block cursor-pointer rounded-lg overflow-hidden border border-gray-300 max-w-[200px] group"
                             >
                               <img
                                 src={selectedTicket.attachmentUrl}
@@ -1315,40 +1469,38 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                         )}
                       </div>
 
-                      {/* Previous Admin Reply if present */}
                       {selectedTicket.reply && (
-                        <div className="bg-emerald-950/30 border border-emerald-500/40 p-3 rounded-xl space-y-1">
-                          <div className="flex items-center justify-between text-[11px] text-emerald-400 font-bold">
+                        <div className="bg-emerald-50 border border-emerald-200 p-3 rounded-xl space-y-1">
+                          <div className="flex items-center justify-between text-[11px] text-emerald-700 font-bold">
                             <span className="flex items-center gap-1">
                               <CheckCircle2 className="w-3.5 h-3.5" />
-                              الرد الحالي من الإدارة ({selectedTicket.repliedBy || 'livo.admin@gmail.com'})
+                              الرد الحالي من الإدارة ({selectedTicket.repliedBy || actorEmail})
                             </span>
                             {selectedTicket.repliedAt && (
-                              <span className="font-digits text-[10px] text-emerald-300">
+                              <span className="font-digits text-[10px] text-emerald-600">
                                 {new Date(selectedTicket.repliedAt).toLocaleDateString('ar-EG')}
                               </span>
                             )}
                           </div>
-                          <p className="text-xs text-emerald-100 leading-relaxed whitespace-pre-wrap">
+                          <p className="text-xs text-emerald-900 leading-relaxed whitespace-pre-wrap">
                             {selectedTicket.reply}
                           </p>
                         </div>
                       )}
 
-                      {/* Reply Form */}
-                      <div className="space-y-3 pt-2 border-t border-purple-800/40">
+                      <div className="space-y-3 pt-2 border-t border-gray-100">
                         <div className="flex items-center justify-between">
-                          <label className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
-                            <Send className="w-3.5 h-3.5" />
+                          <label className="text-xs font-bold text-gray-900 flex items-center gap-1.5">
+                            <Send className="w-3.5 h-3.5 text-amber-600" />
                             <span>كتابة رد مباشر وموثق للمستخدم:</span>
                           </label>
 
                           <div className="flex items-center gap-2">
-                            <span className="text-[10px] text-purple-300">الحالة بعد الرد:</span>
+                            <span className="text-[10px] text-gray-500">الحالة بعد الرد:</span>
                             <select
                               value={ticketReplyStatus}
                               onChange={(e: any) => setTicketReplyStatus(e.target.value)}
-                              className="bg-[#120824] border border-purple-800/60 rounded-lg px-2 py-1 text-[11px] text-white outline-none"
+                              className="bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 text-[11px] text-gray-900 outline-none"
                             >
                               <option value="resolved">تم الحل (Resolved)</option>
                               <option value="in_progress">قيد المتابعة (In Progress)</option>
@@ -1357,26 +1509,25 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                           </div>
                         </div>
 
-                        {/* Quick responses */}
                         <div className="flex flex-wrap gap-1.5">
                           <button
                             type="button"
                             onClick={() => setTicketReplyText('مرحباً بك في LIVO، تم فحص طلبك ومعالجة المشكلة بنجاح. نتمنى لك تجربة ممتعة.')}
-                            className="text-[10px] bg-purple-900/60 hover:bg-purple-800 text-purple-200 px-2 py-0.5 rounded-md border border-purple-700/40"
+                            className="text-[10px] bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 py-0.5 rounded-md border border-gray-200"
                           >
                             + تم حل المشكلة بنجاح
                           </button>
                           <button
                             type="button"
                             onClick={() => setTicketReplyText('مرحباً بك، يرجى تزويدنا برقم العملية وصورة إيصال التحويل لإتمام طلب الشحن فوراً.')}
-                            className="text-[10px] bg-purple-900/60 hover:bg-purple-800 text-purple-200 px-2 py-0.5 rounded-md border border-purple-700/40"
+                            className="text-[10px] bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 py-0.5 rounded-md border border-gray-200"
                           >
                             + طلب إيصال الشحن
                           </button>
                           <button
                             type="button"
                             onClick={() => setTicketReplyText('نشكرك على تواصلك، تم تحويل البلاغ للقسم المختص وسيتم اتخاذ الإجراء اللازم.')}
-                            className="text-[10px] bg-purple-900/60 hover:bg-purple-800 text-purple-200 px-2 py-0.5 rounded-md border border-purple-700/40"
+                            className="text-[10px] bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 py-0.5 rounded-md border border-gray-200"
                           >
                             + تحويل للقسم المختص
                           </button>
@@ -1387,13 +1538,13 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                           onChange={(e) => setTicketReplyText(e.target.value)}
                           placeholder="اكتب رد الإدارة الرسمي هنا... سيصل مباشرة لحساب المستخدم في LIVO ويظهر في محادثات الدعم"
                           rows={4}
-                          className="w-full bg-[#120824] border border-purple-800/60 rounded-xl p-3 text-xs text-white placeholder-purple-400/50 outline-none focus:border-amber-400"
+                          className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-xs text-gray-900 placeholder-gray-400 outline-none focus:border-[#FFE600]"
                         />
 
                         <button
                           type="button"
                           onClick={handleReplyToTicket}
-                          className="w-full py-2.5 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 text-black font-extrabold text-xs rounded-xl shadow-lg transition-all flex items-center justify-center gap-2"
+                          className="w-full py-2.5 bg-[#FFE600] hover:bg-yellow-400 text-black font-black text-xs rounded-xl shadow-sm transition-all flex items-center justify-center gap-2"
                         >
                           <Send className="w-4 h-4" />
                           <span>إرسال الرد للمستخدم وتحديث التذكرة في Firebase</span>
@@ -1401,10 +1552,10 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                       </div>
                     </div>
                   ) : (
-                    <div className="bg-[#170b2c] p-12 rounded-2xl border border-purple-800/40 text-center text-xs text-purple-400 space-y-2">
-                      <MessageSquare className="w-10 h-10 mx-auto opacity-30 text-purple-300" />
-                      <p className="font-bold text-sm text-purple-200">اختر رسالة أو تذكرة من القائمة لمعاينتها والرد عليها</p>
-                      <p className="text-[11px] text-purple-400">أي رد سيصل مباشرة للمستخدم ويُحفظ في سجل الدعم الفني المشترك</p>
+                    <div className="bg-white p-12 rounded-2xl border border-gray-200 text-center text-xs text-gray-400 space-y-2">
+                      <MessageSquare className="w-10 h-10 mx-auto opacity-30 text-gray-400" />
+                      <p className="font-bold text-sm text-gray-700">اختر رسالة أو تذكرة من القائمة لمعاينتها والرد عليها</p>
+                      <p className="text-[11px] text-gray-500">أي رد سيصل مباشرة للمستخدم ويُحفظ في سجل الدعم الفني المشترك</p>
                     </div>
                   )}
                 </div>
@@ -1415,70 +1566,67 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
           {/* SECTION: ADVERTISEMENT MANAGEMENT CENTER */}
           {activeSection === 'ads' && (
             <div className="space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-purple-800/40">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-gray-200">
                 <div>
                   <div className="flex items-center gap-2">
-                    <Megaphone className="w-5 h-5 text-amber-400" />
-                    <h2 className="text-base font-black text-white">مركز إدارة الإعلانات والعروض الترويجية</h2>
-                    <span className="bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-digits font-bold px-2 py-0.5 rounded-full">
+                    <Megaphone className="w-5 h-5 text-amber-600" />
+                    <h2 className="text-base font-black text-gray-900">مركز إدارة الإعلانات والعروض الترويجية</h2>
+                    <span className="bg-amber-100 text-amber-800 border border-amber-200 text-[10px] font-digits font-bold px-2 py-0.5 rounded-full">
                       {ads.length} حملة إعلانية
                     </span>
                   </div>
-                  <p className="text-xs text-purple-300 mt-1">
+                  <p className="text-xs text-gray-500 mt-1">
                     إدارة الحملات الترويجية، البانرات، النوافذ المنبثقة، وتتبع النقرات والمشاهدات الحقيقية
                   </p>
                 </div>
 
                 <button
                   onClick={() => setShowCreateAdModal(true)}
-                  className="px-3.5 py-2 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 text-black font-extrabold text-xs rounded-xl shadow-md flex items-center gap-1.5 shrink-0"
+                  className="px-3.5 py-2 bg-[#FFE600] hover:bg-yellow-400 text-black font-black text-xs rounded-xl shadow-sm flex items-center gap-1.5 shrink-0"
                 >
                   <Plus className="w-4 h-4" />
                   <span>إنشاء إعلان جديد</span>
                 </button>
               </div>
 
-              {/* Performance Cards */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div className="bg-[#170b2c] p-3 rounded-xl border border-purple-800/40">
-                  <span className="text-[10px] text-purple-300 block">إجمالي الإعلانات</span>
-                  <span className="font-digits font-black text-lg text-white">{ads.length}</span>
+                <div className="bg-white p-3 rounded-xl border border-gray-200 shadow-xs">
+                  <span className="text-[10px] text-gray-500 block">إجمالي الإعلانات</span>
+                  <span className="font-digits font-black text-lg text-gray-900">{ads.length}</span>
                 </div>
-                <div className="bg-[#170b2c] p-3 rounded-xl border border-purple-800/40">
-                  <span className="text-[10px] text-purple-300 block">الإعلانات النشطة</span>
-                  <span className="font-digits font-black text-lg text-amber-400">{activeAdsCount}</span>
+                <div className="bg-white p-3 rounded-xl border border-gray-200 shadow-xs">
+                  <span className="text-[10px] text-gray-500 block">الإعلانات النشطة</span>
+                  <span className="font-digits font-black text-lg text-amber-600">{activeAdsCount}</span>
                 </div>
-                <div className="bg-[#170b2c] p-3 rounded-xl border border-purple-800/40">
-                  <span className="text-[10px] text-purple-300 block">إجمالي المشاهدات</span>
-                  <span className="font-digits font-black text-lg text-blue-400">
+                <div className="bg-white p-3 rounded-xl border border-gray-200 shadow-xs">
+                  <span className="text-[10px] text-gray-500 block">إجمالي المشاهدات</span>
+                  <span className="font-digits font-black text-lg text-blue-600">
                     {ads.reduce((sum, a) => sum + (a.viewsCount || 0), 0).toLocaleString()}
                   </span>
                 </div>
-                <div className="bg-[#170b2c] p-3 rounded-xl border border-purple-800/40">
-                  <span className="text-[10px] text-purple-300 block">إجمالي النقرات</span>
-                  <span className="font-digits font-black text-lg text-emerald-400">
+                <div className="bg-white p-3 rounded-xl border border-gray-200 shadow-xs">
+                  <span className="text-[10px] text-gray-500 block">إجمالي النقرات</span>
+                  <span className="font-digits font-black text-lg text-emerald-600">
                     {ads.reduce((sum, a) => sum + (a.clicksCount || 0), 0).toLocaleString()}
                   </span>
                 </div>
               </div>
 
-              {/* Advertisements Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {ads.length === 0 ? (
-                  <div className="col-span-full bg-[#170b2c] p-12 rounded-2xl border border-purple-800/40 text-center text-xs text-purple-400 space-y-2">
-                    <Megaphone className="w-10 h-10 mx-auto opacity-30 text-purple-300" />
-                    <p className="font-bold text-sm text-purple-200">لا توجد إعلانات منشأة حتى الآن</p>
-                    <p className="text-[11px] text-purple-400">اضغط على "إنشاء إعلان جديد" لإطلاق حملة ترويجية تظهر لمستخدمي LIVO</p>
+                  <div className="col-span-full bg-white p-12 rounded-2xl border border-gray-200 text-center text-xs text-gray-500 space-y-2">
+                    <Megaphone className="w-10 h-10 mx-auto opacity-30 text-gray-400" />
+                    <p className="font-bold text-sm text-gray-800">لا توجد إعلانات منشأة حتى الآن</p>
+                    <p className="text-[11px] text-gray-500">اضغط على "إنشاء إعلان جديد" لإطلاق حملة ترويجية تظهر لمستخدمي LIVO</p>
                   </div>
                 ) : (
                   ads.map(ad => (
                     <div
                       key={ad.id}
-                      className="bg-[#170b2c] rounded-2xl border border-purple-800/50 overflow-hidden shadow-lg flex flex-col justify-between"
+                      className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-xs flex flex-col justify-between"
                     >
                       <div>
-                        {/* Ad Banner Image Preview */}
-                        <div className="relative aspect-[16/8] bg-black/40 overflow-hidden border-b border-purple-800/40">
+                        <div className="relative aspect-[16/8] bg-gray-100 overflow-hidden border-b border-gray-200">
                           <img
                             src={ad.imageUrl}
                             alt={ad.title}
@@ -1487,8 +1635,8 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                           <div className="absolute top-2 right-2 flex items-center gap-1.5">
                             <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
                               ad.status === 'active'
-                                ? 'bg-green-500 text-black font-black'
-                                : 'bg-red-500/80 text-white'
+                                ? 'bg-emerald-500 text-white font-black'
+                                : 'bg-red-500 text-white'
                             }`}>
                               {ad.status === 'active' ? 'نشط ويعمل ✓' : 'متوقف'}
                             </span>
@@ -1498,41 +1646,37 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                           </div>
                         </div>
 
-                        {/* Details */}
                         <div className="p-3.5 space-y-2">
-                          <h3 className="font-bold text-sm text-white">{ad.title}</h3>
-                          <p className="text-xs text-purple-200 line-clamp-2 leading-relaxed">
+                          <h3 className="font-bold text-sm text-gray-900">{ad.title}</h3>
+                          <p className="text-xs text-gray-600 line-clamp-2 leading-relaxed">
                             {ad.description}
                           </p>
 
-                          {/* Stats Bar */}
-                          <div className="grid grid-cols-2 gap-2 bg-[#120824] p-2 rounded-xl text-center font-digits">
+                          <div className="grid grid-cols-2 gap-2 bg-gray-50 p-2 rounded-xl text-center font-digits border border-gray-100">
                             <div>
-                              <span className="text-[10px] text-purple-400 block">المشاهدات</span>
-                              <span className="font-bold text-xs text-blue-300">{(ad.viewsCount || 0).toLocaleString()}</span>
+                              <span className="text-[10px] text-gray-500 block">المشاهدات</span>
+                              <span className="font-bold text-xs text-blue-600">{(ad.viewsCount || 0).toLocaleString()}</span>
                             </div>
                             <div>
-                              <span className="text-[10px] text-purple-400 block">النقرات</span>
-                              <span className="font-bold text-xs text-emerald-300">{(ad.clicksCount || 0).toLocaleString()}</span>
+                              <span className="text-[10px] text-gray-500 block">النقرات</span>
+                              <span className="font-bold text-xs text-emerald-600">{(ad.clicksCount || 0).toLocaleString()}</span>
                             </div>
                           </div>
 
-                          {/* Dates */}
-                          <div className="text-[10px] text-purple-400 font-digits flex items-center justify-between pt-1">
+                          <div className="text-[10px] text-gray-400 font-digits flex items-center justify-between pt-1">
                             <span>البداية: {ad.startDate}</span>
                             <span>النهاية: {ad.endDate}</span>
                           </div>
                         </div>
                       </div>
 
-                      {/* Card Action Footer */}
-                      <div className="p-3 bg-[#120824] border-t border-purple-800/40 flex items-center justify-between gap-2">
+                      <div className="p-3 bg-gray-50 border-t border-gray-200 flex items-center justify-between gap-2">
                         <button
                           onClick={() => handleToggleAdStatus(ad)}
                           className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
                             ad.status === 'active'
-                              ? 'bg-amber-950/70 text-amber-300 border border-amber-800/60 hover:bg-amber-900/70'
-                              : 'bg-green-950/70 text-green-300 border border-green-800/60 hover:bg-green-900/70'
+                              ? 'bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100'
+                              : 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'
                           }`}
                         >
                           {ad.status === 'active' ? (
@@ -1550,7 +1694,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
 
                         <button
                           onClick={() => setAdDeleteConfirmId(ad.id)}
-                          className="p-1.5 bg-red-950/60 hover:bg-red-900/60 text-red-300 border border-red-800/50 rounded-xl"
+                          className="p-1.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded-xl"
                           title="حذف الإعلان نهائياً"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -1568,18 +1712,18 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
             <div className="space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-lg font-black text-white">إدارة طلبات شحن الكوينز</h2>
-                  <p className="text-xs text-purple-300">
+                  <h2 className="text-lg font-black text-gray-900">إدارة طلبات شحن الكوينز</h2>
+                  <p className="text-xs text-gray-500">
                     الطلبات محفوظة بصورة دائمة في Firestore ولن تختفي عند تحديث الصفحة أو تسجيل الدخول
                   </p>
                 </div>
 
                 {/* Filter Tabs */}
-                <div className="flex bg-[#170b2c] p-1 rounded-xl border border-purple-800/40">
+                <div className="flex bg-white p-1 rounded-xl border border-gray-200">
                   <button
                     onClick={() => setRechargeFilter('pending')}
                     className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-                      rechargeFilter === 'pending' ? 'bg-amber-500 text-black' : 'text-purple-300 hover:text-white'
+                      rechargeFilter === 'pending' ? 'bg-[#FFE600] text-black font-black' : 'text-gray-600 hover:text-gray-900'
                     }`}
                   >
                     المعلقة ({recharges.filter(r => r.status === 'pending').length})
@@ -1587,7 +1731,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                   <button
                     onClick={() => setRechargeFilter('approved')}
                     className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-                      rechargeFilter === 'approved' ? 'bg-green-600 text-white' : 'text-purple-300 hover:text-white'
+                      rechargeFilter === 'approved' ? 'bg-emerald-600 text-white' : 'text-gray-600 hover:text-gray-900'
                     }`}
                   >
                     المقبولة ({recharges.filter(r => r.status === 'approved').length})
@@ -1595,7 +1739,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                   <button
                     onClick={() => setRechargeFilter('rejected')}
                     className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-                      rechargeFilter === 'rejected' ? 'bg-red-600 text-white' : 'text-purple-300 hover:text-white'
+                      rechargeFilter === 'rejected' ? 'bg-red-600 text-white' : 'text-gray-600 hover:text-gray-900'
                     }`}
                   >
                     المرفوضة ({recharges.filter(r => r.status === 'rejected').length})
@@ -1603,7 +1747,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                   <button
                     onClick={() => setRechargeFilter('all')}
                     className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-                      rechargeFilter === 'all' ? 'bg-purple-700 text-white' : 'text-purple-300 hover:text-white'
+                      rechargeFilter === 'all' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:text-gray-900'
                     }`}
                   >
                     الكل ({recharges.length})
@@ -1611,9 +1755,8 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                 </div>
               </div>
 
-              {/* Requests List */}
               {filteredRecharges.length === 0 ? (
-                <div className="bg-[#170b2c] p-8 rounded-2xl border border-purple-800/40 text-center text-purple-400 text-xs">
+                <div className="bg-white p-8 rounded-2xl border border-gray-200 text-center text-gray-500 text-xs">
                   لا توجد طلبات شحن في هذا القسم حالياً
                 </div>
               ) : (
@@ -1623,44 +1766,44 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                       key={req.id}
                       className={`p-4 rounded-2xl border flex flex-col md:flex-row items-start md:items-center justify-between gap-4 transition-all ${
                         req.status === 'pending'
-                          ? 'bg-[#170b2c] border-amber-500/40'
+                          ? 'bg-white border-amber-300 shadow-xs'
                           : req.status === 'approved'
-                          ? 'bg-[#120824] border-green-800/40 opacity-90'
-                          : 'bg-[#120824] border-red-900/40 opacity-75'
+                          ? 'bg-white border-emerald-200'
+                          : 'bg-gray-50 border-red-200 opacity-85'
                       }`}
                     >
                       <div className="flex items-start gap-3">
                         <img
                           src={req.userAvatar}
                           alt={req.username}
-                          className="w-12 h-12 rounded-full border border-purple-500 object-cover shrink-0"
+                          className="w-12 h-12 rounded-full border border-gray-200 object-cover shrink-0"
                         />
                         <div>
                           <div className="flex items-center gap-2">
-                            <span className="font-bold text-sm text-white">{req.username}</span>
-                            <span className="font-digits font-bold text-amber-300 text-xs bg-purple-950 px-2 py-0.5 rounded border border-purple-800">
+                            <span className="font-bold text-sm text-gray-900">{req.username}</span>
+                            <span className="font-digits font-bold text-amber-800 text-xs bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
                               UID: {req.uid}
                             </span>
                             <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
                               req.status === 'pending'
-                                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                                ? 'bg-amber-100 text-amber-800'
                                 : req.status === 'approved'
-                                ? 'bg-green-500/20 text-green-300 border border-green-500/40'
-                                : 'bg-red-500/20 text-red-300 border border-red-500/40'
+                                ? 'bg-emerald-100 text-emerald-700'
+                                : 'bg-red-100 text-red-700'
                             }`}>
                               {req.status === 'pending' ? 'قيد المراجعة' : req.status === 'approved' ? 'تمت الموافقة' : 'مرفوض'}
                             </span>
                           </div>
 
-                          <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-purple-300">
-                            <span>الطلب: <strong className="font-digits text-white">{req.orderNumber}</strong></span>
-                            <span>الباقة: <strong className="font-digits text-amber-400">{req.packageCoins.toLocaleString()} كوينز</strong></span>
-                            <span>المبلغ: <strong className="font-digits text-green-400">{req.amountEGP} ج.م</strong></span>
-                            <span>هاتف الدافع: <strong className="font-digits text-white">{req.payerPhone}</strong></span>
+                          <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-gray-600">
+                            <span>الطلب: <strong className="font-digits text-gray-900">{req.orderNumber}</strong></span>
+                            <span>الباقة: <strong className="font-digits text-amber-700">{req.packageCoins.toLocaleString()} كوينز</strong></span>
+                            <span>المبلغ: <strong className="font-digits text-emerald-600">{req.amountEGP} ج.م</strong></span>
+                            <span>هاتف الدافع: <strong className="font-digits text-gray-900">{req.payerPhone}</strong></span>
                           </div>
 
                           {req.rejectReason && (
-                            <p className="text-[11px] text-red-300 mt-1">
+                            <p className="text-[11px] text-red-600 mt-1">
                               سبب الرفض: {req.rejectReason}
                             </p>
                           )}
@@ -1671,7 +1814,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                         {req.receiptUrl && (
                           <button
                             onClick={() => setZoomedReceiptUrl(req.receiptUrl)}
-                            className="flex items-center gap-1 bg-purple-900/60 hover:bg-purple-800 text-purple-200 border border-purple-700/60 text-xs px-3 py-2 rounded-xl transition-all"
+                            className="flex items-center gap-1 bg-gray-100 hover:bg-gray-200 text-gray-800 border border-gray-200 text-xs px-3 py-2 rounded-xl transition-all font-bold"
                           >
                             <ZoomIn className="w-3.5 h-3.5" />
                             <span>معاينة الإيصال</span>
@@ -1682,14 +1825,14 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                           <>
                             <button
                               onClick={() => handleApproveRecharge(req.id)}
-                              className="bg-green-600 hover:bg-green-500 text-white font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1 shadow-md"
+                              className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1 shadow-xs"
                             >
                               <Check className="w-3.5 h-3.5" />
                               <span>موافقة وإضافة الرصيد</span>
                             </button>
                             <button
                               onClick={() => setRejectModalReqId(req.id)}
-                              className="bg-red-900/60 hover:bg-red-800 text-red-200 text-xs px-3 py-2 rounded-xl border border-red-800"
+                              className="bg-red-50 hover:bg-red-100 text-red-600 text-xs px-3 py-2 rounded-xl border border-red-200 font-bold"
                             >
                               رفض الطلب
                             </button>
@@ -1707,69 +1850,111 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
           {activeSection === 'manual_coins' && (
             <div className="space-y-5 max-w-2xl">
               <div>
-                <h2 className="text-lg font-black text-white">الشحن اليدوي وضبط أرصدة UID</h2>
-                <p className="text-xs text-purple-300">
+                <h2 className="text-lg font-black text-gray-900">الشحن اليدوي وضبط أرصدة UID</h2>
+                <p className="text-xs text-gray-500">
                   صلاحية خاصة بالمالك لتعديل الأرصدة مع تسجيل فوري في السجل المالي
                 </p>
               </div>
 
-              <div className="bg-[#170b2c] p-4 rounded-2xl border border-purple-800/50 space-y-3">
-                <label className="block text-xs font-bold text-purple-200">
-                  ابحث عن المستخدم بالـ Public ID (5 أرقام) أو UID أو اسم المستخدم:
+              <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm space-y-3">
+                <label className="block text-xs font-bold text-gray-700">
+                  ابحث عن المستخدم بالـ Public ID (5 أرقام) أو الاسم أو البريد:
                 </label>
                 <div className="flex gap-2">
                   <input
                     type="text"
                     value={searchCoinsUid}
                     onChange={(e) => setSearchCoinsUid(e.target.value)}
-                    placeholder="أدخل معرّف Public ID (مثال: 48291)"
-                    className="flex-1 bg-[#120824] border border-purple-800/60 rounded-xl px-3 py-2 text-xs font-digits text-white placeholder-purple-400/50 outline-none focus:border-amber-400"
+                    placeholder="أدخل معرّف Public ID أو الاسم..."
+                    className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs font-digits text-gray-900 placeholder-gray-400 outline-none focus:border-amber-500"
                   />
                   <button
                     onClick={() => {
-                      const clean = searchCoinsUid.trim().toLowerCase();
-                      const found = users.find(u =>
-                        u.uid.toLowerCase() === clean ||
-                        u.authUid?.toLowerCase() === clean ||
-                        u.username.toLowerCase() === clean ||
-                        u.displayName.toLowerCase() === clean ||
-                        u.email?.toLowerCase() === clean
-                      );
-                      if (found) {
-                        setSelectedUserForCoins(found);
+                      const matches = livoStore.searchUsersByQuery(searchCoinsUid);
+                      if (matches.length > 0) {
+                        setSelectedUserForCoins(matches[0]);
                       } else {
                         showToast(`لم يتم العثور على أي مستخدم بالمعرف "${searchCoinsUid}"`);
                       }
                     }}
-                    className="bg-purple-900 hover:bg-purple-800 text-white text-xs px-4 py-2 rounded-xl font-bold"
+                    className="bg-[#FFE600] hover:bg-yellow-400 text-black text-xs px-4 py-2 rounded-xl font-black shadow-sm"
                   >
                     بحث
                   </button>
                 </div>
+
+                {searchCoinsUid.trim().length > 0 && (
+                  <div className="max-h-44 overflow-y-auto divide-y divide-gray-100 border border-gray-200 rounded-xl bg-gray-50/70">
+                    {livoStore.searchUsersByQuery(searchCoinsUid).slice(0, 8).map((matchUser) => (
+                      <button
+                        key={matchUser.uid}
+                        type="button"
+                        onClick={() => setSelectedUserForCoins(matchUser)}
+                        className="w-full px-3 py-2 flex items-center justify-between text-right hover:bg-amber-50 transition-colors"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <AvatarWithFrame
+                            avatarUrl={matchUser.avatar}
+                            displayName={matchUser.displayName}
+                            frameUrl={matchUser.equippedFrameUrl}
+                            frameGlowColor={matchUser.frameGlowColor}
+                            frameAnimated={matchUser.frameAnimated}
+                            sizePx={36}
+                          />
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1">
+                              <span className="font-bold text-xs text-gray-900 truncate">{matchUser.displayName}</span>
+                              {matchUser.isVerified && (
+                                <LivoVerifiedBadge
+                                  size={13}
+                                  color={matchUser.verifiedBadgeColor}
+                                  shape={matchUser.verifiedBadgeShape}
+                                  glow={matchUser.verifiedBadgeGlow}
+                                />
+                              )}
+                            </div>
+                            <span className="text-[10px] font-digits text-gray-500">UID: {matchUser.uid} • @{matchUser.username}</span>
+                          </div>
+                        </div>
+                        <span className="text-[11px] font-digits font-black text-amber-700">{matchUser.coins.toLocaleString('en-US')} 🪙</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {selectedUserForCoins && (
-                <div className="bg-[#170b2c] p-4 rounded-2xl border border-purple-800/60 space-y-4">
-                  <div className="flex items-center justify-between pb-3 border-b border-purple-800/40">
+                <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm space-y-4">
+                  <div className="flex items-center justify-between pb-3 border-b border-gray-100">
                     <div className="flex items-center gap-3">
-                      <img src={selectedUserForCoins.avatar} alt="" className="w-12 h-12 rounded-full border border-purple-500 object-cover" />
+                      <AvatarWithFrame
+                        avatarUrl={selectedUserForCoins.avatar}
+                        displayName={selectedUserForCoins.displayName}
+                        frameUrl={selectedUserForCoins.equippedFrameUrl}
+                        frameGlowColor={selectedUserForCoins.frameGlowColor}
+                        frameAnimated={selectedUserForCoins.frameAnimated}
+                        customIconUrl={selectedUserForCoins.customIconUrl}
+                        customIconGlow={selectedUserForCoins.customIconGlow}
+                        customIconAnimated={selectedUserForCoins.customIconAnimated}
+                        sizePx={52}
+                      />
                       <div>
                         <div className="flex items-center gap-2">
-                          <h4 className="font-bold text-sm text-white">{selectedUserForCoins.displayName}</h4>
-                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-yellow-400 text-purple-950 font-digits font-black">
+                          <h4 className="font-bold text-sm text-gray-900">{selectedUserForCoins.displayName}</h4>
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#FFE600] text-black font-digits font-black">
                             Lv.{selectedUserForCoins.level || 0}
                           </span>
                         </div>
-                        <div className="flex items-center gap-2 mt-0.5 text-xs font-digits text-purple-300">
-                          <span className="text-amber-400 font-bold">Public ID: {selectedUserForCoins.uid}</span>
+                        <div className="flex items-center gap-2 mt-0.5 text-xs font-digits text-gray-500">
+                          <span className="text-amber-700 font-bold">Public ID: {selectedUserForCoins.uid}</span>
                           <span>•</span>
-                          <span className="text-cyan-300 font-bold">💎 {(selectedUserForCoins.diamonds || 0).toLocaleString('en-US')} ألماسة</span>
+                          <span className="text-cyan-700 font-bold">💎 {(selectedUserForCoins.diamonds || 0).toLocaleString('en-US')} ألماسة</span>
                         </div>
                       </div>
                     </div>
                     <div className="text-left">
-                      <span className="text-xs text-purple-300 block">رصيد الكوينز الحالي:</span>
-                      <span className="text-lg font-black font-digits text-yellow-300">
+                      <span className="text-xs text-gray-500 block">رصيد الكوينز الحالي:</span>
+                      <span className="text-lg font-black font-digits text-amber-600">
                         {selectedUserForCoins.coins.toLocaleString('en-US')} 🪙
                       </span>
                     </div>
@@ -1781,7 +1966,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                       type="button"
                       onClick={() => setCoinActionType('add')}
                       className={`py-2 rounded-xl text-xs font-bold transition-all ${
-                        coinActionType === 'add' ? 'bg-green-600 text-white' : 'bg-[#120824] text-purple-300 border border-purple-800/40'
+                        coinActionType === 'add' ? 'bg-emerald-600 text-white shadow-sm' : 'bg-gray-50 text-gray-700 border border-gray-200'
                       }`}
                     >
                       + إضافة كوينز
@@ -1790,7 +1975,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                       type="button"
                       onClick={() => setCoinActionType('deduct')}
                       className={`py-2 rounded-xl text-xs font-bold transition-all ${
-                        coinActionType === 'deduct' ? 'bg-red-600 text-white' : 'bg-[#120824] text-purple-300 border border-purple-800/40'
+                        coinActionType === 'deduct' ? 'bg-red-600 text-white shadow-sm' : 'bg-gray-50 text-gray-700 border border-gray-200'
                       }`}
                     >
                       - خصم كوينز
@@ -1799,7 +1984,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                       type="button"
                       onClick={() => setCoinActionType('set')}
                       className={`py-2 rounded-xl text-xs font-bold transition-all ${
-                        coinActionType === 'set' ? 'bg-amber-500 text-black' : 'bg-[#120824] text-purple-300 border border-purple-800/40'
+                        coinActionType === 'set' ? 'bg-[#FFE600] text-black font-black shadow-sm' : 'bg-gray-50 text-gray-700 border border-gray-200'
                       }`}
                     >
                       ضبط الرصيد مباشرة
@@ -1807,7 +1992,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-purple-200 mb-1">
+                    <label className="block text-xs font-bold text-gray-700 mb-1">
                       الكمية (أرقام إنجليزية فقط):
                     </label>
                     <input
@@ -1817,12 +2002,12 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                       value={coinAmountInput}
                       onChange={(e) => setCoinAmountInput(e.target.value.replace(/[^0-9]/g, ''))}
                       placeholder="أدخل عدد الكوينز (مثال: 5000)"
-                      className="w-full bg-[#120824] border border-purple-800/60 rounded-xl px-3 py-2 text-xs font-digits text-white placeholder-purple-400/50 outline-none focus:border-amber-400"
+                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs font-digits text-gray-900 placeholder-gray-400 outline-none focus:border-amber-500"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-purple-200 mb-1">
+                    <label className="block text-xs font-bold text-gray-700 mb-1">
                       سبب العملية الإدارية (مطلوب للتدقيق المالي):
                     </label>
                     <input
@@ -1830,7 +2015,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                       value={coinReasonInput}
                       onChange={(e) => setCoinReasonInput(e.target.value)}
                       placeholder="مثال: تصحيح خطأ شحن، مكافأة مسابقة رسمية، تعويض"
-                      className="w-full bg-[#120824] border border-purple-800/60 rounded-xl px-3 py-2 text-xs text-white placeholder-purple-400/50 outline-none focus:border-amber-400"
+                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 placeholder-gray-400 outline-none focus:border-amber-500"
                     />
                   </div>
 
@@ -1843,7 +2028,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                       }
                       setShowCoinConfirmModal(true);
                     }}
-                    className="w-full py-3 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 text-black font-extrabold text-xs rounded-xl shadow-lg transition-all"
+                    className="w-full py-3 bg-[#FFE600] hover:bg-yellow-400 text-black font-black text-xs rounded-xl shadow-sm transition-all"
                   >
                     مراجعة وتأكيد العملية
                   </button>
@@ -1857,8 +2042,8 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
             <div className="space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-lg font-black text-white">أسعار وباقات الكوينز المعتمدة</h2>
-                  <p className="text-xs text-purple-300">
+                  <h2 className="text-lg font-black text-gray-900">أسعار وباقات الكوينز المعتمدة</h2>
+                  <p className="text-xs text-gray-500">
                     إدارة كاملة للباقات (إضافة، تعديل، تفعيل/تعطيل، حذف) مع مزامنة فورية في شاشة الشحن للعملاء
                   </p>
                 </div>
@@ -1871,7 +2056,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                     setPkgActiveInput(true);
                     setShowCoinPkgModal(true);
                   }}
-                  className="bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 text-black font-extrabold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow transition-all shrink-0"
+                  className="bg-[#FFE600] hover:bg-yellow-400 text-black font-black text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow-sm transition-all shrink-0"
                 >
                   <Plus className="w-4 h-4" />
                   <span>إضافة باقة شحن جديدة</span>
@@ -1882,38 +2067,38 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                 {coinPackagesList.map((pkg) => (
                   <div
                     key={pkg.id}
-                    className={`bg-[#170b2c] p-3.5 rounded-2xl border transition-all flex flex-col justify-between gap-3 ${
-                      pkg.isActive !== false ? 'border-purple-800/60' : 'border-red-900/40 opacity-60'
+                    className={`bg-white p-3.5 rounded-2xl border shadow-sm transition-all flex flex-col justify-between gap-3 ${
+                      pkg.isActive !== false ? 'border-gray-200' : 'border-red-200 opacity-65'
                     }`}
                   >
                     <div className="flex items-start justify-between">
                       <div>
                         <div className="flex items-center gap-1.5">
-                          <span className="font-digits font-black text-amber-400 text-base">
+                          <span className="font-digits font-black text-amber-600 text-base">
                             {pkg.coins.toLocaleString()} كوينز
                           </span>
                           {pkg.popular && (
-                            <span className="text-[9px] bg-red-500/20 text-red-300 border border-red-500/40 px-1.5 py-0.2 rounded font-bold">
+                            <span className="text-[9px] bg-red-50 text-red-600 border border-red-200 px-1.5 py-0.5 rounded font-bold">
                               الأكثر طلباً
                             </span>
                           )}
                         </div>
-                        <span className="text-xs text-green-400 font-digits font-bold block mt-0.5">
+                        <span className="text-xs text-emerald-700 font-digits font-bold block mt-0.5">
                           {pkg.priceEGP.toLocaleString()} جنيه مصري
                         </span>
                       </div>
                       <span className={`text-[10px] px-2 py-0.5 rounded-lg font-bold ${
-                        pkg.isActive !== false ? 'bg-green-500/20 text-green-300' : 'bg-red-500/20 text-red-300'
+                        pkg.isActive !== false ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200'
                       }`}>
                         {pkg.isActive !== false ? 'مفعلة' : 'معطلة'}
                       </span>
                     </div>
 
-                    <div className="pt-2 border-t border-purple-800/40 flex items-center justify-between gap-2">
+                    <div className="pt-2 border-t border-gray-100 flex items-center justify-between gap-2">
                       <button
                         onClick={() => handleToggleCoinPackageActive(pkg)}
                         className={`text-[11px] px-2.5 py-1 rounded-lg font-bold flex items-center gap-1 ${
-                          pkg.isActive !== false ? 'bg-amber-900/40 text-amber-300' : 'bg-green-900/40 text-green-300'
+                          pkg.isActive !== false ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                         }`}
                       >
                         {pkg.isActive !== false ? <ToggleRight className="w-3.5 h-3.5" /> : <ToggleLeft className="w-3.5 h-3.5" />}
@@ -1929,14 +2114,14 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                             setPkgActiveInput(pkg.isActive !== false);
                             setShowCoinPkgModal(true);
                           }}
-                          className="bg-purple-900/70 hover:bg-purple-800 text-purple-200 text-xs px-2.5 py-1 rounded-lg"
+                          className="bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs px-2.5 py-1 rounded-lg"
                           title="تعديل الباقة"
                         >
                           <Edit2 className="w-3.5 h-3.5" />
                         </button>
                         <button
                           onClick={() => handleDeleteCoinPackage(pkg.id)}
-                          className="bg-red-950/60 hover:bg-red-900 text-red-300 text-xs px-2.5 py-1 rounded-lg"
+                          className="bg-red-50 hover:bg-red-100 text-red-600 text-xs px-2.5 py-1 rounded-lg"
                           title="حذف الباقة"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -1952,38 +2137,69 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
           {/* SECTION 5: USERS MANAGEMENT */}
           {activeSection === 'users' && (
             <div className="space-y-4">
-              <div>
-                <h2 className="text-lg font-black text-white">إدارة الحسابات وسلامة معرّفات UID</h2>
-                <p className="text-xs text-purple-300">
-                  كل مستخدم يمتلك UID فريد ثابت • الحسابات الجديدة تحصل على رتبة User فقط بدون كوينز تلقائية
-                </p>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-black text-gray-900">إدارة الحسابات وسلامة معرّفات UID</h2>
+                  <p className="text-xs text-gray-500">
+                    كل مستخدم يمتلك UID فريد ثابت • حسابات حقيقية موثقة عبر Firebase بدون أي حسابات وهمية
+                  </p>
+                </div>
+                <div className="relative w-full sm:w-72">
+                  <Search className="w-4 h-4 text-gray-400 absolute right-3 top-2.5" />
+                  <input
+                    type="text"
+                    value={usersDirectoryQuery}
+                    onChange={(e) => setUsersDirectoryQuery(e.target.value)}
+                    placeholder="ابحث بالاسم أو UID أو البريد..."
+                    className="w-full bg-white border border-gray-200 rounded-xl pr-9 pl-3 py-2 text-xs text-gray-900 placeholder-gray-400 outline-none focus:border-amber-500"
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {users.map(u => (
+                {(usersDirectoryQuery.trim() ? livoStore.searchUsersByQuery(usersDirectoryQuery) : users).map(u => (
                   <div
                     key={u.uid}
-                    className="bg-[#170b2c] p-3.5 rounded-2xl border border-purple-800/50 flex items-center justify-between"
+                    className="bg-white p-3.5 rounded-2xl border border-gray-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3"
                   >
-                    <div className="flex items-center gap-3">
-                      <img src={u.avatar} alt={u.displayName} className="w-10 h-10 rounded-full border border-purple-500 object-cover" />
-                      <div>
+                    <div className="flex items-center gap-3 min-w-0">
+                      <AvatarWithFrame
+                        avatarUrl={u.avatar}
+                        displayName={u.displayName}
+                        frameUrl={u.equippedFrameUrl}
+                        frameGlowColor={u.frameGlowColor}
+                        frameAnimated={u.frameAnimated}
+                        customIconUrl={u.customIconUrl}
+                        customIconGlow={u.customIconGlow}
+                        customIconAnimated={u.customIconAnimated}
+                        sizePx={48}
+                      />
+                      <div className="min-w-0">
                         <div className="flex items-center gap-1.5">
-                          <span className="font-bold text-xs text-white">{u.displayName}</span>
-                          {u.isVerified && <span className="text-[10px] text-blue-400">✓</span>}
+                          <span className={`font-bold text-xs text-gray-900 truncate ${u.nameGlowColor && u.nameGlowColor !== 'none' ? `name-glow-${u.nameGlowColor}` : ''}`}>
+                            {u.displayName}
+                          </span>
+                          {u.isVerified && (
+                            <LivoVerifiedBadge
+                              size={14}
+                              color={u.verifiedBadgeColor}
+                              shape={u.verifiedBadgeShape}
+                              glow={u.verifiedBadgeGlow}
+                            />
+                          )}
                         </div>
-                        <span className="text-[11px] text-purple-300 font-digits">
-                          UID: <strong className="text-amber-400">{u.uid}</strong> • @{u.username}
+                        <span className="text-[11px] text-gray-500 font-digits block truncate">
+                          UID: <strong className="text-amber-700">{u.uid}</strong> • @{u.username}
                         </span>
                         <div className="flex items-center gap-2 mt-1">
-                          <span className={`text-[9px] px-1.5 py-0.2 rounded font-bold ${
+                          <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
                             u.role === 'owner'
-                              ? 'bg-amber-500/20 text-amber-300'
+                              ? 'bg-amber-100 text-amber-800'
                               : u.role === 'supervisor'
-                              ? 'bg-cyan-500/20 text-cyan-300'
+                              ? 'bg-cyan-100 text-cyan-800'
                               : (u.role === 'charging_agent' || u.role === 'distributor_agent' || u.role === 'agent')
-                              ? 'bg-purple-500/20 text-purple-300'
-                              : 'bg-gray-800 text-gray-300'
+                              ? 'bg-purple-100 text-purple-800'
+                              : 'bg-gray-100 text-gray-700'
                           }`}>
                             {u.role === 'owner'
                               ? 'المالك الرسمي'
@@ -1997,25 +2213,469 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                               ? 'وكيل معتمد'
                               : 'مستخدم عادي'}
                           </span>
-                          <span className="text-[10px] text-purple-300 font-digits">
+                          <span className="text-[10px] text-gray-600 font-digits font-bold">
                             الرصيد: {u.coins.toLocaleString()}
                           </span>
                         </div>
                       </div>
                     </div>
 
-                    <button
-                      onClick={() => {
-                        setSelectedUserForCoins(u);
-                        setSearchCoinsUid(u.uid);
-                        setActiveSection('manual_coins');
-                      }}
-                      className="text-xs text-amber-400 hover:text-amber-300 bg-purple-950 px-2.5 py-1.5 rounded-xl border border-purple-800"
-                    >
-                      تعديل الرصيد
-                    </button>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        onClick={() => {
+                          selectUserForCosmetics(u);
+                          setActiveSection('cosmetics_studio');
+                        }}
+                        className="text-[11px] font-bold text-purple-700 hover:bg-purple-100 bg-purple-50 px-2.5 py-1.5 rounded-xl border border-purple-200 flex items-center gap-1"
+                        title="تخصيص الإطارات وتوثيق VIP"
+                      >
+                        <Crown className="w-3.5 h-3.5" />
+                        <span>VIP والتوثيق</span>
+                      </button>
+                      <button
+                        onClick={() => {
+                          setSelectedUserForCoins(u);
+                          setSearchCoinsUid(u.uid);
+                          setActiveSection('manual_coins');
+                        }}
+                        className="text-[11px] font-black text-black hover:bg-yellow-400 bg-[#FFE600] px-2.5 py-1.5 rounded-xl shadow-sm"
+                      >
+                        تعديل الرصيد
+                      </button>
+                    </div>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* SECTION 5B: ADMIN-ONLY VIP COSMETICS & BADGE STUDIO */}
+          {activeSection === 'cosmetics_studio' && (
+            <div className="space-y-4">
+              <div>
+                <h2 className="text-lg font-black text-gray-900 flex items-center gap-2">
+                  <Crown className="w-5 h-5 text-amber-500" />
+                  <span>استوديو VIP والإطارات الملكية والتوثيق المخصص (حصري للإدارة)</span>
+                </h2>
+                <p className="text-xs text-gray-500">
+                  منح وتعديل الإطارات المتوهجة، الأيقونات المرفرفة PNG، توهج الاسم، وشارات التوثيق الملونة للأعضاء — محمي بقواعد الأمان ولا يمكن للمستخدمين تعديله ذاتياً
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                {/* User Picker Column */}
+                <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-3.5 flex flex-col space-y-3">
+                  <div className="relative">
+                    <Search className="w-4 h-4 text-gray-400 absolute right-3 top-2.5" />
+                    <input
+                      type="text"
+                      value={cosmeticSearchQuery}
+                      onChange={(e) => setCosmeticSearchQuery(e.target.value)}
+                      placeholder="ابحث بالـ UID أو الاسم لاختيار مستخدم..."
+                      className="w-full bg-gray-50 border border-gray-200 rounded-xl pr-9 pl-3 py-2 text-xs text-gray-900 placeholder-gray-400 outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  <div className="flex-1 overflow-y-auto max-h-[540px] space-y-1.5">
+                    {livoStore.searchUsersByQuery(cosmeticSearchQuery).map((u) => {
+                      const active = cosmeticTargetUser?.uid === u.uid;
+                      return (
+                        <button
+                          key={u.uid}
+                          type="button"
+                          onClick={() => selectUserForCosmetics(u)}
+                          className={`w-full p-2.5 rounded-xl border text-right flex items-center justify-between gap-2 transition-all ${
+                            active
+                              ? 'bg-amber-50 border-amber-400 ring-1 ring-amber-300'
+                              : 'bg-gray-50/70 border-gray-200 hover:bg-gray-100'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <AvatarWithFrame
+                              avatarUrl={u.avatar}
+                              displayName={u.displayName}
+                              frameUrl={u.equippedFrameUrl}
+                              frameGlowColor={u.frameGlowColor}
+                              frameAnimated={u.frameAnimated}
+                              sizePx={40}
+                            />
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1">
+                                <span className="font-bold text-xs text-gray-900 truncate">{u.displayName}</span>
+                                {u.isVerified && (
+                                  <LivoVerifiedBadge
+                                    size={13}
+                                    color={u.verifiedBadgeColor}
+                                    shape={u.verifiedBadgeShape}
+                                    glow={u.verifiedBadgeGlow}
+                                  />
+                                )}
+                              </div>
+                              <span className="text-[10px] font-digits text-gray-500">UID: {u.uid}</span>
+                            </div>
+                          </div>
+                          {u.equippedFrameUrl && <Crown className="w-3.5 h-3.5 text-amber-500 shrink-0" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Editor + Live Preview Column */}
+                <div className="lg:col-span-2 space-y-4">
+                  {cosmeticTargetUser ? (
+                    <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-4 space-y-5">
+                      {/* Dual Live Previews (Dark Voice Room + Light Profile) */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="bg-[#180829] rounded-2xl p-4 flex flex-col items-center justify-center text-center border border-purple-900/60">
+                          <span className="text-[10px] text-purple-300 font-bold mb-2">معاينة داخل الغرفة الصوتية</span>
+                          <AvatarWithFrame
+                            avatarUrl={cosmeticTargetUser.avatar}
+                            displayName={cosmeticTargetUser.displayName}
+                            frameUrl={cosFrameUrl}
+                            frameGlowColor={cosFrameGlow}
+                            frameAnimated={cosFrameAnimated}
+                            customIconUrl={cosCustomIconUrl}
+                            customIconGlow={cosCustomIconGlow}
+                            customIconAnimated={cosCustomIconAnimated}
+                            sizePx={96}
+                          />
+                          <div className="mt-2.5 flex items-center gap-1.5">
+                            <span className={`font-black text-sm text-white ${cosNameGlow !== 'none' ? `name-glow-${cosNameGlow}` : ''}`}>
+                              {cosmeticTargetUser.displayName}
+                            </span>
+                            {cosIsVerified && (
+                              <LivoVerifiedBadge
+                                size={16}
+                                color={cosBadgeColor}
+                                shape={cosBadgeShape}
+                                glow={cosBadgeGlow}
+                              />
+                            )}
+                          </div>
+                          <span className="text-[10px] text-amber-300 font-digits mt-0.5">UID: {cosmeticTargetUser.uid}</span>
+                        </div>
+
+                        <div className="bg-gray-50 rounded-2xl p-4 flex flex-col items-center justify-center text-center border border-gray-200">
+                          <span className="text-[10px] text-gray-500 font-bold mb-2">معاينة في الملف الشخصي</span>
+                          <AvatarWithFrame
+                            avatarUrl={cosmeticTargetUser.avatar}
+                            displayName={cosmeticTargetUser.displayName}
+                            frameUrl={cosFrameUrl}
+                            frameGlowColor={cosFrameGlow}
+                            frameAnimated={cosFrameAnimated}
+                            customIconUrl={cosCustomIconUrl}
+                            customIconGlow={cosCustomIconGlow}
+                            customIconAnimated={cosCustomIconAnimated}
+                            sizePx={96}
+                          />
+                          <div className="mt-2.5 flex items-center gap-1.5">
+                            <span className={`font-black text-sm text-gray-900 ${cosNameGlow !== 'none' ? `name-glow-${cosNameGlow}` : ''}`}>
+                              {cosmeticTargetUser.displayName}
+                            </span>
+                            {cosIsVerified && (
+                              <LivoVerifiedBadge
+                                size={16}
+                                color={cosBadgeColor}
+                                shape={cosBadgeShape}
+                                glow={cosBadgeGlow}
+                              />
+                            )}
+                          </div>
+                          <span className="text-[10px] text-gray-500 font-digits mt-0.5">UID: {cosmeticTargetUser.uid}</span>
+                        </div>
+                      </div>
+
+                      {/* 1. Royal Frame Presets + Custom Frame PNG */}
+                      <div className="space-y-2.5 pt-2 border-t border-gray-100">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <h4 className="text-xs font-black text-gray-900">1. الإطار الملكي (14 إطار مفرغ شفاف + رفع مخصص)</h4>
+                          <label className="cursor-pointer bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 px-3 py-1.5 rounded-xl text-[11px] font-bold flex items-center gap-1.5">
+                            <Upload className="w-3.5 h-3.5" />
+                            <span>{isProcessingCosmeticImg ? 'جاري تفريغ الخلفية...' : 'رفع إطار مخصص وتفريغ خلفيته'}</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={async (e) => {
+                                const file = e.target.files?.[0];
+                                if (!file) return;
+                                setIsProcessingCosmeticImg(true);
+                                try {
+                                  const png = await removeImageBackgroundToPng(file, { maxSize: 400, tolerance: 34 });
+                                  let url = png;
+                                  try {
+                                    url = await firebaseService.uploadImage(`frames/frame_${Date.now()}.png`, png);
+                                  } catch {
+                                    url = png;
+                                  }
+                                  setCosFrameUrl(url);
+                                  showToast('تم تفريغ خلفية الإطار ورفعه بنجاح ✓');
+                                } finally {
+                                  setIsProcessingCosmeticImg(false);
+                                }
+                              }}
+                            />
+                          </label>
+                        </div>
+
+                        <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setCosFrameUrl('')}
+                            className={`p-2 rounded-xl border text-[10px] font-bold flex flex-col items-center justify-center h-16 ${
+                              !cosFrameUrl ? 'border-amber-500 bg-amber-50 text-amber-800' : 'border-gray-200 bg-gray-50 text-gray-500'
+                            }`}
+                          >
+                            <X className="w-4 h-4 mb-0.5" />
+                            <span>بدون إطار</span>
+                          </button>
+                          {ROYAL_FRAME_PRESETS.map((preset) => (
+                            <button
+                              key={preset.id}
+                              type="button"
+                              onClick={() => {
+                                setCosFrameUrl(preset.url);
+                                setCosFrameGlow(preset.defaultGlow);
+                                setCosFrameAnimated(preset.recommendedAnimated);
+                              }}
+                              className={`p-1.5 rounded-xl border flex flex-col items-center justify-center h-16 transition-all ${
+                                cosFrameUrl === preset.url
+                                  ? 'border-amber-500 bg-amber-50 ring-2 ring-amber-300'
+                                  : 'border-gray-200 bg-[#180829]/90 hover:border-amber-400'
+                              }`}
+                              title={preset.name}
+                            >
+                              <img src={preset.url} alt={preset.name} className="w-10 h-10 object-contain" />
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* Frame Glow & Flutter Animation */}
+                        <div className="flex flex-wrap items-center justify-between gap-3 bg-gray-50 p-3 rounded-xl border border-gray-200">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-[11px] font-bold text-gray-700">توهج الإطار:</span>
+                            {GLOW_COLOR_PRESETS.map((g) => (
+                              <button
+                                key={g.id}
+                                type="button"
+                                onClick={() => setCosFrameGlow(g.value)}
+                                title={g.label}
+                                className={`w-6 h-6 rounded-full border-2 transition-transform ${
+                                  cosFrameGlow === g.value ? 'border-gray-900 scale-110' : 'border-white shadow'
+                                }`}
+                                style={{ backgroundColor: g.swatch }}
+                              />
+                            ))}
+                          </div>
+                          <label className="flex items-center gap-2 text-xs font-bold text-gray-700 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={cosFrameAnimated}
+                              onChange={(e) => setCosFrameAnimated(e.target.checked)}
+                              className="w-4 h-4 accent-amber-500 rounded"
+                            />
+                            <span>تفعيل رفرفة وتنفس الإطار</span>
+                          </label>
+                        </div>
+                      </div>
+
+                      {/* 2. Custom Corner Fluttering Icon */}
+                      <div className="space-y-2.5 pt-2 border-t border-gray-100">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <h4 className="text-xs font-black text-gray-900">2. أيقونة VIP مرفرفة بجانب الصورة (PNG شفاف)</h4>
+                          <div className="flex items-center gap-2">
+                            {cosCustomIconUrl && (
+                              <button
+                                type="button"
+                                onClick={() => setCosCustomIconUrl('')}
+                                className="text-[11px] text-red-600 bg-red-50 border border-red-200 px-2.5 py-1 rounded-xl font-bold"
+                              >
+                                إزالة الأيقونة
+                              </button>
+                            )}
+                            <label className="cursor-pointer bg-purple-50 hover:bg-purple-100 text-purple-800 border border-purple-200 px-3 py-1.5 rounded-xl text-[11px] font-bold flex items-center gap-1.5">
+                              <Wand2 className="w-3.5 h-3.5" />
+                              <span>رفع صورة أيقونة وتفريغها تلقائياً</span>
+                              <input
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                onChange={async (e) => {
+                                  const file = e.target.files?.[0];
+                                  if (!file) return;
+                                  setIsProcessingCosmeticImg(true);
+                                  try {
+                                    const png = await removeImageBackgroundToPng(file, { maxSize: 220, tolerance: 34 });
+                                    let url = png;
+                                    try {
+                                      url = await firebaseService.uploadImage(`icons/icon_${Date.now()}.png`, png);
+                                    } catch {
+                                      url = png;
+                                    }
+                                    setCosCustomIconUrl(url);
+                                    showToast('تم تفريغ خلفية الأيقونة بنجاح ✓');
+                                  } finally {
+                                    setIsProcessingCosmeticImg(false);
+                                  }
+                                }}
+                              />
+                            </label>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center justify-between gap-3 bg-gray-50 p-3 rounded-xl border border-gray-200">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-[11px] font-bold text-gray-700">توهج الأيقونة:</span>
+                            {GLOW_COLOR_PRESETS.map((g) => (
+                              <button
+                                key={g.id}
+                                type="button"
+                                onClick={() => setCosCustomIconGlow(g.value)}
+                                title={g.label}
+                                className={`w-6 h-6 rounded-full border-2 ${
+                                  cosCustomIconGlow === g.value ? 'border-gray-900 scale-110' : 'border-white shadow'
+                                }`}
+                                style={{ backgroundColor: g.swatch }}
+                              />
+                            ))}
+                          </div>
+                          <label className="flex items-center gap-2 text-xs font-bold text-gray-700 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={cosCustomIconAnimated}
+                              onChange={(e) => setCosCustomIconAnimated(e.target.checked)}
+                              className="w-4 h-4 accent-purple-600 rounded"
+                            />
+                            <span>حركة رفرفة الأيقونة</span>
+                          </label>
+                        </div>
+                      </div>
+
+                      {/* 3. Verified Badge & Name Glow */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-gray-100">
+                        <div className="space-y-2 bg-gray-50 p-3 rounded-xl border border-gray-200">
+                          <div className="flex items-center justify-between">
+                            <h4 className="text-xs font-black text-gray-900">3. شارة التوثيق المخصصة</h4>
+                            <label className="flex items-center gap-1.5 text-xs font-bold text-blue-700 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={cosIsVerified}
+                                onChange={(e) => setCosIsVerified(e.target.checked)}
+                                className="w-4 h-4 accent-blue-600 rounded"
+                              />
+                              <span>الحساب موثق</span>
+                            </label>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="block text-[10px] font-bold text-gray-500 mb-1">لون الشارة:</label>
+                              <select
+                                value={cosBadgeColor}
+                                onChange={(e) => setCosBadgeColor(e.target.value as VerifiedBadgeColor)}
+                                className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1.5 text-xs text-gray-900"
+                              >
+                                <option value="blue">أزرق رسمي</option>
+                                <option value="gold">ذهبي ملكي</option>
+                                <option value="crimson">أحمر قرمزي</option>
+                                <option value="emerald">زمردي</option>
+                                <option value="purple">أرجواني VIP</option>
+                                <option value="cyan">سماوي نيون</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-bold text-gray-500 mb-1">شكل الشارة:</label>
+                              <select
+                                value={cosBadgeShape}
+                                onChange={(e) => setCosBadgeShape(e.target.value as VerifiedBadgeShape)}
+                                className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1.5 text-xs text-gray-900"
+                              >
+                                <option value="rosette">علامة صح نجمية</option>
+                                <option value="crown">تاج ملكي</option>
+                                <option value="shield">درع رسمي</option>
+                                <option value="diamond">ماسة VIP</option>
+                              </select>
+                            </div>
+                          </div>
+
+                          <label className="flex items-center gap-2 text-[11px] font-bold text-gray-700 cursor-pointer pt-1">
+                            <input
+                              type="checkbox"
+                              checked={cosBadgeGlow}
+                              onChange={(e) => setCosBadgeGlow(e.target.checked)}
+                              className="w-4 h-4 accent-amber-500 rounded"
+                            />
+                            <span>توهج ساطع خلف شارة التوثيق</span>
+                          </label>
+                        </div>
+
+                        <div className="space-y-2 bg-gray-50 p-3 rounded-xl border border-gray-200">
+                          <h4 className="text-xs font-black text-gray-900">4. إضاءة وتوهج الاسم في الغرف</h4>
+                          <div className="grid grid-cols-3 gap-1.5">
+                            {[
+                              { id: 'none', label: 'عادي' },
+                              { id: 'gold', label: 'ذهبي' },
+                              { id: 'cyan', label: 'سماوي' },
+                              { id: 'crimson', label: 'قرمزي' },
+                              { id: 'purple', label: 'أرجواني' },
+                              { id: 'emerald', label: 'زمردي' },
+                              { id: 'rainbow', label: 'قوس قزح' }
+                            ].map((opt) => (
+                              <button
+                                key={opt.id}
+                                type="button"
+                                onClick={() => setCosNameGlow(opt.id as any)}
+                                className={`py-1.5 px-2 rounded-lg text-[11px] font-bold border transition-all ${
+                                  cosNameGlow === opt.id
+                                    ? 'bg-[#FFE600] border-amber-500 text-black'
+                                    : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-100'
+                                }`}
+                              >
+                                {opt.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const res = livoStore.adminAssignUserCosmetics(
+                            cosmeticTargetUser.uid,
+                            {
+                              isVerified: cosIsVerified,
+                              verifiedBadgeColor: cosBadgeColor,
+                              verifiedBadgeShape: cosBadgeShape,
+                              verifiedBadgeGlow: cosBadgeGlow,
+                              nameGlowColor: cosNameGlow,
+                              equippedFrameUrl: cosFrameUrl,
+                              frameGlowColor: cosFrameGlow,
+                              frameAnimated: cosFrameAnimated,
+                              customIconUrl: cosCustomIconUrl,
+                              customIconGlow: cosCustomIconGlow,
+                              customIconAnimated: cosCustomIconAnimated
+                            },
+                            actorEmail
+                          );
+                          showToast(res.message);
+                        }}
+                        className="w-full py-3 bg-[#FFE600] hover:bg-yellow-400 text-black font-black text-xs rounded-xl shadow-sm transition-all flex items-center justify-center gap-2"
+                      >
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>حفظ واعتماد التخصيصات الملكية لـ {cosmeticTargetUser.displayName}</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="bg-white rounded-2xl border border-gray-200 p-10 text-center text-gray-500">
+                      <Crown className="w-12 h-12 text-amber-400 mx-auto mb-3" />
+                      <h4 className="font-bold text-sm text-gray-900">اختر عضواً من القائمة لتخصيص إطار VIP وشارة التوثيق</h4>
+                      <p className="text-xs text-gray-500 mt-1">
+                        جميع الإطارات والتوهجات والأيقونات المرفرفة يتم تفعيلها فوراً داخل الغرف والملف الشخصي
+                      </p>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -2024,14 +2684,14 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
           {activeSection === 'agencies' && (
             <div className="space-y-4">
               <div>
-                <h2 className="text-lg font-black text-white">إدارة الوكالات والوكلاء المعتمدين</h2>
-                <p className="text-xs text-purple-300">
+                <h2 className="text-lg font-black text-gray-900">إدارة الوكالات والوكلاء المعتمدين</h2>
+                <p className="text-xs text-gray-500">
                   اعتماد طلبات الوكالات ومنح صلاحية الشحن المباشر للمستخدمين
                 </p>
               </div>
 
               {agencies.length === 0 ? (
-                <div className="bg-[#170b2c] p-8 rounded-2xl border border-purple-800/40 text-center text-purple-400 text-xs">
+                <div className="bg-white p-8 rounded-2xl border border-gray-200 text-center text-gray-400 text-xs">
                   لا توجد طلبات وكالات حالياً
                 </div>
               ) : (
@@ -2039,24 +2699,24 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                   {agencies.map((agency) => (
                     <div
                       key={agency.id}
-                      className="bg-[#170b2c] p-4 rounded-2xl border border-purple-800/50 flex flex-col md:flex-row items-start md:items-center justify-between gap-4"
+                      className="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4"
                     >
                       <div className="flex items-start gap-3">
-                        <img src={agency.userAvatar} alt="" className="w-12 h-12 rounded-full border border-purple-500" />
+                        <img src={agency.userAvatar} alt="" className="w-12 h-12 rounded-full border border-gray-200 object-cover" />
                         <div>
                           <div className="flex items-center gap-2">
-                            <h4 className="font-bold text-sm text-white">{agency.agencyName}</h4>
-                            <span className="text-xs font-digits text-amber-400">UID: {agency.uid}</span>
+                            <h4 className="font-bold text-sm text-gray-900">{agency.agencyName}</h4>
+                            <span className="text-xs font-digits text-amber-700 font-bold">UID: {agency.uid}</span>
                             <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                              agency.status === 'approved' ? 'bg-green-500/20 text-green-300' : agency.status === 'pending' ? 'bg-amber-500/20 text-amber-300' : 'bg-red-500/20 text-red-300'
+                              agency.status === 'approved' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : agency.status === 'pending' ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-red-50 text-red-700 border border-red-200'
                             }`}>
                               {agency.status === 'approved' ? 'وكالة معتمدة' : agency.status === 'pending' ? 'قيد المراجعة' : 'مرفوضة'}
                             </span>
                           </div>
-                          <p className="text-xs text-purple-300 mt-0.5">
+                          <p className="text-xs text-gray-600 mt-0.5">
                             النوع: {agency.agencyType === 'charging_agent' ? 'وكيل شحن' : 'وكيل موزعين'} • هاتف: {agency.phone}
                           </p>
-                          <p className="text-[11px] text-purple-400 mt-1">{agency.experienceNotes}</p>
+                          <p className="text-[11px] text-gray-500 mt-1">{agency.experienceNotes}</p>
                         </div>
                       </div>
 
@@ -2065,19 +2725,19 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                           <>
                             <button
                               onClick={() => {
-                                livoStore.reviewAgencyApplication(agency.id, 'approved', true, 'livo.admin@gmail.com');
+                                livoStore.reviewAgencyApplication(agency.id, 'approved', true, actorEmail);
                                 showToast(`تمت الموافقة على وكالة ${agency.agencyName} وتفعيل الشحن`);
                               }}
-                              className="bg-green-600 hover:bg-green-500 text-white text-xs px-3 py-1.5 rounded-xl font-bold"
+                              className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3 py-1.5 rounded-xl font-bold"
                             >
                               موافقة وتفعيل الشحن
                             </button>
                             <button
                               onClick={() => {
-                                livoStore.reviewAgencyApplication(agency.id, 'rejected', false, 'livo.admin@gmail.com');
+                                livoStore.reviewAgencyApplication(agency.id, 'rejected', false, actorEmail);
                                 showToast('تم رفض طلب الوكالة');
                               }}
-                              className="bg-red-900/60 hover:bg-red-800 text-red-200 text-xs px-3 py-1.5 rounded-xl"
+                              className="bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-xs px-3 py-1.5 rounded-xl font-bold"
                             >
                               رفض
                             </button>
@@ -2089,7 +2749,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                               showToast(`تم ${!agency.canChargeUsers ? 'تفعيل' : 'إيقاف'} صلاحية شحن الأعضاء`);
                             }}
                             className={`text-xs px-3 py-1.5 rounded-xl font-bold transition-all ${
-                              agency.canChargeUsers ? 'bg-amber-500 text-black' : 'bg-purple-900 text-purple-300'
+                              agency.canChargeUsers ? 'bg-[#FFE600] text-black font-black shadow-sm' : 'bg-gray-100 text-gray-700'
                             }`}
                           >
                             {agency.canChargeUsers ? 'صلاحية الشحن مفعلة ✓' : 'تفعيل صلاحية الشحن'}
@@ -2107,44 +2767,35 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
           {activeSection === 'direct_support_hub' && (
             <div className="space-y-4">
               <div>
-                <h2 className="text-lg font-black text-white">مركز الإدارة والدعم المباشر للأعضاء</h2>
-                <p className="text-xs text-purple-300">
-                  مراسلة فورية مشفرة في الوقت الفعلي مع أي مستخدم عبر معرّف UID أو الاسم، مع متابعة الإشعارات والرسائل غير المقروءة
+                <h2 className="text-lg font-black text-gray-900">مركز الإدارة والدعم المباشر للأعضاء</h2>
+                <p className="text-xs text-gray-500">
+                  مراسلة فورية في الوقت الفعلي مع أي مستخدم عبر معرّف UID أو الاسم، مع متابعة الإشعارات والرسائل غير المقروءة
                 </p>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 min-h-[520px]">
                 {/* Left Panel: Search & Users / Threads List */}
-                <div className="bg-[#170b2c] rounded-2xl border border-purple-800/50 p-3 flex flex-col space-y-3">
+                <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-3 flex flex-col space-y-3">
                   <div className="relative">
-                    <Search className="w-4 h-4 text-purple-400 absolute right-3 top-3" />
+                    <Search className="w-4 h-4 text-gray-400 absolute right-3 top-2.5" />
                     <input
                       type="text"
                       value={supportSearchQuery}
                       onChange={(e) => setSupportSearchQuery(e.target.value)}
                       placeholder="ابحث بالـ UID أو الاسم أو الحساب..."
-                      className="w-full bg-[#120824] border border-purple-800/50 rounded-xl pr-9 pl-3 py-2 text-xs text-white placeholder-purple-400/50 outline-none focus:border-amber-400"
+                      className="w-full bg-gray-50 border border-gray-200 rounded-xl pr-9 pl-3 py-2 text-xs text-gray-900 placeholder-gray-400 outline-none focus:border-amber-500"
                     />
                   </div>
 
-                  <div className="text-[11px] text-purple-300 font-bold px-1 flex items-center justify-between">
+                  <div className="text-[11px] text-gray-700 font-bold px-1 flex items-center justify-between">
                     <span>قائمة المستخدمين والمحادثات</span>
-                    <span className="text-[10px] bg-purple-900/60 px-2 py-0.5 rounded font-digits text-amber-300">
+                    <span className="text-[10px] bg-amber-50 border border-amber-200 px-2 py-0.5 rounded font-digits text-amber-800">
                       {users.length} مستخدم
                     </span>
                   </div>
 
                   <div className="flex-1 overflow-y-auto space-y-1.5 max-h-[440px] pr-1">
-                    {users
-                      .filter(u => {
-                        if (!supportSearchQuery.trim()) return true;
-                        const q = supportSearchQuery.toLowerCase();
-                        return (
-                          u.uid.toLowerCase().includes(q) ||
-                          u.displayName.toLowerCase().includes(q) ||
-                          u.username.toLowerCase().includes(q)
-                        );
-                      })
+                    {livoStore.searchUsersByQuery(supportSearchQuery)
                       .map((u) => {
                         const isSelected = selectedSupportUser?.uid === u.uid;
                         const userMsgs = allMessages.filter(
@@ -2160,20 +2811,20 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                             onClick={() => setSelectedSupportUser(u)}
                             className={`w-full p-2.5 rounded-xl border text-right transition-all flex items-center justify-between gap-2.5 ${
                               isSelected
-                                ? 'bg-amber-500/20 border-amber-400/80 text-white'
-                                : 'bg-[#120824]/60 border-purple-800/30 hover:border-purple-600 text-purple-200'
+                                ? 'bg-amber-50 border-amber-400 text-gray-900'
+                                : 'bg-gray-50/70 border-gray-200 hover:bg-gray-100 text-gray-700'
                             }`}
                           >
                             <div className="flex items-center gap-2.5 min-w-0">
-                              <img src={u.avatar} alt="" className="w-9 h-9 rounded-full object-cover border border-purple-600 shrink-0" />
+                              <AvatarWithFrame avatarUrl={u.avatar} displayName={u.displayName} frameUrl={u.equippedFrameUrl} sizePx={36} />
                               <div className="min-w-0">
                                 <div className="flex items-center gap-1.5">
-                                  <span className="font-bold text-xs truncate text-white">{u.displayName}</span>
-                                  {u.isVerified && <span className="text-blue-400 text-[10px]">✓</span>}
+                                  <span className="font-bold text-xs truncate text-gray-900">{u.displayName}</span>
+                                  {u.isVerified && <LivoVerifiedBadge size={13} color={u.verifiedBadgeColor} shape={u.verifiedBadgeShape} glow={u.verifiedBadgeGlow} />}
                                 </div>
-                                <span className="text-[10px] font-digits text-amber-400 block">UID: {u.uid}</span>
+                                <span className="text-[10px] font-digits text-amber-700 block">UID: {u.uid}</span>
                                 {lastMsg && (
-                                  <p className="text-[10px] text-purple-300/80 truncate mt-0.5">
+                                  <p className="text-[10px] text-gray-500 truncate mt-0.5">
                                     {lastMsg.content}
                                   </p>
                                 )}
@@ -2192,22 +2843,22 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                 </div>
 
                 {/* Right Panel: Active Direct Conversation */}
-                <div className="md:col-span-2 bg-[#170b2c] rounded-2xl border border-purple-800/50 p-4 flex flex-col justify-between">
+                <div className="md:col-span-2 bg-white rounded-2xl border border-gray-200 shadow-sm p-4 flex flex-col justify-between">
                   {selectedSupportUser ? (
                     <>
                       {/* Chat Header */}
-                      <div className="pb-3 border-b border-purple-800/50 flex items-center justify-between">
+                      <div className="pb-3 border-b border-gray-100 flex items-center justify-between">
                         <div className="flex items-center gap-3">
-                          <img src={selectedSupportUser.avatar} alt="" className="w-10 h-10 rounded-full border border-purple-500 object-cover" />
+                          <AvatarWithFrame avatarUrl={selectedSupportUser.avatar} displayName={selectedSupportUser.displayName} frameUrl={selectedSupportUser.equippedFrameUrl} sizePx={42} />
                           <div>
                             <div className="flex items-center gap-2">
-                              <h3 className="font-black text-sm text-white">{selectedSupportUser.displayName}</h3>
-                              {selectedSupportUser.isVerified && <span className="text-xs text-blue-400">✓ موثق</span>}
+                              <h3 className="font-black text-sm text-gray-900">{selectedSupportUser.displayName}</h3>
+                              {selectedSupportUser.isVerified && <LivoVerifiedBadge size={14} color={selectedSupportUser.verifiedBadgeColor} shape={selectedSupportUser.verifiedBadgeShape} />}
                               {(selectedSupportUser.role === 'charging_agent' || selectedSupportUser.agencyType === 'charging_agent') && (
-                                <span className="text-[9px] bg-amber-500/20 text-amber-300 border border-amber-500/40 px-1.5 py-0.2 rounded font-bold">⚡ وكيل شحن</span>
+                                <span className="text-[9px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-bold">⚡ وكيل شحن</span>
                               )}
                             </div>
-                            <span className="text-xs text-purple-300 font-digits">
+                            <span className="text-xs text-gray-500 font-digits">
                               UID: {selectedSupportUser.uid} • رصيد: {selectedSupportUser.coins.toLocaleString()} كوينز • هاتف: {selectedSupportUser.phoneNumber || 'غير مسجل'}
                             </span>
                           </div>
@@ -2219,7 +2870,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                             setSearchCoinsUid(selectedSupportUser.uid);
                             setActiveSection('manual_coins');
                           }}
-                          className="bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs px-2.5 py-1.5 rounded-xl font-bold flex items-center gap-1"
+                          className="bg-[#FFE600] hover:bg-yellow-400 text-black text-xs px-2.5 py-1.5 rounded-xl font-black flex items-center gap-1"
                         >
                           <Coins className="w-3.5 h-3.5" />
                           <span>تعديل الرصيد</span>
@@ -2241,14 +2892,14 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                                 className={`flex flex-col ${isAdminMsg ? 'items-end' : 'items-start'}`}
                               >
                                 <div
-                                  className={`max-w-[80%] p-3 rounded-2xl text-xs font-medium shadow-md ${
+                                  className={`max-w-[80%] p-3 rounded-2xl text-xs font-medium shadow-sm ${
                                     isAdminMsg
-                                      ? 'bg-gradient-to-r from-amber-500 to-yellow-500 text-black rounded-tl-sm'
-                                      : 'bg-[#120824] border border-purple-800/60 text-white rounded-tr-sm'
+                                      ? 'bg-[#FFE600] text-black rounded-tl-sm'
+                                      : 'bg-gray-100 border border-gray-200 text-gray-900 rounded-tr-sm'
                                   }`}
                                 >
                                   {msg.mediaUrl && (
-                                    <div className="mb-2 rounded-xl overflow-hidden border border-black/20">
+                                    <div className="mb-2 rounded-xl overflow-hidden border border-black/10">
                                       <img
                                         src={msg.mediaUrl}
                                         alt="مرفق"
@@ -2259,7 +2910,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                                   )}
                                   <p>{msg.content}</p>
                                 </div>
-                                <span className="text-[9px] text-purple-400 font-digits mt-1 px-1">
+                                <span className="text-[9px] text-gray-400 font-digits mt-1 px-1">
                                   {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                 </span>
                               </div>
@@ -2268,18 +2919,18 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                       </div>
 
                       {/* Reply Input Bar */}
-                      <form onSubmit={handleSendAdminDirectMessage} className="pt-2 border-t border-purple-800/50 flex items-center gap-2">
+                      <form onSubmit={handleSendAdminDirectMessage} className="pt-2 border-t border-gray-100 flex items-center gap-2">
                         <input
                           type="text"
                           value={supportChatInput}
                           onChange={(e) => setSupportChatInput(e.target.value)}
                           placeholder="اكتب رد الإدارة الرسمي..."
-                          className="flex-1 bg-[#120824] border border-purple-800/60 rounded-xl px-3 py-2.5 text-xs text-white placeholder-purple-400/50 outline-none focus:border-amber-400"
+                          className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs text-gray-900 placeholder-gray-400 outline-none focus:border-amber-500"
                         />
                         <button
                           type="submit"
                           disabled={!supportChatInput.trim()}
-                          className="bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-black px-4 py-2.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all"
+                          className="bg-[#FFE600] hover:bg-yellow-400 disabled:opacity-40 text-black px-4 py-2.5 rounded-xl font-black text-xs flex items-center gap-1.5 transition-all"
                         >
                           <Send className="w-3.5 h-3.5" />
                           <span>إرسال</span>
@@ -2287,10 +2938,10 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                       </form>
                     </>
                   ) : (
-                    <div className="h-full flex flex-col items-center justify-center text-center p-8 text-purple-400">
-                      <MessageSquare className="w-12 h-12 mb-3 text-purple-600" />
-                      <h4 className="font-bold text-sm text-white">اختر مستخدماً من القائمة للبدء بالمراسلة الفورية</h4>
-                      <p className="text-xs text-purple-300 mt-1">تصل رسائلك فوراً إلى صندوق رسائل المستخدم في حسابه وتظهر مباشرة</p>
+                    <div className="h-full flex flex-col items-center justify-center text-center p-8 text-gray-400">
+                      <MessageSquare className="w-12 h-12 mb-3 text-gray-300" />
+                      <h4 className="font-bold text-sm text-gray-900">اختر مستخدماً من القائمة للبدء بالمراسلة الفورية</h4>
+                      <p className="text-xs text-gray-500 mt-1">تصل رسائلك فوراً إلى صندوق رسائل المستخدم في حسابه وتظهر مباشرة</p>
                     </div>
                   )}
                 </div>
@@ -2303,8 +2954,8 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
             <div className="space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-lg font-black text-white">إعدادات وسائل الدفع والشحن المعتمدة</h2>
-                  <p className="text-xs text-purple-300">
+                  <h2 className="text-lg font-black text-gray-900">إعدادات وسائل الدفع والشحن المعتمدة</h2>
+                  <p className="text-xs text-gray-500">
                     إدارة محافظ فودافون كاش، إنستاباي، والوسائل الإلكترونية لتلقي مدفوعات المستخدمين (تظهر فوراً في نافذة شحن الأعضاء)
                   </p>
                 </div>
@@ -2318,7 +2969,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                     setPaymentIsDefault(false);
                     setShowAddPaymentModal(true);
                   }}
-                  className="bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 text-black font-extrabold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow transition-all shrink-0"
+                  className="bg-[#FFE600] hover:bg-yellow-400 text-black font-black text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow-sm transition-all shrink-0"
                 >
                   <Plus className="w-4 h-4" />
                   <span>إضافة وسيلة دفع جديدة</span>
@@ -2329,57 +2980,57 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                 {paymentMethods.map((pm) => (
                   <div
                     key={pm.id}
-                    className={`bg-[#170b2c] p-4 rounded-2xl border transition-all flex flex-col justify-between ${
-                      pm.isActive ? 'border-purple-800/60' : 'border-red-900/40 opacity-60'
+                    className={`bg-white p-4 rounded-2xl border shadow-sm transition-all flex flex-col justify-between ${
+                      pm.isActive ? 'border-gray-200' : 'border-red-200 opacity-65'
                     }`}
                   >
                     <div>
                       <div className="flex items-center justify-between mb-2">
                         <div className="flex items-center gap-2">
-                          <span className="text-xs font-bold px-2 py-0.5 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                          <span className="text-xs font-bold px-2 py-0.5 rounded-lg bg-amber-50 text-amber-800 border border-amber-200">
                             {pm.type === 'vodafone_cash' ? 'فودافون كاش' : pm.type === 'instapay' ? 'InstaPay' : pm.type === 'orange_cash' ? 'أورنج كاش' : pm.type === 'etisalat_cash' ? 'اتصالات كاش' : 'محفظة إلكترونية'}
                           </span>
                           {pm.isDefault && (
-                            <span className="text-[10px] bg-green-500/20 text-green-300 border border-green-500/30 px-1.5 py-0.2 rounded font-bold">
+                            <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded font-bold">
                               الأساسية
                             </span>
                           )}
                         </div>
                         <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                          pm.isActive ? 'bg-green-500/20 text-green-300' : 'bg-red-500/20 text-red-300'
+                          pm.isActive ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200'
                         }`}>
                           {pm.isActive ? 'مفعلة' : 'معطلة'}
                         </span>
                       </div>
 
-                      <h4 className="font-extrabold text-sm text-white mb-1">{pm.title}</h4>
-                      
-                      <div className="bg-[#120824] p-2.5 rounded-xl border border-purple-800/40 my-2 space-y-1">
+                      <h4 className="font-extrabold text-sm text-gray-900 mb-1">{pm.title}</h4>
+
+                      <div className="bg-gray-50 p-2.5 rounded-xl border border-gray-200 my-2 space-y-1">
                         <div className="flex items-center justify-between">
-                          <span className="text-[11px] text-purple-300">رقم المحفظة / الحساب:</span>
-                          <span className="text-xs font-digits font-black text-amber-400">{pm.accountNumber}</span>
+                          <span className="text-[11px] text-gray-500">رقم المحفظة / الحساب:</span>
+                          <span className="text-xs font-digits font-black text-amber-700">{pm.accountNumber}</span>
                         </div>
                         {pm.accountHolder && (
                           <div className="flex items-center justify-between">
-                            <span className="text-[11px] text-purple-300">اسم صاحب الحساب:</span>
-                            <span className="text-xs font-bold text-white">{pm.accountHolder}</span>
+                            <span className="text-[11px] text-gray-500">اسم صاحب الحساب:</span>
+                            <span className="text-xs font-bold text-gray-900">{pm.accountHolder}</span>
                           </div>
                         )}
                       </div>
 
                       {pm.instructions && (
-                        <p className="text-[11px] text-purple-300/80 mb-3">{pm.instructions}</p>
+                        <p className="text-[11px] text-gray-500 mb-3">{pm.instructions}</p>
                       )}
                     </div>
 
-                    <div className="pt-3 border-t border-purple-800/40 flex items-center justify-between gap-2">
+                    <div className="pt-3 border-t border-gray-100 flex items-center justify-between gap-2">
                       <button
                         onClick={() => handleTogglePaymentStatus(pm)}
                         className={`text-xs px-2.5 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1 ${
-                          pm.isActive ? 'bg-amber-900/40 text-amber-300' : 'bg-green-900/40 text-green-300'
+                          pm.isActive ? 'bg-amber-50 text-amber-800 border border-amber-200' : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
                         }`}
                       >
-                        {pm.isActive ? <ToggleRight className="w-4 h-4 text-amber-400" /> : <ToggleLeft className="w-4 h-4 text-gray-400" />}
+                        {pm.isActive ? <ToggleRight className="w-4 h-4 text-amber-600" /> : <ToggleLeft className="w-4 h-4 text-gray-400" />}
                         <span>{pm.isActive ? 'تعطيل' : 'تفعيل'}</span>
                       </button>
 
@@ -2395,13 +3046,13 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                             setPaymentIsDefault(pm.isDefault || false);
                             setShowAddPaymentModal(true);
                           }}
-                          className="bg-purple-900/60 hover:bg-purple-800 text-purple-200 text-xs px-2.5 py-1.5 rounded-xl"
+                          className="bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs px-2.5 py-1.5 rounded-xl"
                         >
                           <Edit2 className="w-3.5 h-3.5" />
                         </button>
                         <button
                           onClick={() => handleDeletePaymentMethod(pm.id)}
-                          className="bg-red-950/60 hover:bg-red-900 text-red-300 text-xs px-2.5 py-1.5 rounded-xl"
+                          className="bg-red-50 hover:bg-red-100 text-red-600 text-xs px-2.5 py-1.5 rounded-xl"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -2418,23 +3069,23 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
             <div className="space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-lg font-black text-white">أكواد وقسائم الشحن الفورية (Vouchers)</h2>
-                  <p className="text-xs text-purple-300">
+                  <h2 className="text-lg font-black text-gray-900">أكواد وقسائم الشحن الفورية (Vouchers)</h2>
+                  <p className="text-xs text-gray-500">
                     إنشاء وتوليد قسائم شحن بأرصدة كوينز محددة • نظام مانع التكرار يضمن شحن الكود مرة واحدة فقط لكل حساب UID
                   </p>
                 </div>
                 <button
                   onClick={() => setShowAddCodeModal(true)}
-                  className="bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 text-black font-extrabold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow transition-all shrink-0"
+                  className="bg-[#FFE600] hover:bg-yellow-400 text-black font-black text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow-sm transition-all shrink-0"
                 >
                   <Plus className="w-4 h-4" />
                   <span>توليد كود شحن جديد</span>
                 </button>
               </div>
 
-              <div className="bg-[#170b2c] rounded-2xl border border-purple-800/50 overflow-x-auto">
+              <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-x-auto">
                 <table className="w-full text-right text-xs">
-                  <thead className="bg-[#120824] text-purple-300 border-b border-purple-800/50">
+                  <thead className="bg-gray-50 text-gray-600 border-b border-gray-200">
                     <tr>
                       <th className="p-3">كود القسيمة</th>
                       <th className="p-3">الكوينز الممنوحة</th>
@@ -2444,15 +3095,15 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                       <th className="p-3 text-center">إجراءات</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-purple-800/30 text-white">
+                  <tbody className="divide-y divide-gray-100 text-gray-900">
                     {rechargeCodes.map((code) => {
                       const isMaxReached = code.usedCount >= code.maxUses;
                       return (
-                        <tr key={code.id} className="hover:bg-purple-950/20">
-                          <td className="p-3 font-mono font-black text-amber-400 text-sm">
+                        <tr key={code.id} className="hover:bg-gray-50">
+                          <td className="p-3 font-mono font-black text-amber-700 text-sm">
                             {code.code}
                           </td>
-                          <td className="p-3 font-digits font-bold text-yellow-300">
+                          <td className="p-3 font-digits font-bold text-amber-600">
                             {code.coins.toLocaleString()} كوينز
                           </td>
                           <td className="p-3 font-digits">
@@ -2460,18 +3111,18 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                           </td>
                           <td className="p-3">
                             <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                              !isMaxReached ? 'bg-green-500/20 text-green-300' : 'bg-red-500/20 text-red-300'
+                              !isMaxReached ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200'
                             }`}>
                               {!isMaxReached ? 'صالح للاستخدام' : 'مكتمل الاستخدام'}
                             </span>
                           </td>
-                          <td className="p-3 text-purple-300 text-[11px] font-digits">
+                          <td className="p-3 text-gray-500 text-[11px] font-digits">
                             {code.usedByUids?.length ? `${code.usedByUids.length} حساب` : 'لم يُستخدم بعد'}
                           </td>
                           <td className="p-3 text-center">
                             <button
                               onClick={() => handleDeleteRechargeCode(code.id)}
-                              className="bg-red-950/60 hover:bg-red-900 text-red-300 text-xs px-2.5 py-1 rounded-lg"
+                              className="bg-red-50 hover:bg-red-100 text-red-600 text-xs px-2.5 py-1 rounded-lg font-bold"
                             >
                               حذف
                             </button>
@@ -2489,14 +3140,14 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
           {activeSection === 'verifications' && (
             <div className="space-y-4">
               <div>
-                <h2 className="text-lg font-black text-white">طلبات التوثيق بالعلامة الزرقاء الرسمية</h2>
-                <p className="text-xs text-purple-300">
+                <h2 className="text-lg font-black text-gray-900">طلبات التوثيق بالعلامة الزرقاء الرسمية</h2>
+                <p className="text-xs text-gray-500">
                   مراجعة طلبات وإيصالات توثيق الحسابات بالعلامة الزرقاء الرسمية في الغرف والملف الشخصي
                 </p>
               </div>
 
               {verifications.length === 0 ? (
-                <div className="bg-[#170b2c] p-8 rounded-2xl border border-purple-800/40 text-center text-purple-400 text-xs">
+                <div className="bg-white p-8 rounded-2xl border border-gray-200 text-center text-gray-400 text-xs">
                   لا توجد طلبات توثيق حالياً
                 </div>
               ) : (
@@ -2504,22 +3155,22 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                   {verifications.map((req) => (
                     <div
                       key={req.id}
-                      className="bg-[#170b2c] p-4 rounded-2xl border border-purple-800/50 flex flex-col md:flex-row items-start md:items-center justify-between gap-4"
+                      className="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4"
                     >
                       <div className="flex items-start gap-3">
-                        <img src={req.userAvatar} alt="" className="w-12 h-12 rounded-full border border-purple-500 object-cover" />
+                        <img src={req.userAvatar} alt="" className="w-12 h-12 rounded-full border border-gray-200 object-cover" />
                         <div>
                           <div className="flex items-center gap-2">
-                            <h4 className="font-bold text-sm text-white">@{req.username}</h4>
-                            <span className="text-xs font-digits text-amber-400">UID: {req.uid}</span>
+                            <h4 className="font-bold text-sm text-gray-900">@{req.username}</h4>
+                            <span className="text-xs font-digits text-amber-700 font-bold">UID: {req.uid}</span>
                             <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                              req.status === 'approved' ? 'bg-green-500/20 text-green-300' : req.status === 'pending' ? 'bg-amber-500/20 text-amber-300' : 'bg-red-500/20 text-red-300'
+                              req.status === 'approved' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : req.status === 'pending' ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-red-50 text-red-700 border border-red-200'
                             }`}>
                               {req.status === 'approved' ? 'موثق رسمياً' : req.status === 'pending' ? 'قيد المراجعة' : 'مرفوض'}
                             </span>
                           </div>
-                          <p className="text-xs text-purple-300 mt-1">
-                            المدة: <strong className="text-white">{req.monthsCount} شهر</strong> • الرسوم: <strong className="text-amber-400 font-digits">{req.priceEGP?.toLocaleString()} ج.م</strong> • هاتف التحويل: {req.paymentPhone}
+                          <p className="text-xs text-gray-600 mt-1">
+                            المدة: <strong className="text-gray-900">{req.monthsCount} شهر</strong> • الرسوم: <strong className="text-amber-700 font-digits">{req.priceEGP?.toLocaleString()} ج.م</strong> • هاتف التحويل: {req.paymentPhone}
                           </p>
                         </div>
                       </div>
@@ -2528,7 +3179,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                         {req.receiptUrl && (
                           <button
                             onClick={() => setZoomedVerificationReceiptUrl(req.receiptUrl)}
-                            className="bg-purple-900/80 hover:bg-purple-800 text-purple-200 text-xs px-3 py-1.5 rounded-xl font-bold flex items-center gap-1"
+                            className="bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs px-3 py-1.5 rounded-xl font-bold flex items-center gap-1"
                           >
                             <ZoomIn className="w-3.5 h-3.5" />
                             <span>معاينة الإيصال</span>
@@ -2539,10 +3190,10 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                           <>
                             <button
                               onClick={() => {
-                                livoStore.reviewVerificationRequest(req.id, 'approved', activeAdminEmail || 'livo.admin@gmail.com');
+                                livoStore.reviewVerificationRequest(req.id, 'approved', actorEmail);
                                 showToast(`تم توثيق حساب @${req.username} بالعلامة الزرقاء بنجاح ✓`);
                               }}
-                              className="bg-green-600 hover:bg-green-500 text-white text-xs px-3 py-1.5 rounded-xl font-bold flex items-center gap-1"
+                              className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3 py-1.5 rounded-xl font-bold flex items-center gap-1"
                             >
                               <Check className="w-3.5 h-3.5" />
                               <span>موافقة وتوثيق</span>
@@ -2551,7 +3202,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                               onClick={() => {
                                 setRejectVerificationId(req.id);
                               }}
-                              className="bg-red-900/60 hover:bg-red-800 text-red-200 text-xs px-3 py-1.5 rounded-xl"
+                              className="bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-xs px-3 py-1.5 rounded-xl font-bold"
                             >
                               رفض
                             </button>
@@ -2569,14 +3220,14 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
           {activeSection === 'withdrawals' && (
             <div className="space-y-4">
               <div>
-                <h2 className="text-lg font-black text-white">طلبات سحب الأرباح والتحويل النقدي</h2>
-                <p className="text-xs text-purple-300">
+                <h2 className="text-lg font-black text-gray-900">طلبات سحب الأرباح والتحويل النقدي</h2>
+                <p className="text-xs text-gray-500">
                   مراجعة طلبات تحويل الكوينز إلى نقد عبر فودافون كاش أو إنستاباي (عند الرفض يسترجع المستخدم كوينزاته تلقائياً)
                 </p>
               </div>
 
               {withdrawals.length === 0 ? (
-                <div className="bg-[#170b2c] p-8 rounded-2xl border border-purple-800/40 text-center text-purple-400 text-xs">
+                <div className="bg-white p-8 rounded-2xl border border-gray-200 text-center text-gray-400 text-xs">
                   لا توجد طلبات سحب حالياً
                 </div>
               ) : (
@@ -2584,22 +3235,22 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                   {withdrawals.map((req) => (
                     <div
                       key={req.id}
-                      className="bg-[#170b2c] p-4 rounded-2xl border border-purple-800/50 flex flex-col md:flex-row items-start md:items-center justify-between gap-4"
+                      className="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4"
                     >
                       <div>
                         <div className="flex items-center gap-2">
-                          <h4 className="font-bold text-sm text-white">طلب سحب #{req.id}</h4>
-                          <span className="text-xs font-digits text-amber-400">UID: {req.uid}</span>
+                          <h4 className="font-bold text-sm text-gray-900">طلب سحب #{req.id}</h4>
+                          <span className="text-xs font-digits text-amber-700 font-bold">UID: {req.uid}</span>
                           <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                            req.status === 'approved' ? 'bg-green-500/20 text-green-300' : req.status === 'pending' ? 'bg-amber-500/20 text-amber-300' : 'bg-red-500/20 text-red-300'
+                            req.status === 'approved' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : req.status === 'pending' ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-red-50 text-red-700 border border-red-200'
                           }`}>
                             {req.status === 'approved' ? 'تم الصرف والتحويل' : req.status === 'pending' ? 'قيد المراجعة' : 'مرفوض وتم استرجاع الكوينز'}
                           </span>
                         </div>
-                        <p className="text-xs text-purple-200 mt-1">
-                          المبلغ: <strong className="text-emerald-400 font-digits">{req.netPayoutEGP.toFixed(2)} ج.م</strong> مقابل ({req.totalCoins.toLocaleString()} كوينز)
+                        <p className="text-xs text-gray-700 mt-1">
+                          المبلغ: <strong className="text-emerald-700 font-digits">{req.netPayoutEGP.toFixed(2)} ج.م</strong> مقابل ({req.totalCoins.toLocaleString()} كوينز)
                         </p>
-                        <p className="text-[11px] text-purple-300 mt-0.5">
+                        <p className="text-[11px] text-gray-500 mt-0.5">
                           الوسيلة: {req.paymentMethod === 'vodafone_cash' ? 'فودافون كاش' : req.paymentMethod === 'instapay' ? 'InstaPay' : 'تحويل بنكي'} • التفاصيل: {req.paymentDetails}
                         </p>
                       </div>
@@ -2609,7 +3260,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                           <>
                             <button
                               onClick={() => {
-                                livoStore.reviewWithdrawalRequest(req.id, 'approved', undefined, 'livo.admin@gmail.com');
+                                livoStore.reviewWithdrawalRequest(req.id, 'approved', undefined, actorEmail);
                                 showToast(`تمت الموافقة على طلب سحب ${req.netPayoutEGP} ج.م بنجاح ✓`);
                               }}
                               className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3.5 py-1.5 rounded-xl font-bold flex items-center gap-1"
@@ -2619,7 +3270,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                             </button>
                             <button
                               onClick={() => setRejectWithdrawalId(req.id)}
-                              className="bg-red-900/60 hover:bg-red-800 text-red-200 text-xs px-3 py-1.5 rounded-xl"
+                              className="bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-xs px-3 py-1.5 rounded-xl font-bold"
                             >
                               رفض وإرجاع الكوينز
                             </button>
@@ -2633,14 +3284,14 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
             </div>
           )}
 
-          {/* SECTION: STORE & GIFTS CRUD */}
+          {/* SECTION: STORE, GIFTS CRUD & LIVE ROOM GIFT BLASTER */}
           {activeSection === 'store_items' && (
-            <div className="space-y-4">
+            <div className="space-y-5">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-lg font-black text-white">المتجر وعناصر الإطارات والدخلات والهدايا</h2>
-                  <p className="text-xs text-purple-300">
-                    العناصر المتاحة للمستخدمين للشراء بالكوينز في المتجر والغرف مع إمكانية إضافة هدايا وإدارتها لحظياً
+                  <h2 className="text-lg font-black text-gray-900">المتجر وعناصر الإطارات والهدايا وضرب الهدايا</h2>
+                  <p className="text-xs text-gray-500">
+                    إضافة وتعديل أسعار الهدايا وصور PNG الشفافة + منصة ضرب وإرسال الهدايا الطائرة مباشرة للغرف
                   </p>
                 </div>
                 <button
@@ -2649,35 +3300,149 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                     setNewGiftName('');
                     setNewGiftPrice('');
                     setNewGiftIcon('🎁');
+                    setNewGiftImageUrl('');
                     setNewGiftAnimation('heart');
                     setShowAddGiftModal(true);
                   }}
-                  className="bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 text-black font-extrabold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow transition-all shrink-0"
+                  className="bg-[#FFE600] hover:bg-yellow-400 text-black font-black text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow-sm transition-all shrink-0"
                 >
                   <Plus className="w-4 h-4" />
                   <span>إضافة هدية جديدة للمتجر</span>
                 </button>
               </div>
 
+              {/* Live Room Gift Blaster (ضرب وإرسال الهدايا للغرف) */}
+              <div className="bg-white rounded-2xl border border-amber-300 shadow-sm p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-black text-gray-900 flex items-center gap-2">
+                    <Zap className="w-4 h-4 text-amber-500" />
+                    <span>منصة ضرب وإرسال الهدايا للغرف (Live Room Gift Blaster)</span>
+                  </h3>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-bold">تأثير فوري بالصوت والطيران</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 mb-1">الغرفة المستهدفة:</label>
+                    <select
+                      value={blastRoomId || rooms[0]?.id || ''}
+                      onChange={(e) => setBlastRoomId(e.target.value)}
+                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-2.5 py-2 text-xs text-gray-900"
+                    >
+                      {rooms.length === 0 ? (
+                        <option value="">لا توجد غرف حالياً</option>
+                      ) : (
+                        rooms.map((r) => (
+                          <option key={r.id} value={r.id}>
+                            {r.title} ({r.status === 'open' ? 'مفتوحة' : 'مغلقة'})
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 mb-1">الهدية:</label>
+                    <select
+                      value={blastGiftId || giftsList[0]?.id || ''}
+                      onChange={(e) => setBlastGiftId(e.target.value)}
+                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-2.5 py-2 text-xs text-gray-900"
+                    >
+                      {giftsList.map((g) => (
+                        <option key={g.id} value={g.id}>
+                          {g.icon} {g.name} ({g.coins} 🪙)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 mb-1">عدد الضربات (Combo):</label>
+                    <select
+                      value={blastCount}
+                      onChange={(e) => setBlastCount(Number(e.target.value))}
+                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-2.5 py-2 text-xs font-digits text-gray-900"
+                    >
+                      <option value={1}>× 1</option>
+                      <option value={5}>× 5 طيران متتالي</option>
+                      <option value={10}>× 10 مهرجان هدايا</option>
+                      <option value={25}>× 25 عاصفة ملكية</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 mb-1">المستلم UID (اختياري):</label>
+                    <select
+                      value={blastRecipientUid}
+                      onChange={(e) => setBlastRecipientUid(e.target.value)}
+                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-2.5 py-2 text-xs text-gray-900"
+                    >
+                      <option value="">كافة الحضور / مالك الغرفة</option>
+                      {users.map((u) => (
+                        <option key={u.uid} value={u.uid}>
+                          {u.displayName} (UID: {u.uid})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 mb-1">اسم المرسل الظاهر:</label>
+                    <input
+                      type="text"
+                      value={blastSenderName}
+                      onChange={(e) => setBlastSenderName(e.target.value)}
+                      placeholder="إدارة LIVO الملكية"
+                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-2.5 py-2 text-xs text-gray-900"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const targetRoomId = blastRoomId || rooms[0]?.id;
+                    const targetGiftId = blastGiftId || giftsList[0]?.id;
+                    if (!targetRoomId || !targetGiftId) {
+                      showToast('يرجى اختيار غرفة وهدية صالحة أولاً');
+                      return;
+                    }
+                    const res = livoStore.adminSendGiftToTarget({
+                      roomId: targetRoomId,
+                      giftId: targetGiftId,
+                      count: blastCount,
+                      recipientUid: blastRecipientUid || undefined,
+                      senderName: blastSenderName.trim() || 'إدارة LIVO الملكية',
+                      adminEmail: actorEmail
+                    });
+                    showToast(res.message);
+                  }}
+                  className="w-full sm:w-auto px-5 py-2.5 bg-[#FFE600] hover:bg-yellow-400 text-black font-black text-xs rounded-xl shadow-sm flex items-center justify-center gap-2"
+                >
+                  <Zap className="w-4 h-4" />
+                  <span>إطلاق الهدية الطائرة داخل الغرفة الآن</span>
+                </button>
+              </div>
+
               {/* Gifts Grid */}
               <div className="space-y-2">
-                <h3 className="font-bold text-sm text-amber-400 flex items-center gap-2">
-                  <Gift className="w-4 h-4" />
+                <h3 className="font-bold text-sm text-gray-900 flex items-center gap-2">
+                  <Gift className="w-4 h-4 text-amber-500" />
                   <span>هدايا الغرف والمحادثات ({giftsList.length})</span>
                 </h3>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
                   {giftsList.map((gift) => (
                     <div
                       key={gift.id}
-                      className={`bg-[#170b2c] p-3 rounded-2xl border flex flex-col items-center text-center justify-between relative ${
-                        gift.isActive !== false ? 'border-purple-800/50' : 'border-red-900/40 opacity-60'
+                      className={`bg-white p-3 rounded-2xl border shadow-sm flex flex-col items-center text-center justify-between relative ${
+                        gift.isActive !== false ? 'border-gray-200' : 'border-red-200 opacity-60'
                       }`}
                     >
                       <div className="w-full flex items-center justify-between mb-1">
                         <button
                           onClick={() => handleToggleGiftStatus(gift)}
                           className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
-                            gift.isActive !== false ? 'bg-green-500/20 text-green-300' : 'bg-red-500/20 text-red-300'
+                            gift.isActive !== false ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'
                           }`}
                           title={gift.isActive !== false ? 'تعطيل' : 'تفعيل'}
                         >
@@ -2690,29 +3455,34 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                               setNewGiftName(gift.name);
                               setNewGiftPrice(String(gift.coins));
                               setNewGiftIcon(gift.icon);
+                              setNewGiftImageUrl(gift.imageUrl || '');
                               setNewGiftAnimation(gift.animationType);
                               setShowAddGiftModal(true);
                             }}
-                            className="text-purple-300 hover:text-amber-300 p-1"
+                            className="text-gray-500 hover:text-amber-600 p-1"
                             title="تعديل الهدية"
                           >
                             <Edit2 className="w-3.5 h-3.5" />
                           </button>
                           <button
                             onClick={() => handleDeleteGift(gift.id)}
-                            className="text-red-400 hover:text-red-300 p-1"
+                            className="text-red-500 hover:text-red-700 p-1"
                             title="حذف الهدية"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       </div>
-                      <span className="text-4xl filter drop-shadow my-1">{gift.icon}</span>
-                      <h4 className="font-bold text-xs text-white mt-1">{gift.name}</h4>
-                      <span className="text-xs font-digits font-bold text-amber-300 mt-0.5">
+                      {gift.imageUrl ? (
+                        <img src={gift.imageUrl} alt={gift.name} className="w-14 h-14 object-contain my-1 livo-flutter" />
+                      ) : (
+                        <span className="text-4xl filter drop-shadow my-1">{gift.icon}</span>
+                      )}
+                      <h4 className="font-bold text-xs text-gray-900 mt-1">{gift.name}</h4>
+                      <span className="text-xs font-digits font-black text-amber-600 mt-0.5">
                         {gift.coins.toLocaleString()} كوينز
                       </span>
-                      <span className="text-[9px] text-purple-400 mt-0.5">
+                      <span className="text-[9px] text-gray-400 mt-0.5">
                         تأثير: {gift.animationType}
                       </span>
                     </div>
@@ -2721,19 +3491,23 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
               </div>
 
               {/* Store Items (Frames & Entrances) */}
-              <div className="space-y-2 pt-4 border-t border-purple-800/50">
-                <h3 className="font-bold text-sm text-yellow-300 flex items-center gap-2">
-                  <Sparkles className="w-4 h-4" />
+              <div className="space-y-2 pt-4 border-t border-gray-200">
+                <h3 className="font-bold text-sm text-gray-900 flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-amber-500" />
                   <span>إطارات ودخلات المتجر الحصرية ({storeItemsList.length})</span>
                 </h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                   {storeItemsList.map((item) => (
-                    <div key={item.id} className="bg-[#170b2c] p-3 rounded-2xl border border-purple-800/40 flex items-center gap-3">
-                      <span className="text-3xl filter drop-shadow">{item.image}</span>
+                    <div key={item.id} className="bg-white p-3 rounded-2xl border border-gray-200 shadow-sm flex items-center gap-3">
+                      {item.imageUrl ? (
+                        <img src={item.imageUrl} alt={item.name} className="w-11 h-11 object-contain shrink-0" />
+                      ) : (
+                        <span className="text-3xl filter drop-shadow shrink-0">{item.image}</span>
+                      )}
                       <div>
-                        <h4 className="font-bold text-xs text-white">{item.name}</h4>
-                        <span className="text-[10px] text-purple-300 block">{item.description}</span>
-                        <span className="text-xs font-digits font-bold text-amber-300">{item.priceCoins.toLocaleString()} كوينز</span>
+                        <h4 className="font-bold text-xs text-gray-900">{item.name}</h4>
+                        <span className="text-[10px] text-gray-500 block">{item.description}</span>
+                        <span className="text-xs font-digits font-black text-amber-600">{item.priceCoins.toLocaleString()} كوينز</span>
                       </div>
                     </div>
                   ))}
@@ -2746,15 +3520,15 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
           {activeSection === 'official_room' && (
             <div className="space-y-4 max-w-2xl">
               <div>
-                <h2 className="text-lg font-black text-white">الغرفة الرسمية LIVO Admin والإعلانات</h2>
-                <p className="text-xs text-purple-300">
+                <h2 className="text-lg font-black text-gray-900">الغرفة الرسمية LIVO Admin والإعلانات</h2>
+                <p className="text-xs text-gray-500">
                   تظهر في صدارة قائمة الرسائل والغرف لجميع المستخدمين ولا يمكن حذفها
                 </p>
               </div>
 
-              <div className="bg-[#170b2c] p-4 rounded-2xl border border-purple-800/50 space-y-3">
+              <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm space-y-3">
                 <div>
-                  <label className="block text-xs font-bold text-purple-200 mb-1">
+                  <label className="block text-xs font-bold text-gray-700 mb-1">
                     حالة الغرفة الرسمية:
                   </label>
                   <select
@@ -2765,7 +3539,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                       livoStore.setOfficialRoomStatus(st, announcementText);
                       showToast(`تم تغيير حالة الغرفة الرسمية إلى: ${st}`);
                     }}
-                    className="w-full bg-[#120824] border border-purple-800/60 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 outline-none"
                   >
                     <option value="open">مفتوحة ومتاحة لجميع المستخدمين (Open)</option>
                     <option value="closed">مغلقة مؤقتاً (Closed)</option>
@@ -2774,14 +3548,14 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-purple-200 mb-1">
+                  <label className="block text-xs font-bold text-gray-700 mb-1">
                     نص الإعلان الرسمي المعروض في الغرفة:
                   </label>
                   <textarea
                     value={announcementText}
                     onChange={(e) => setAnnouncementText(e.target.value)}
                     rows={3}
-                    className="w-full bg-[#120824] border border-purple-800/60 rounded-xl p-3 text-xs text-white outline-none"
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-xs text-gray-900 outline-none focus:border-amber-500"
                   />
                 </div>
 
@@ -2790,7 +3564,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                     livoStore.setOfficialRoomStatus(officialRoomStatus, announcementText);
                     showToast('تم تحديث إعلان الغرفة الرسمية والمزامنة فوراً ✓');
                   }}
-                  className="w-full py-2.5 bg-[#FFE600] text-black font-black text-xs rounded-xl shadow-md hover:bg-yellow-400"
+                  className="w-full py-2.5 bg-[#FFE600] text-black font-black text-xs rounded-xl shadow-sm hover:bg-yellow-400"
                 >
                   نشر الإعلان لجميع المستخدمين
                 </button>
@@ -2802,53 +3576,68 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
           {activeSection === 'bans' && (
             <div className="space-y-4">
               <div>
-                <h2 className="text-lg font-black text-white">إدارة الحظر والعقوبات</h2>
-                <p className="text-xs text-purple-300">
+                <h2 className="text-lg font-black text-gray-900">إدارة الحظر والعقوبات</h2>
+                <p className="text-xs text-gray-500">
                   حظر الحساب أو الجهاز مع الاحتفاظ بالسجل وعدم حذف البيانات المالية
                 </p>
               </div>
 
-              <form onSubmit={handleExecuteBan} className="bg-[#170b2c] p-4 rounded-2xl border border-purple-800/50 space-y-3">
+              <form onSubmit={handleExecuteBan} className="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm space-y-3">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-semibold text-purple-200 mb-1">ابحث عن المستخدم:</label>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1">ابحث عن المستخدم بالـ UID أو الاسم:</label>
                     <div className="flex gap-2">
                       <input
                         type="text"
                         value={banSearchUid}
                         onChange={(e) => setBanSearchUid(e.target.value)}
-                        placeholder="أدخل معرّف UID"
-                        className="flex-1 bg-[#120824] border border-purple-800/60 rounded-xl px-3 py-1.5 text-xs text-white"
+                        placeholder="أدخل معرّف UID أو الاسم"
+                        className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-3 py-1.5 text-xs text-gray-900"
                       />
                       <button
                         type="button"
                         onClick={() => {
-                          const found = users.find(u => u.uid === banSearchUid.trim());
-                          if (found) setSelectedUserForBan(found);
+                          const matches = livoStore.searchUsersByQuery(banSearchUid);
+                          if (matches.length > 0) setSelectedUserForBan(matches[0]);
                           else showToast('المستخدم غير موجود');
                         }}
-                        className="bg-purple-900 px-3 py-1.5 text-xs rounded-xl font-bold"
+                        className="bg-[#FFE600] hover:bg-yellow-400 text-black px-3 py-1.5 text-xs rounded-xl font-black"
                       >
                         تحديد
                       </button>
                     </div>
+                    {banSearchUid.trim().length > 0 && (
+                      <div className="mt-1.5 max-h-36 overflow-y-auto border border-gray-200 rounded-xl divide-y divide-gray-100 bg-gray-50">
+                        {livoStore.searchUsersByQuery(banSearchUid).slice(0, 6).map((u) => (
+                          <button
+                            key={u.uid}
+                            type="button"
+                            onClick={() => setSelectedUserForBan(u)}
+                            className="w-full px-2.5 py-1.5 flex items-center justify-between text-right hover:bg-amber-50 text-xs"
+                          >
+                            <span className="font-bold text-gray-900">{u.displayName}</span>
+                            <span className="font-digits text-amber-700">UID: {u.uid}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   {selectedUserForBan && (
-                    <div className="flex items-center gap-2 bg-[#120824] p-2 rounded-xl border border-purple-800/40">
-                      <img src={selectedUserForBan.avatar} alt="" className="w-8 h-8 rounded-full" />
-                      <span className="text-xs font-bold text-white">{selectedUserForBan.displayName} (UID: {selectedUserForBan.uid})</span>
+                    <div className="flex items-center gap-2 bg-gray-50 p-2 rounded-xl border border-gray-200 self-start">
+                      <img src={selectedUserForBan.avatar} alt="" className="w-8 h-8 rounded-full object-cover" />
+                      <span className="text-xs font-bold text-gray-900">{selectedUserForBan.displayName} (UID: {selectedUserForBan.uid})</span>
                     </div>
                   )}
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-semibold text-purple-200 mb-1">نوع الحظر:</label>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1">نوع الحظر:</label>
                     <select
                       value={banType}
                       onChange={(e) => setBanType(e.target.value as any)}
-                      className="w-full bg-[#120824] border border-purple-800/60 rounded-xl px-2.5 py-1.5 text-xs text-white"
+                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-2.5 py-1.5 text-xs text-gray-900"
                     >
                       <option value="account">حظر الحساب فقط</option>
                       <option value="device">حظر الجهاز فقط</option>
@@ -2857,11 +3646,11 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-purple-200 mb-1">المدة:</label>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1">المدة:</label>
                     <select
                       value={banDuration}
                       onChange={(e) => setBanDuration(e.target.value as any)}
-                      className="w-full bg-[#120824] border border-purple-800/60 rounded-xl px-2.5 py-1.5 text-xs text-white"
+                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-2.5 py-1.5 text-xs text-gray-900"
                     >
                       <option value="temporary">مؤقت (7 أيام)</option>
                       <option value="permanent">دائم نهائي</option>
@@ -2870,13 +3659,13 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-purple-200 mb-1">سبب الحظر:</label>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">سبب الحظر:</label>
                   <input
                     type="text"
                     value={banReason}
                     onChange={(e) => setBanReason(e.target.value)}
                     placeholder="مخالفة معايير المجتمع، سب وقذف، محاولة احتيال"
-                    className="w-full bg-[#120824] border border-purple-800/60 rounded-xl px-3 py-2 text-xs text-white"
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900"
                     required
                   />
                 </div>
@@ -2891,30 +3680,30 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
 
               {/* Bans List */}
               <div className="space-y-3">
-                <h3 className="font-bold text-xs text-white">قائمة المحظورين وسجل العقوبات</h3>
+                <h3 className="font-bold text-xs text-gray-900">قائمة المحظورين وسجل العقوبات</h3>
                 {bans.length === 0 ? (
-                  <div className="bg-[#170b2c] p-4 rounded-xl border border-purple-800/40 text-center text-xs text-purple-400">
+                  <div className="bg-white p-4 rounded-xl border border-gray-200 text-center text-xs text-gray-400">
                     لا يوجد مستخدمون محظورون حالياً
                   </div>
                 ) : (
                   bans.map(b => (
                     <div
                       key={b.id}
-                      className={`p-3.5 rounded-2xl border flex items-center justify-between ${
-                        b.status === 'active' ? 'bg-red-950/30 border-red-800/50' : 'bg-[#170b2c] border-purple-800/40 opacity-75'
+                      className={`p-3.5 rounded-2xl border shadow-sm flex items-center justify-between ${
+                        b.status === 'active' ? 'bg-red-50/70 border-red-200' : 'bg-white border-gray-200 opacity-80'
                       }`}
                     >
                       <div>
                         <div className="flex items-center gap-2">
-                          <span className="font-bold text-xs text-white">{b.username}</span>
-                          <span className="font-digits text-xs text-amber-300">UID: {b.uid}</span>
+                          <span className="font-bold text-xs text-gray-900">{b.username}</span>
+                          <span className="font-digits text-xs text-amber-700 font-bold">UID: {b.uid}</span>
                           <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${
-                            b.status === 'active' ? 'bg-red-500/20 text-red-300' : 'bg-green-500/20 text-green-300'
+                            b.status === 'active' ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'
                           }`}>
                             {b.status === 'active' ? 'حظر نشط' : 'تم رفع الحظر'}
                           </span>
                         </div>
-                        <p className="text-[11px] text-purple-300 mt-1">
+                        <p className="text-[11px] text-gray-600 mt-1">
                           نوع: {b.banType} • المدة: {b.duration} • السبب: {b.reason}
                         </p>
                       </div>
@@ -2922,7 +3711,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                       {b.status === 'active' && (
                         <button
                           onClick={() => setUnbanModalRecord(b)}
-                          className="bg-green-600 hover:bg-green-500 text-white font-bold text-xs px-3 py-1.5 rounded-xl"
+                          className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3 py-1.5 rounded-xl"
                         >
                           فك الحظر
                         </button>
@@ -2938,39 +3727,39 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
           {activeSection === 'supervisors' && (
             <div className="space-y-4 max-w-3xl">
               <div>
-                <h2 className="text-lg font-black text-white">إدارة صلاحيات المشرفين الحقيقية</h2>
-                <p className="text-xs text-purple-300">
+                <h2 className="text-lg font-black text-gray-900">إدارة صلاحيات المشرفين الحقيقية</h2>
+                <p className="text-xs text-gray-500">
                   تتم المزامنة مباشرة مع Firebase • المشرف المفعّل يستطيع دخول لوحة الإدارة بحسابه المعتمد
                 </p>
               </div>
 
-              <div className="bg-[#170b2c] p-4 rounded-2xl border border-purple-800/50 space-y-3">
+              <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm space-y-3">
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <input
                     type="text"
                     value={newSupervisorUid}
                     onChange={(e) => setNewSupervisorUid(e.target.value)}
                     placeholder="UID المستخدم (اختياري)"
-                    className="bg-[#120824] border border-purple-800/60 rounded-xl px-3 py-2 text-xs text-white font-digits outline-none focus:border-amber-400"
+                    className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 font-digits outline-none focus:border-amber-500"
                   />
                   <input
                     type="text"
                     value={newSupervisorName}
                     onChange={(e) => setNewSupervisorName(e.target.value)}
                     placeholder="الاسم الكامل للمشرف"
-                    className="bg-[#120824] border border-purple-800/60 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-amber-400"
+                    className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 outline-none focus:border-amber-500"
                   />
                   <input
                     type="email"
                     value={newSupervisorEmail}
                     onChange={(e) => setNewSupervisorEmail(e.target.value)}
                     placeholder="البريد الإلكتروني (Gmail) *"
-                    className="bg-[#120824] border border-purple-800/60 rounded-xl px-3 py-2 text-xs text-white font-digits outline-none focus:border-amber-400"
+                    className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 font-digits outline-none focus:border-amber-500"
                   />
                 </div>
 
                 <div>
-                  <span className="text-[11px] font-bold text-purple-200 block mb-1.5">الصلاحيات الممنوحة:</span>
+                  <span className="text-[11px] font-bold text-gray-700 block mb-1.5">الصلاحيات الممنوحة:</span>
                   <div className="flex flex-wrap gap-2">
                     {SUPERVISOR_PERMISSIONS_OPTIONS.map((perm) => {
                       const checked = newSupervisorPermissions.includes(perm.id);
@@ -2985,8 +3774,8 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                           }
                           className={`text-[11px] px-2.5 py-1 rounded-lg border font-bold transition-all ${
                             checked
-                              ? 'bg-amber-500/20 border-amber-400 text-amber-300'
-                              : 'bg-[#120824] border-purple-800/60 text-purple-400'
+                              ? 'bg-[#FFE600] border-amber-500 text-black'
+                              : 'bg-gray-50 border-gray-200 text-gray-600'
                           }`}
                         >
                           {checked ? '✓ ' : '+ '}{perm.label}
@@ -3015,7 +3804,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                     setNewSupervisorPermissions(['recharges', 'bans', 'rooms']);
                     showToast('تمت إضافة المشرف وحفظ صلاحياته في قاعدة البيانات ✓');
                   }}
-                  className="w-full py-2.5 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 text-black font-black text-xs rounded-xl shadow"
+                  className="w-full py-2.5 bg-[#FFE600] hover:bg-yellow-400 text-black font-black text-xs rounded-xl shadow-sm"
                 >
                   إضافة وتفعيل المشرف في قاعدة البيانات
                 </button>
@@ -3023,24 +3812,24 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
 
               <div className="space-y-2.5">
                 {supervisors.length === 0 ? (
-                  <div className="bg-[#170b2c] p-6 rounded-2xl border border-purple-800/40 text-center text-xs text-purple-400">
+                  <div className="bg-white p-6 rounded-2xl border border-gray-200 text-center text-xs text-gray-400">
                     لا يوجد مشرفون مضافون حالياً
                   </div>
                 ) : (
                   supervisors.map((s) => (
-                    <div key={s.id} className="bg-[#170b2c] p-3.5 rounded-2xl border border-purple-800/50 space-y-2.5">
+                    <div key={s.id} className="bg-white p-3.5 rounded-2xl border border-gray-200 shadow-sm space-y-2.5">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div>
                           <div className="flex items-center gap-2">
-                            <span className="font-bold text-xs text-white">{s.name}</span>
-                            <span className="text-[11px] text-amber-400 font-digits">UID: {s.uid}</span>
+                            <span className="font-bold text-xs text-gray-900">{s.name}</span>
+                            <span className="text-[11px] text-amber-700 font-digits font-bold">UID: {s.uid}</span>
                             <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${
-                              s.isActive ? 'bg-green-500/20 text-green-300' : 'bg-red-500/20 text-red-300'
+                              s.isActive ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200'
                             }`}>
                               {s.isActive ? 'نشط ومفعّل' : 'موقوف'}
                             </span>
                           </div>
-                          <span className="text-[11px] text-purple-300 font-digits block mt-0.5">{s.email}</span>
+                          <span className="text-[11px] text-gray-500 font-digits block mt-0.5">{s.email}</span>
                         </div>
 
                         <div className="flex items-center gap-1.5">
@@ -3053,7 +3842,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                                 setEditingSupervisorPerms([...s.permissions]);
                               }
                             }}
-                            className="text-xs px-2.5 py-1.5 rounded-xl bg-purple-900/60 hover:bg-purple-800 text-purple-200 font-bold"
+                            className="text-xs px-2.5 py-1.5 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold"
                           >
                             الصلاحيات
                           </button>
@@ -3063,7 +3852,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                               showToast(`تم ${s.isActive ? 'تعطيل' : 'تفعيل'} المشرف ${s.name}`);
                             }}
                             className={`text-xs px-2.5 py-1.5 rounded-xl font-bold ${
-                              s.isActive ? 'bg-amber-900/40 text-amber-300' : 'bg-green-900/40 text-green-300'
+                              s.isActive ? 'bg-amber-50 text-amber-800 border border-amber-200' : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
                             }`}
                           >
                             {s.isActive ? 'تعطيل' : 'تفعيل'}
@@ -3073,7 +3862,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                               livoStore.removeSupervisor(s.id);
                               showToast('تم إزالة المشرف وسحب صلاحياته من النظام');
                             }}
-                            className="text-xs px-2.5 py-1.5 rounded-xl bg-red-950/60 hover:bg-red-900 text-red-300"
+                            className="text-xs px-2.5 py-1.5 rounded-xl bg-red-50 hover:bg-red-100 text-red-600"
                             title="حذف المشرف"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -3082,7 +3871,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                       </div>
 
                       {editingSupervisorId === s.id ? (
-                        <div className="pt-2 border-t border-purple-800/40 space-y-2">
+                        <div className="pt-2 border-t border-gray-100 space-y-2">
                           <div className="flex flex-wrap gap-1.5">
                             {SUPERVISOR_PERMISSIONS_OPTIONS.map((perm) => {
                               const checked = editingSupervisorPerms.includes(perm.id);
@@ -3097,8 +3886,8 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                                   }
                                   className={`text-[10px] px-2 py-1 rounded-lg border font-bold ${
                                     checked
-                                      ? 'bg-amber-500/20 border-amber-400 text-amber-300'
-                                      : 'bg-[#120824] border-purple-800/50 text-purple-400'
+                                      ? 'bg-[#FFE600] border-amber-500 text-black'
+                                      : 'bg-gray-50 border-gray-200 text-gray-600'
                                   }`}
                                 >
                                   {checked ? '✓ ' : '+ '}{perm.label}
@@ -3122,7 +3911,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                           {s.permissions.map((pId) => {
                             const found = SUPERVISOR_PERMISSIONS_OPTIONS.find(o => o.id === pId);
                             return (
-                              <span key={pId} className="text-[10px] bg-purple-950 text-purple-200 border border-purple-800/40 px-2 py-0.5 rounded-md">
+                              <span key={pId} className="text-[10px] bg-gray-100 text-gray-700 border border-gray-200 px-2 py-0.5 rounded-md font-bold">
                                 {found?.label || pId}
                               </span>
                             );
@@ -3140,14 +3929,14 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
           {activeSection === 'financial_logs' && (
             <div className="space-y-4">
               <div>
-                <h2 className="text-lg font-black text-white">السجل المالي الدائم</h2>
-                <p className="text-xs text-purple-300">
+                <h2 className="text-lg font-black text-gray-900">السجل المالي الدائم</h2>
+                <p className="text-xs text-gray-500">
                   سجل غير قابل للتعديل أو الحذف لجميع عمليات الشحن والخصم والإدارة
                 </p>
               </div>
 
               {audits.length === 0 ? (
-                <div className="bg-[#170b2c] p-6 rounded-2xl border border-purple-800/40 text-center text-xs text-purple-400">
+                <div className="bg-white p-6 rounded-2xl border border-gray-200 text-center text-xs text-gray-400">
                   لا توجد عمليات مسجلة حتى الآن
                 </div>
               ) : (
@@ -3155,24 +3944,24 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                   {audits.map(item => (
                     <div
                       key={item.id}
-                      className="bg-[#170b2c] p-3 rounded-xl border border-purple-800/40 flex items-center justify-between text-xs"
+                      className="bg-white p-3 rounded-xl border border-gray-200 shadow-sm flex items-center justify-between text-xs"
                     >
                       <div>
                         <div className="flex items-center gap-2">
-                          <span className="font-bold text-white">{item.username}</span>
-                          <span className="font-digits text-amber-300">UID: {item.uid}</span>
+                          <span className="font-bold text-gray-900">{item.username}</span>
+                          <span className="font-digits text-amber-700 font-bold">UID: {item.uid}</span>
                           <span className={`font-digits font-bold px-1.5 py-0.5 rounded ${
-                            item.coinsChange > 0 ? 'bg-green-500/20 text-green-300' : 'bg-red-500/20 text-red-300'
+                            item.coinsChange > 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'
                           }`}>
                             {item.coinsChange > 0 ? `+${item.coinsChange.toLocaleString()}` : item.coinsChange.toLocaleString()} كوينز
                           </span>
                         </div>
-                        <p className="text-purple-300 text-[11px] mt-0.5">
+                        <p className="text-gray-500 text-[11px] mt-0.5">
                           {item.reason} • المنفذ: {item.performedBy}
                         </p>
                       </div>
 
-                      <div className="text-left font-digits text-[10px] text-purple-400">
+                      <div className="text-left font-digits text-[10px] text-gray-500">
                         <span>الرصيد: {item.balanceBefore.toLocaleString()} ➔ {item.balanceAfter.toLocaleString()}</span>
                         <span className="block">{new Date(item.createdAt).toLocaleTimeString()}</span>
                       </div>
@@ -3188,18 +3977,18 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
 
       {/* MODAL: ZOOM RECEIPT */}
       {zoomedReceiptUrl && (
-        <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="relative max-w-2xl max-h-[90vh] bg-[#170b2c] rounded-2xl border border-purple-800 overflow-hidden shadow-2xl flex flex-col">
-            <div className="p-3 border-b border-purple-800/50 flex items-center justify-between">
-              <span className="text-xs font-bold text-white">معاينة إيصال السداد بدقة عالية</span>
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="relative max-w-2xl max-h-[90vh] bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-2xl flex flex-col">
+            <div className="p-3 border-b border-gray-200 flex items-center justify-between">
+              <span className="text-xs font-bold text-gray-900">معاينة إيصال السداد بدقة عالية</span>
               <button
                 onClick={() => setZoomedReceiptUrl(null)}
-                className="text-purple-400 hover:text-white p-1"
+                className="text-gray-400 hover:text-gray-700 p-1"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="p-3 flex items-center justify-center overflow-auto max-h-[80vh]">
+            <div className="p-3 flex items-center justify-center overflow-auto max-h-[80vh] bg-gray-50">
               <img
                 src={zoomedReceiptUrl}
                 alt="Zoomed Receipt"
@@ -3212,15 +4001,15 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
 
       {/* MODAL: REJECT RECHARGE REASON */}
       {rejectModalReqId && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#170b2c] w-full max-w-sm rounded-2xl border border-purple-800 p-4 space-y-3 text-white">
-            <h3 className="font-bold text-sm text-red-400">سبب رفض طلب الشحن:</h3>
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-sm rounded-2xl border border-gray-200 shadow-2xl p-4 space-y-3 text-gray-900">
+            <h3 className="font-bold text-sm text-red-600">سبب رفض طلب الشحن:</h3>
             <textarea
               value={rejectReason}
               onChange={(e) => setRejectReason(e.target.value)}
               placeholder="مثال: الإيصال غير مطابق، المبلغ لم يصل للحساب..."
               rows={3}
-              className="w-full bg-[#120824] border border-purple-800/60 rounded-xl p-2.5 text-xs text-white outline-none"
+              className="w-full bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-xs text-gray-900 outline-none focus:border-red-400"
             />
             <div className="flex items-center gap-2">
               <button
@@ -3231,7 +4020,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
               </button>
               <button
                 onClick={() => setRejectModalReqId(null)}
-                className="px-4 py-2 bg-purple-900 text-purple-200 text-xs rounded-xl"
+                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-xs rounded-xl"
               >
                 إلغاء
               </button>
@@ -3242,23 +4031,23 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
 
       {/* MODAL: CONFIRM COIN ADJUSTMENT */}
       {showCoinConfirmModal && selectedUserForCoins && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#170b2c] w-full max-w-sm rounded-2xl border border-amber-500/60 p-5 space-y-3 text-white text-center">
-            <AlertTriangle className="w-10 h-10 text-amber-400 mx-auto" />
-            <h3 className="font-bold text-sm text-white">تأكيد تعديل رصيد المستخدم</h3>
-            <p className="text-xs text-purple-200 leading-relaxed">
-              هل أنت متأكد من تنفيذ عملية ({coinActionType === 'add' ? 'إضافة' : coinActionType === 'deduct' ? 'خصم' : 'ضبط'}) كمية <strong className="font-digits text-amber-300">{parseInt(coinAmountInput, 10).toLocaleString()}</strong> كوينز للمستخدم <strong className="text-white">{selectedUserForCoins.displayName}</strong> (UID: {selectedUserForCoins.uid})؟
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-sm rounded-2xl border border-amber-300 shadow-2xl p-5 space-y-3 text-gray-900 text-center">
+            <AlertTriangle className="w-10 h-10 text-amber-500 mx-auto" />
+            <h3 className="font-bold text-sm text-gray-900">تأكيد تعديل رصيد المستخدم</h3>
+            <p className="text-xs text-gray-600 leading-relaxed">
+              هل أنت متأكد من تنفيذ عملية ({coinActionType === 'add' ? 'إضافة' : coinActionType === 'deduct' ? 'خصم' : 'ضبط'}) كمية <strong className="font-digits text-amber-700">{parseInt(coinAmountInput, 10).toLocaleString()}</strong> كوينز للمستخدم <strong className="text-gray-900">{selectedUserForCoins.displayName}</strong> (UID: {selectedUserForCoins.uid})؟
             </p>
             <div className="flex items-center gap-2 pt-2">
               <button
                 onClick={handleExecuteCoinAdjustment}
-                className="flex-1 py-2.5 bg-gradient-to-r from-amber-500 to-yellow-500 text-black font-extrabold text-xs rounded-xl"
+                className="flex-1 py-2.5 bg-[#FFE600] hover:bg-yellow-400 text-black font-black text-xs rounded-xl shadow-sm"
               >
                 نعم، تنفيذ الآن
               </button>
               <button
                 onClick={() => setShowCoinConfirmModal(false)}
-                className="px-4 py-2.5 bg-purple-900 text-white text-xs rounded-xl"
+                className="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-xs rounded-xl"
               >
                 تراجع
               </button>
@@ -3269,26 +4058,26 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
 
       {/* MODAL: UNBAN REASON */}
       {unbanModalRecord && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#170b2c] w-full max-w-sm rounded-2xl border border-green-500/60 p-4 space-y-3 text-white">
-            <h3 className="font-bold text-sm text-green-400">فك الحظر عن المستخدم:</h3>
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-sm rounded-2xl border border-emerald-300 shadow-2xl p-4 space-y-3 text-gray-900">
+            <h3 className="font-bold text-sm text-emerald-700">فك الحظر عن المستخدم:</h3>
             <input
               type="text"
               value={unbanReasonText}
               onChange={(e) => setUnbanReasonText(e.target.value)}
               placeholder="سبب فك الحظر (مثال: انتهاء فترة العقوبة، قبول التماس)"
-              className="w-full bg-[#120824] border border-purple-800/60 rounded-xl p-2 text-xs text-white"
+              className="w-full bg-gray-50 border border-gray-200 rounded-xl p-2 text-xs text-gray-900"
             />
             <div className="flex items-center gap-2">
               <button
                 onClick={handleExecuteUnban}
-                className="flex-1 py-2 bg-green-600 hover:bg-green-500 text-white font-bold text-xs rounded-xl"
+                className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl"
               >
                 تأكيد فك الحظر
               </button>
               <button
                 onClick={() => setUnbanModalRecord(null)}
-                className="px-4 py-2 bg-purple-900 text-white text-xs rounded-xl"
+                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-xs rounded-xl"
               >
                 إلغاء
               </button>
@@ -3299,16 +4088,16 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
 
       {/* MODAL: CREATE ADVERTISEMENT */}
       {showCreateAdModal && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#170b2c] w-full max-w-lg rounded-2xl border border-amber-500/60 p-5 space-y-4 text-white">
-            <div className="flex items-center justify-between pb-2 border-b border-purple-800/50">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-lg rounded-2xl border border-gray-200 shadow-2xl p-5 space-y-4 text-gray-900">
+            <div className="flex items-center justify-between pb-2 border-b border-gray-100">
               <div className="flex items-center gap-2">
-                <Megaphone className="w-5 h-5 text-amber-400" />
-                <h3 className="font-bold text-sm text-white">إنشاء ونشر إعلان جديد في LIVO</h3>
+                <Megaphone className="w-5 h-5 text-amber-500" />
+                <h3 className="font-bold text-sm text-gray-900">إنشاء ونشر إعلان جديد في LIVO</h3>
               </div>
               <button
                 onClick={() => setShowCreateAdModal(false)}
-                className="text-purple-400 hover:text-white"
+                className="text-gray-400 hover:text-gray-700"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -3316,36 +4105,36 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
 
             <form onSubmit={handleCreateAd} className="space-y-3">
               <div>
-                <label className="block text-xs font-semibold text-purple-200 mb-1">عنوان الإعلان:</label>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">عنوان الإعلان:</label>
                 <input
                   type="text"
                   value={newAdTitle}
                   onChange={(e) => setNewAdTitle(e.target.value)}
                   placeholder="مثال: خصم 50% على باقة الكوينز الذهبية"
-                  className="w-full bg-[#120824] border border-purple-800/60 rounded-xl p-2.5 text-xs text-white outline-none focus:border-amber-400"
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-xs text-gray-900 outline-none focus:border-amber-500"
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-purple-200 mb-1">وصف الإعلان:</label>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">وصف الإعلان:</label>
                 <textarea
                   value={newAdDescription}
                   onChange={(e) => setNewAdDescription(e.target.value)}
                   placeholder="اكتب تفاصيل العرض الترويجي..."
                   rows={2}
-                  className="w-full bg-[#120824] border border-purple-800/60 rounded-xl p-2.5 text-xs text-white outline-none focus:border-amber-400"
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-xs text-gray-900 outline-none focus:border-amber-500"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-purple-200 mb-1">رابط صورة البانر (URL):</label>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">رابط صورة البانر (URL):</label>
                 <input
                   type="url"
                   value={newAdImageUrl}
                   onChange={(e) => setNewAdImageUrl(e.target.value)}
                   placeholder="https://images.unsplash.com/photo-..."
-                  className="w-full bg-[#120824] border border-purple-800/60 rounded-xl p-2.5 text-xs text-white font-digits outline-none focus:border-amber-400"
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-xs text-gray-900 font-digits outline-none focus:border-amber-500"
                   required
                 />
                 {/* Quick Presets */}
@@ -3353,14 +4142,14 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                   <button
                     type="button"
                     onClick={() => setNewAdImageUrl('https://images.unsplash.com/photo-1511512578047-dfb367046420?w=800&auto=format&fit=crop&q=80')}
-                    className="text-[10px] bg-purple-950/70 border border-purple-800/60 px-2 py-0.5 rounded text-purple-300"
+                    className="text-[10px] bg-gray-100 hover:bg-gray-200 border border-gray-200 px-2 py-0.5 rounded text-gray-700 font-bold"
                   >
                     نموذج ألعاب وبث
                   </button>
                   <button
                     type="button"
                     onClick={() => setNewAdImageUrl('https://images.unsplash.com/photo-1518770660439-4636190af475?w=800&auto=format&fit=crop&q=80')}
-                    className="text-[10px] bg-purple-950/70 border border-purple-800/60 px-2 py-0.5 rounded text-purple-300"
+                    className="text-[10px] bg-gray-100 hover:bg-gray-200 border border-gray-200 px-2 py-0.5 rounded text-gray-700 font-bold"
                   >
                     نموذج شحن وجوائز
                   </button>
@@ -3368,23 +4157,23 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-purple-200 mb-1">رابط التوجيه (اختياري):</label>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">رابط التوجيه (اختياري):</label>
                 <input
                   type="text"
                   value={newAdTargetUrl}
                   onChange={(e) => setNewAdTargetUrl(e.target.value)}
                   placeholder="https://livo.live/offers أو اتركها فارغة"
-                  className="w-full bg-[#120824] border border-purple-800/60 rounded-xl p-2.5 text-xs text-white font-digits outline-none focus:border-amber-400"
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-xs text-gray-900 font-digits outline-none focus:border-amber-500"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-purple-200 mb-1">مكان العرض:</label>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">مكان العرض:</label>
                   <select
                     value={newAdPlacement}
                     onChange={(e: any) => setNewAdPlacement(e.target.value)}
-                    className="w-full bg-[#120824] border border-purple-800/60 rounded-xl p-2 text-xs text-white outline-none"
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl p-2 text-xs text-gray-900 outline-none"
                   >
                     <option value="banner">بانر رئيسي (Banner)</option>
                     <option value="popup">نافذة منبثقة (Popup)</option>
@@ -3393,12 +4182,12 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-purple-200 mb-1">تاريخ الانتهاء:</label>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">تاريخ الانتهاء:</label>
                   <input
                     type="date"
                     value={newAdEndDate}
                     onChange={(e) => setNewAdEndDate(e.target.value)}
-                    className="w-full bg-[#120824] border border-purple-800/60 rounded-xl p-2 text-xs text-white font-digits outline-none"
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl p-2 text-xs text-gray-900 font-digits outline-none"
                     required
                   />
                 </div>
@@ -3407,14 +4196,14 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
               <div className="flex items-center gap-2 pt-3">
                 <button
                   type="submit"
-                  className="flex-1 py-2.5 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 text-black font-extrabold text-xs rounded-xl shadow-lg"
+                  className="flex-1 py-2.5 bg-[#FFE600] hover:bg-yellow-400 text-black font-black text-xs rounded-xl shadow-sm"
                 >
                   نشر وتفعيل الإعلان
                 </button>
                 <button
                   type="button"
                   onClick={() => setShowCreateAdModal(false)}
-                  className="px-4 py-2.5 bg-purple-900 text-white text-xs rounded-xl"
+                  className="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-xs rounded-xl"
                 >
                   إلغاء
                 </button>
@@ -3426,18 +4215,18 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
 
       {/* MODAL: ZOOM TICKET ATTACHMENT */}
       {zoomedTicketImageUrl && (
-        <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="relative max-w-2xl max-h-[90vh] bg-[#170b2c] rounded-2xl border border-purple-800 overflow-hidden shadow-2xl flex flex-col">
-            <div className="p-3 border-b border-purple-800/50 flex items-center justify-between">
-              <span className="text-xs font-bold text-white">معاينة مرفق التذكرة</span>
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="relative max-w-2xl max-h-[90vh] bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-2xl flex flex-col">
+            <div className="p-3 border-b border-gray-200 flex items-center justify-between">
+              <span className="text-xs font-bold text-gray-900">معاينة مرفق التذكرة</span>
               <button
                 onClick={() => setZoomedTicketImageUrl(null)}
-                className="text-purple-400 hover:text-white p-1"
+                className="text-gray-400 hover:text-gray-700 p-1"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="p-3 flex items-center justify-center overflow-auto max-h-[80vh]">
+            <div className="p-3 flex items-center justify-center overflow-auto max-h-[80vh] bg-gray-50">
               <img
                 src={zoomedTicketImageUrl}
                 alt="Zoomed Attachment"
@@ -3450,11 +4239,11 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
 
       {/* MODAL: CONFIRM DELETE AD */}
       {adDeleteConfirmId && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#170b2c] w-full max-w-sm rounded-2xl border border-red-500/60 p-4 space-y-3 text-white text-center">
-            <AlertTriangle className="w-10 h-10 text-red-400 mx-auto" />
-            <h3 className="font-bold text-sm text-white">تأكيد حذف الإعلان</h3>
-            <p className="text-xs text-purple-200">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-sm rounded-2xl border border-red-200 shadow-2xl p-4 space-y-3 text-gray-900 text-center">
+            <AlertTriangle className="w-10 h-10 text-red-500 mx-auto" />
+            <h3 className="font-bold text-sm text-gray-900">تأكيد حذف الإعلان</h3>
+            <p className="text-xs text-gray-600">
               هل أنت متأكد من حذف هذا الإعلان نهائياً من قاعدة البيانات والتطبيق؟
             </p>
             <div className="flex items-center gap-2 pt-2">
@@ -3466,7 +4255,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
               </button>
               <button
                 onClick={() => setAdDeleteConfirmId(null)}
-                className="px-4 py-2 bg-purple-900 text-white text-xs rounded-xl"
+                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-xs rounded-xl"
               >
                 إلغاء
               </button>
@@ -3477,15 +4266,15 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
 
       {/* MODAL: ADD / EDIT PAYMENT METHOD */}
       {showAddPaymentModal && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#170b2c] w-full max-w-md rounded-2xl border border-amber-500/60 p-5 space-y-4 text-white">
-            <div className="flex items-center justify-between pb-2 border-b border-purple-800/50">
-              <h3 className="font-bold text-sm text-white">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-md rounded-2xl border border-gray-200 shadow-2xl p-5 space-y-4 text-gray-900">
+            <div className="flex items-center justify-between pb-2 border-b border-gray-100">
+              <h3 className="font-bold text-sm text-gray-900">
                 {editPaymentId ? 'تعديل وسيلة الدفع' : 'إضافة وسيلة دفع جديدة'}
               </h3>
               <button
                 onClick={() => setShowAddPaymentModal(false)}
-                className="text-purple-400 hover:text-white"
+                className="text-gray-400 hover:text-gray-700"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -3493,7 +4282,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
 
             <form onSubmit={handleSavePaymentMethod} className="space-y-3">
               <div>
-                <label className="block text-xs font-semibold text-purple-200 mb-1">نوع الوسيلة:</label>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">نوع الوسيلة:</label>
                 <select
                   value={paymentType}
                   onChange={(e: any) => {
@@ -3509,7 +4298,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                       setPaymentTitle(titles[e.target.value] || '');
                     }
                   }}
-                  className="w-full bg-[#120824] border border-purple-800/60 rounded-xl p-2.5 text-xs text-white outline-none"
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-xs text-gray-900 outline-none"
                 >
                   <option value="vodafone_cash">فودافون كاش (Vodafone Cash)</option>
                   <option value="instapay">إنستاباي (InstaPay)</option>
@@ -3522,48 +4311,48 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-purple-200 mb-1">اسم وسيلة الدفع للعرض:</label>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">اسم وسيلة الدفع للعرض:</label>
                 <input
                   type="text"
                   value={paymentTitle}
                   onChange={(e) => setPaymentTitle(e.target.value)}
                   placeholder="مثال: فودافون كاش - الحساب المعتمد"
-                  className="w-full bg-[#120824] border border-purple-800/60 rounded-xl p-2.5 text-xs text-white outline-none focus:border-amber-400"
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-xs text-gray-900 outline-none focus:border-amber-500"
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-purple-200 mb-1">رقم المحفظة أو المعرف:</label>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">رقم المحفظة أو المعرف:</label>
                 <input
                   type="text"
                   value={paymentAccountNum}
                   onChange={(e) => setPaymentAccountNum(e.target.value)}
                   placeholder="010XXXXXXXX أو username@instapay"
-                  className="w-full bg-[#120824] border border-purple-800/60 rounded-xl p-2.5 text-xs text-white font-digits outline-none focus:border-amber-400"
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-xs text-gray-900 font-digits outline-none focus:border-amber-500"
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-purple-200 mb-1">اسم صاحب الحساب (اختياري):</label>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">اسم صاحب الحساب (اختياري):</label>
                 <input
                   type="text"
                   value={paymentHolderName}
                   onChange={(e) => setPaymentHolderName(e.target.value)}
                   placeholder="اسم الشخص أو اسم الشركة"
-                  className="w-full bg-[#120824] border border-purple-800/60 rounded-xl p-2.5 text-xs text-white outline-none focus:border-amber-400"
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-xs text-gray-900 outline-none focus:border-amber-500"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-purple-200 mb-1">تعليمات التحويل للأعضاء (اختياري):</label>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">تعليمات التحويل للأعضاء (اختياري):</label>
                 <textarea
                   value={paymentInstructions}
                   onChange={(e) => setPaymentInstructions(e.target.value)}
                   placeholder="يرجى تحويل المبلغ وتصوير إيصال التحويل كاملاً..."
                   rows={2}
-                  className="w-full bg-[#120824] border border-purple-800/60 rounded-xl p-2.5 text-xs text-white outline-none focus:border-amber-400"
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-xs text-gray-900 outline-none focus:border-amber-500"
                 />
               </div>
 
@@ -3575,7 +4364,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                   onChange={(e) => setPaymentIsDefault(e.target.checked)}
                   className="w-4 h-4 accent-amber-500 rounded"
                 />
-                <label htmlFor="payDefault" className="text-xs text-purple-200 cursor-pointer">
+                <label htmlFor="payDefault" className="text-xs text-gray-700 cursor-pointer font-medium">
                   تعيين كوسيلة دفع أساسية ومفضلة
                 </label>
               </div>
@@ -3583,14 +4372,14 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
               <div className="flex items-center gap-2 pt-2">
                 <button
                   type="submit"
-                  className="flex-1 py-2.5 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 text-black font-extrabold text-xs rounded-xl shadow"
+                  className="flex-1 py-2.5 bg-[#FFE600] hover:bg-yellow-400 text-black font-black text-xs rounded-xl shadow-sm"
                 >
                   حفظ وتفعيل وسيلة الدفع
                 </button>
                 <button
                   type="button"
                   onClick={() => setShowAddPaymentModal(false)}
-                  className="px-4 py-2.5 bg-purple-900 text-white text-xs rounded-xl"
+                  className="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-xs rounded-xl"
                 >
                   إلغاء
                 </button>
@@ -3602,13 +4391,13 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
 
       {/* MODAL: GENERATE RECHARGE VOUCHER CODE */}
       {showAddCodeModal && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#170b2c] w-full max-w-sm rounded-2xl border border-pink-500/60 p-5 space-y-4 text-white">
-            <div className="flex items-center justify-between pb-2 border-b border-purple-800/50">
-              <h3 className="font-bold text-sm text-white">توليد كود شحن فوري (Voucher)</h3>
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-sm rounded-2xl border border-gray-200 shadow-2xl p-5 space-y-4 text-gray-900">
+            <div className="flex items-center justify-between pb-2 border-b border-gray-100">
+              <h3 className="font-bold text-sm text-gray-900">توليد كود شحن فوري (Voucher)</h3>
               <button
                 onClick={() => setShowAddCodeModal(false)}
-                className="text-purple-400 hover:text-white"
+                className="text-gray-400 hover:text-gray-700"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -3616,20 +4405,20 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
 
             <form onSubmit={handleCreateRechargeCode} className="space-y-3">
               <div>
-                <label className="block text-xs font-semibold text-purple-200 mb-1">كود القسيمة (حروف وأرقام):</label>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">كود القسيمة (حروف وأرقام):</label>
                 <div className="flex gap-2">
                   <input
                     type="text"
                     value={newCodeInput}
                     onChange={(e) => setNewCodeInput(e.target.value.toUpperCase())}
                     placeholder="مثال: LIVO-VIP-500"
-                    className="flex-1 bg-[#120824] border border-purple-800/60 rounded-xl p-2.5 text-xs text-white font-mono uppercase outline-none focus:border-amber-400"
+                    className="flex-1 bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-xs text-gray-900 font-mono uppercase outline-none focus:border-amber-500"
                     required
                   />
                   <button
                     type="button"
                     onClick={() => setNewCodeInput(`LIVO-${Math.floor(1000 + Math.random() * 9000)}-GOLD`)}
-                    className="bg-purple-900 text-purple-200 text-xs px-2.5 rounded-xl font-bold"
+                    className="bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs px-2.5 rounded-xl font-bold"
                   >
                     عشوائي
                   </button>
@@ -3637,25 +4426,25 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-purple-200 mb-1">عدد الكوينز الممنوحة:</label>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">عدد الكوينز الممنوحة:</label>
                 <input
                   type="number"
                   value={newCodeCoinsInput}
                   onChange={(e) => setNewCodeCoinsInput(e.target.value)}
                   placeholder="مثال: 500 أو 1000 أو 5000"
-                  className="w-full bg-[#120824] border border-purple-800/60 rounded-xl p-2.5 text-xs text-white font-digits outline-none focus:border-amber-400"
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-xs text-gray-900 font-digits outline-none focus:border-amber-500"
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-purple-200 mb-1">الحد الأقصى لعدد المستفيدين:</label>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">الحد الأقصى لعدد المستفيدين:</label>
                 <input
                   type="number"
                   value={newCodeMaxUsesInput}
                   onChange={(e) => setNewCodeMaxUsesInput(e.target.value)}
                   placeholder="100"
-                  className="w-full bg-[#120824] border border-purple-800/60 rounded-xl p-2.5 text-xs text-white font-digits outline-none focus:border-amber-400"
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-xs text-gray-900 font-digits outline-none focus:border-amber-500"
                   required
                 />
               </div>
@@ -3663,14 +4452,14 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
               <div className="flex items-center gap-2 pt-2">
                 <button
                   type="submit"
-                  className="flex-1 py-2.5 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 text-black font-extrabold text-xs rounded-xl shadow"
+                  className="flex-1 py-2.5 bg-[#FFE600] hover:bg-yellow-400 text-black font-black text-xs rounded-xl shadow-sm"
                 >
                   إنشاء وتفعيل الكود
                 </button>
                 <button
                   type="button"
                   onClick={() => setShowAddCodeModal(false)}
-                  className="px-4 py-2.5 bg-purple-900 text-white text-xs rounded-xl"
+                  className="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-xs rounded-xl"
                 >
                   إلغاء
                 </button>
@@ -3682,18 +4471,19 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
 
       {/* MODAL: ADD / EDIT STORE GIFT */}
       {showAddGiftModal && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#170b2c] w-full max-w-sm rounded-2xl border border-amber-500/60 p-5 space-y-4 text-white">
-            <div className="flex items-center justify-between pb-2 border-b border-purple-800/50">
-              <h3 className="font-bold text-sm text-white">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-sm rounded-2xl border border-gray-200 shadow-2xl p-5 space-y-4 text-gray-900">
+            <div className="flex items-center justify-between pb-2 border-b border-gray-100">
+              <h3 className="font-bold text-sm text-gray-900">
                 {editGiftId ? 'تعديل بيانات الهدية' : 'إضافة هدية جديدة للمتجر'}
               </h3>
               <button
                 onClick={() => {
                   setShowAddGiftModal(false);
                   setEditGiftId(null);
+                  setNewGiftImageUrl('');
                 }}
-                className="text-purple-400 hover:text-white"
+                className="text-gray-400 hover:text-gray-700"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -3701,26 +4491,57 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
 
             <form onSubmit={handleSaveGift} className="space-y-3">
               <div>
-                <label className="block text-xs font-semibold text-purple-200 mb-1">اسم الهدية:</label>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">اسم الهدية:</label>
                 <input
                   type="text"
                   value={newGiftName}
                   onChange={(e) => setNewGiftName(e.target.value)}
                   placeholder="مثال: تاج ذهبي، قصر ملكي، أسد ذهبي"
-                  className="w-full bg-[#120824] border border-purple-800/60 rounded-xl p-2.5 text-xs text-white outline-none focus:border-amber-400"
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-xs text-gray-900 outline-none focus:border-amber-500"
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-purple-200 mb-1">أيقونة الهدية (إيموجي أو رمز):</label>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">صورة الهدية PNG (تفريغ الخلفية تلقائياً):</label>
+                <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl p-2">
+                  {newGiftImageUrl ? (
+                    <div className="relative w-12 h-12 rounded-xl bg-[#180829] flex items-center justify-center shrink-0 p-1">
+                      <img src={newGiftImageUrl} alt="Gift" className="w-10 h-10 object-contain" />
+                      <button
+                        type="button"
+                        onClick={() => setNewGiftImageUrl('')}
+                        className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-600 text-white rounded-full flex items-center justify-center text-[10px]"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ) : null}
+                  <label className="flex-1 cursor-pointer bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 px-3 py-2 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1.5">
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>{isProcessingGiftImage ? 'جاري تفريغ الخلفية...' : 'رفع صورة الهدية (PNG شفاف)'}</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) handleUploadGiftImage(f);
+                      }}
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">أيقونة الهدية الاحتياطية (إيموجي):</label>
                 <div className="flex gap-2">
                   <input
                     type="text"
                     value={newGiftIcon}
                     onChange={(e) => setNewGiftIcon(e.target.value)}
                     placeholder="👑 أو 🦁 أو 🏎️"
-                    className="flex-1 bg-[#120824] border border-purple-800/60 rounded-xl p-2.5 text-lg text-center outline-none focus:border-amber-400"
+                    className="flex-1 bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-lg text-center outline-none focus:border-amber-500"
                     required
                   />
                   <div className="flex gap-1">
@@ -3729,7 +4550,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                         key={em}
                         type="button"
                         onClick={() => setNewGiftIcon(em)}
-                        className="w-8 h-8 rounded-lg bg-purple-900/60 hover:bg-purple-800 text-sm flex items-center justify-center"
+                        className="w-8 h-8 rounded-lg bg-gray-100 hover:bg-amber-100 text-sm flex items-center justify-center"
                       >
                         {em}
                       </button>
@@ -3739,23 +4560,23 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-purple-200 mb-1">سعر الهدية بالكوينز:</label>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">سعر الهدية بالكوينز:</label>
                 <input
                   type="number"
                   value={newGiftPrice}
                   onChange={(e) => setNewGiftPrice(e.target.value)}
                   placeholder="مثال: 500"
-                  className="w-full bg-[#120824] border border-purple-800/60 rounded-xl p-2.5 text-xs text-white font-digits outline-none focus:border-amber-400"
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-xs text-gray-900 font-digits outline-none focus:border-amber-500"
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-purple-200 mb-1">نوع التأثير في الغرفة:</label>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">نوع التأثير في الغرفة:</label>
                 <select
                   value={newGiftAnimation}
                   onChange={(e) => setNewGiftAnimation(e.target.value as GiftItem['animationType'])}
-                  className="w-full bg-[#120824] border border-purple-800/60 rounded-xl p-2.5 text-xs text-white outline-none"
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-xs text-gray-900 outline-none"
                 >
                   <option value="heart">قلب متوهج (Heart)</option>
                   <option value="rose">وردة (Rose)</option>
@@ -3771,7 +4592,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
               <div className="flex items-center gap-2 pt-2">
                 <button
                   type="submit"
-                  className="flex-1 py-2.5 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 text-black font-extrabold text-xs rounded-xl shadow"
+                  className="flex-1 py-2.5 bg-[#FFE600] hover:bg-yellow-400 text-black font-black text-xs rounded-xl shadow-sm"
                 >
                   {editGiftId ? 'حفظ التعديلات' : 'إضافة للمتجر'}
                 </button>
@@ -3780,8 +4601,9 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                   onClick={() => {
                     setShowAddGiftModal(false);
                     setEditGiftId(null);
+                    setNewGiftImageUrl('');
                   }}
-                  className="px-4 py-2.5 bg-purple-900 text-white text-xs rounded-xl"
+                  className="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-xs rounded-xl"
                 >
                   إلغاء
                 </button>
@@ -3793,10 +4615,10 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
 
       {/* MODAL: ADD / EDIT COIN PACKAGE */}
       {showCoinPkgModal && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#170b2c] w-full max-w-sm rounded-2xl border border-amber-500/60 p-5 space-y-4 text-white">
-            <div className="flex items-center justify-between pb-2 border-b border-purple-800/50">
-              <h3 className="font-bold text-sm text-white">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-sm rounded-2xl border border-gray-200 shadow-2xl p-5 space-y-4 text-gray-900">
+            <div className="flex items-center justify-between pb-2 border-b border-gray-100">
+              <h3 className="font-bold text-sm text-gray-900">
                 {editCoinPkgId ? 'تعديل باقة الشحن' : 'إضافة باقة شحن جديدة'}
               </h3>
               <button
@@ -3804,7 +4626,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                   setShowCoinPkgModal(false);
                   setEditCoinPkgId(null);
                 }}
-                className="text-purple-400 hover:text-white"
+                className="text-gray-400 hover:text-gray-700"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -3812,20 +4634,20 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
 
             <form onSubmit={handleSaveCoinPackage} className="space-y-3">
               <div>
-                <label className="block text-xs font-semibold text-purple-200 mb-1">عدد الكوينز:</label>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">عدد الكوينز:</label>
                 <input
                   type="number"
                   min={1}
                   value={pkgCoinsInput}
                   onChange={(e) => setPkgCoinsInput(e.target.value)}
                   placeholder="مثال: 1000"
-                  className="w-full bg-[#120824] border border-purple-800/60 rounded-xl p-2.5 text-xs text-white font-digits outline-none focus:border-amber-400"
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-xs text-gray-900 font-digits outline-none focus:border-amber-500"
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-purple-200 mb-1">السعر بالجنيه المصري (EGP):</label>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">السعر بالجنيه المصري (EGP):</label>
                 <input
                   type="number"
                   min={1}
@@ -3833,12 +4655,12 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                   value={pkgPriceInput}
                   onChange={(e) => setPkgPriceInput(e.target.value)}
                   placeholder="مثال: 350"
-                  className="w-full bg-[#120824] border border-purple-800/60 rounded-xl p-2.5 text-xs text-white font-digits outline-none focus:border-amber-400"
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-xs text-gray-900 font-digits outline-none focus:border-amber-500"
                   required
                 />
               </div>
 
-              <label className="flex items-center gap-2 text-xs text-purple-200 cursor-pointer">
+              <label className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer font-medium">
                 <input
                   type="checkbox"
                   checked={pkgPopularInput}
@@ -3848,7 +4670,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                 <span>تمييز كباقة شائعة (الأكثر طلباً)</span>
               </label>
 
-              <label className="flex items-center gap-2 text-xs text-purple-200 cursor-pointer">
+              <label className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer font-medium">
                 <input
                   type="checkbox"
                   checked={pkgActiveInput}
@@ -3861,7 +4683,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
               <div className="flex items-center gap-2 pt-2">
                 <button
                   type="submit"
-                  className="flex-1 py-2.5 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 text-black font-extrabold text-xs rounded-xl shadow"
+                  className="flex-1 py-2.5 bg-[#FFE600] hover:bg-yellow-400 text-black font-black text-xs rounded-xl shadow-sm"
                 >
                   {editCoinPkgId ? 'حفظ التعديلات' : 'إضافة الباقة'}
                 </button>
@@ -3871,7 +4693,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                     setShowCoinPkgModal(false);
                     setEditCoinPkgId(null);
                   }}
-                  className="px-4 py-2.5 bg-purple-900 text-white text-xs rounded-xl"
+                  className="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-xs rounded-xl"
                 >
                   إلغاء
                 </button>
@@ -3883,18 +4705,18 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
 
       {/* MODAL: ZOOM BLUE VERIFICATION RECEIPT */}
       {zoomedVerificationReceiptUrl && (
-        <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="relative max-w-2xl max-h-[90vh] bg-[#170b2c] rounded-2xl border border-purple-800 overflow-hidden shadow-2xl flex flex-col">
-            <div className="p-3 border-b border-purple-800/50 flex items-center justify-between">
-              <span className="text-xs font-bold text-white">إيصال تحويل التوثيق الأزرق</span>
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="relative max-w-2xl max-h-[90vh] bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-2xl flex flex-col">
+            <div className="p-3 border-b border-gray-200 flex items-center justify-between">
+              <span className="text-xs font-bold text-gray-900">إيصال تحويل التوثيق الأزرق</span>
               <button
                 onClick={() => setZoomedVerificationReceiptUrl(null)}
-                className="text-purple-400 hover:text-white p-1"
+                className="text-gray-400 hover:text-gray-700 p-1"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="p-3 flex items-center justify-center overflow-auto max-h-[80vh]">
+            <div className="p-3 flex items-center justify-center overflow-auto max-h-[80vh] bg-gray-50">
               <img
                 src={zoomedVerificationReceiptUrl}
                 alt="Verification Receipt"
@@ -3907,10 +4729,10 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
 
       {/* MODAL: REJECT VERIFICATION */}
       {rejectVerificationId && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#170b2c] w-full max-w-sm rounded-2xl border border-red-500/60 p-4 space-y-3 text-white">
-            <h3 className="font-bold text-sm text-red-400">رفض طلب التوثيق الأزرق</h3>
-            <p className="text-xs text-purple-200">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-sm rounded-2xl border border-red-200 shadow-2xl p-4 space-y-3 text-gray-900">
+            <h3 className="font-bold text-sm text-red-600">رفض طلب التوثيق الأزرق</h3>
+            <p className="text-xs text-gray-600">
               يرجى توضيح سبب الرفض لإشعار المستخدم عبر الرسائل المباشرة:
             </p>
             <input
@@ -3918,7 +4740,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
               value={rejectVerificationReason}
               onChange={(e) => setRejectVerificationReason(e.target.value)}
               placeholder="مثال: الإيصال غير واضح أو المبلغ المحول غير مطابق"
-              className="w-full bg-[#120824] border border-purple-800/60 rounded-xl p-2.5 text-xs text-white outline-none focus:border-amber-400"
+              className="w-full bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-xs text-gray-900 outline-none focus:border-red-400"
             />
             <div className="flex items-center gap-2 pt-1">
               <button
@@ -3929,7 +4751,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
               </button>
               <button
                 onClick={() => setRejectVerificationId(null)}
-                className="px-4 py-2 bg-purple-900 text-white text-xs rounded-xl"
+                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-xs rounded-xl"
               >
                 إلغاء
               </button>
@@ -3940,10 +4762,10 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
 
       {/* MODAL: REJECT WITHDRAWAL */}
       {rejectWithdrawalId && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#170b2c] w-full max-w-sm rounded-2xl border border-red-500/60 p-4 space-y-3 text-white">
-            <h3 className="font-bold text-sm text-red-400">رفض طلب السحب واسترجاع الكوينز</h3>
-            <p className="text-xs text-purple-200">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-sm rounded-2xl border border-red-200 shadow-2xl p-4 space-y-3 text-gray-900">
+            <h3 className="font-bold text-sm text-red-600">رفض طلب السحب واسترجاع الكوينز</h3>
+            <p className="text-xs text-gray-600">
               سيتم إرجاع كمية الكوينز إلى رصيد حساب المستخدم تلقائياً وتحديث حالة الطلب إلى مرفوض.
             </p>
             <input
@@ -3951,7 +4773,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
               value={rejectWithdrawalReason}
               onChange={(e) => setRejectWithdrawalReason(e.target.value)}
               placeholder="سبب الرفض (مثال: رقم المحفظة غير مسجل باسم صاحب الحساب)"
-              className="w-full bg-[#120824] border border-purple-800/60 rounded-xl p-2.5 text-xs text-white outline-none focus:border-amber-400"
+              className="w-full bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-xs text-gray-900 outline-none focus:border-red-400"
             />
             <div className="flex items-center gap-2 pt-1">
               <button
@@ -3962,7 +4784,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
               </button>
               <button
                 onClick={() => setRejectWithdrawalId(null)}
-                className="px-4 py-2 bg-purple-900 text-white text-xs rounded-xl"
+                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-xs rounded-xl"
               >
                 إلغاء
               </button>

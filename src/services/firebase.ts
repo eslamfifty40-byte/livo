@@ -1183,6 +1183,36 @@ export class FirebaseService {
     }
   }
 
+  private formatFirebaseAuthError(err: any, fallback: string): string {
+    const code = err?.code || '';
+    const host = typeof window !== 'undefined' ? window.location.hostname : '';
+    if (code === 'auth/unauthorized-domain') {
+      return `النطاق الحالي (${host || 'هذا الرابط'}) غير مضاف في قائمة Authorized Domains في Firebase Authentication. يمكنك الدخول مباشرة الآن بالبريد الإلكتروني وكلمة المرور أو رقم الهاتف، أو إضافة النطاق من Firebase Console.`;
+    }
+    if (code === 'auth/popup-blocked' || code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+      return 'تم حجب أو إغلاق نافذة Google في هذا المتصفح. يمكنك تسجيل الدخول مباشرة عبر البريد وكلمة المرور أو رقم الهاتف.';
+    }
+    if (code === 'auth/operation-not-allowed') {
+      return 'طريقة الدخول هذه غير مفعّلة في إعدادات مشروع Firebase Authentication.';
+    }
+    if (code === 'auth/user-not-found' || code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
+      return 'البريد الإلكتروني أو كلمة المرور غير صحيحة.';
+    }
+    if (code === 'auth/email-already-in-use') {
+      return 'هذا البريد الإلكتروني مسجل بالفعل. يرجى تسجيل الدخول.';
+    }
+    if (code === 'auth/weak-password') {
+      return 'كلمة المرور ضعيفة جداً (يجب أن تكون 6 أحرف على الأقل).';
+    }
+    if (code === 'auth/invalid-email') {
+      return 'صيغة البريد الإلكتروني غير صحيحة.';
+    }
+    if (code === 'auth/too-many-requests') {
+      return 'تم تعطيل المحاولات مؤقتاً بسبب كثرة المحاولات. يرجى الانتظار قليلاً.';
+    }
+    return err?.message || fallback;
+  }
+
   /**
    * Admin Authentication with Firebase Auth
    * Strictly authenticates the user with Firebase Authentication via signInWithEmailAndPassword
@@ -1197,26 +1227,7 @@ export class FirebaseService {
       return { success: true, user: cred.user };
     } catch (err: any) {
       console.warn('Firebase signInWithEmailAndPassword error:', err.code, err.message);
-
-      if (err.code === 'auth/operation-not-allowed') {
-        return {
-          success: false,
-          error: 'تسجيل الدخول بالبريد وكلمة المرور (Email/Password) غير مفعّل في مشروع Firebase: academic-task-03rp2. يرجى تفعيله من Firebase Console > Authentication > Sign-in method.'
-        };
-      }
-      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
-        return {
-          success: false,
-          error: 'بيانات الدخول غير صحيحة. يرجى التحقق من البريد الإلكتروني وكلمة المرور المسجلة في Firebase Authentication.'
-        };
-      }
-      if (err.code === 'auth/too-many-requests') {
-        return {
-          success: false,
-          error: 'تم تعطيل الوصول مؤقتاً بسبب تكرار المحاولات الخاطئة. يرجى المحاولة لاحقاً.'
-        };
-      }
-      return { success: false, error: err.message || 'خطأ في المصادقة مع Firebase Authentication' };
+      return { success: false, error: this.formatFirebaseAuthError(err, 'خطأ في المصادقة مع Firebase Authentication') };
     }
   }
 
@@ -1228,35 +1239,25 @@ export class FirebaseService {
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: 'select_account' });
       const cred = await signInWithPopup(auth, provider);
-      const email = cred.user.email?.toLowerCase() || '';
-
-      // Check if email is owner or admin authorized
-      if (email === 'livo.admin@gmail.com' || email === 'eslamfifty11@gmail.com') {
-        return { success: true, user: cred.user };
-      }
       return { success: true, user: cred.user };
     } catch (err: any) {
       console.warn('Google Auth popup error:', err);
-      return { success: false, error: err.message || 'تم إلغاء تسجيل الدخول عبر Google' };
+      return { success: false, error: this.formatFirebaseAuthError(err, 'تم إلغاء تسجيل الدخول عبر Google') };
     }
   }
 
   /**
    * Direct Google Sign-In for Customer with mandatory Account Picker
-   * Satisfies Requirements 4 & 5:
-   * 4. عند الضغط على Google يجب فتح نافذة اختيار حساب Gmail، بحيث يستطيع المستخدم اختيار البريد الذي يريد التسجيل به.
-   * 5. عدم تسجيل الدخول تلقائيًا بحساب Google سابق دون إعطاء المستخدم فرصة اختيار الحساب.
    */
   public async loginCustomerWithGoogle(): Promise<{ success: boolean; user?: FirebaseUser; error?: string }> {
     try {
       const provider = new GoogleAuthProvider();
-      // Force Gmail account picker popup every single time
       provider.setCustomParameters({ prompt: 'select_account' });
       const cred = await signInWithPopup(auth, provider);
       return { success: true, user: cred.user };
     } catch (err: any) {
       console.warn('Customer Google Sign-In error:', err);
-      return { success: false, error: err.message || 'تم إلغاء نافذة اختيار حساب Google' };
+      return { success: false, error: this.formatFirebaseAuthError(err, 'تم إلغاء نافذة اختيار حساب Google') };
     }
   }
 
@@ -1270,16 +1271,7 @@ export class FirebaseService {
       const cred = await signInWithEmailAndPassword(auth, cleanEmail, cleanPass);
       return { success: true, user: cred.user };
     } catch (err: any) {
-      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
-        return { success: false, error: 'البريد الإلكتروني أو كلمة المرور غير صحيحة' };
-      }
-      if (err.code === 'auth/invalid-email') {
-        return { success: false, error: 'صيغة البريد الإلكتروني غير صحيحة' };
-      }
-      if (err.code === 'auth/operation-not-allowed') {
-        return { success: false, error: 'تسجيل الدخول بالبريد غير مفعّل في Firebase حالياً' };
-      }
-      return { success: false, error: err.message || 'تعذر تسجيل الدخول عبر البريد الإلكتروني' };
+      return { success: false, error: this.formatFirebaseAuthError(err, 'تعذر تسجيل الدخول عبر البريد الإلكتروني') };
     }
   }
 
@@ -1296,16 +1288,7 @@ export class FirebaseService {
       }
       return { success: true, user: cred.user };
     } catch (err: any) {
-      if (err.code === 'auth/email-already-in-use') {
-        return { success: false, error: 'هذا البريد الإلكتروني مسجل بالفعل. يرجى تسجيل الدخول.' };
-      }
-      if (err.code === 'auth/weak-password') {
-        return { success: false, error: 'كلمة المرور ضعيفة جداً (يجب أن تكون 6 أحرف على الأقل).' };
-      }
-      if (err.code === 'auth/invalid-email') {
-        return { success: false, error: 'صيغة البريد الإلكتروني غير صحيحة.' };
-      }
-      return { success: false, error: err.message || 'تعذر إنشاء الحساب عبر Firebase' };
+      return { success: false, error: this.formatFirebaseAuthError(err, 'تعذر إنشاء الحساب عبر Firebase') };
     }
   }
 

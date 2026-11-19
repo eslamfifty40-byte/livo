@@ -22,6 +22,21 @@
         "agencyName": { "type": "string" },
         "canChargeUsers": { "type": "boolean" },
         "isBanned": { "type": "boolean" },
+        "phoneNumber": { "type": "string", "maxLength": 32 },
+        "diamonds": { "type": "number" },
+        "level": { "type": "number" },
+        "equippedFrame": { "type": "string", "maxLength": 128 },
+        "equippedFrameUrl": { "type": "string", "maxLength": 500000 },
+        "frameGlowColor": { "type": "string", "maxLength": 32 },
+        "frameAnimated": { "type": "boolean" },
+        "verifiedBadgeColor": { "type": "string", "maxLength": 32 },
+        "verifiedBadgeShape": { "type": "string", "maxLength": 32 },
+        "verifiedBadgeGlow": { "type": "boolean" },
+        "nameGlowColor": { "type": "string", "maxLength": 32 },
+        "customIconUrl": { "type": "string", "maxLength": 500000 },
+        "customIconLabel": { "type": "string", "maxLength": 64 },
+        "customIconGlow": { "type": "string", "maxLength": 32 },
+        "customIconAnimated": { "type": "boolean" },
         "createdAt": { "type": "string" }
       },
       "required": ["uid", "username", "displayName", "role", "coins"]
@@ -82,7 +97,11 @@
         "isOfficial": { "type": "boolean" },
         "status": { "type": "string", "enum": ["open", "closed", "locked_by_admin"] },
         "announcement": { "type": "string", "maxLength": 500 },
-        "viewersCount": { "type": "number" }
+        "viewersCount": { "type": "number" },
+        "seatCount": { "type": "number" },
+        "moderatorUids": { "type": "array" },
+        "roomType": { "type": "string", "enum": ["voice", "live"] },
+        "latestGiftBlast": { "type": "object" }
       },
       "required": ["title", "ownerUid", "status"]
     },
@@ -286,6 +305,8 @@
         "type": { "type": "string", "enum": ["frame", "entrance"] },
         "priceCoins": { "type": "number" },
         "image": { "type": "string", "maxLength": 500000 },
+        "imageUrl": { "type": "string", "maxLength": 500000 },
+        "glowColor": { "type": "string", "maxLength": 32 },
         "description": { "type": "string", "maxLength": 500 },
         "isActive": { "type": "boolean" }
       },

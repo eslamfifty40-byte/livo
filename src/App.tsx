@@ -7,8 +7,16 @@ import { Shield, Smartphone, ExternalLink, ArrowRight } from 'lucide-react';
 import { LivoCustomerAppIcon, LivoAdminAppIcon } from './assets/appIcons';
 
 export default function App() {
-  // Support independent app launch: Customer by default, Admin via ?app=admin or standalone admin.html
-  const [appMode, setAppMode] = useState<'customer' | 'admin'>('customer');
+  // Support independent app launch: Customer by default, Admin via VITE_APP_MODE=admin or ?app=admin
+  const [appMode, setAppMode] = useState<'customer' | 'admin'>(() => {
+    const buildMode = (import.meta as any).env?.VITE_APP_MODE;
+    if (buildMode === 'admin') return 'admin';
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('app') === 'admin') return 'admin';
+    }
+    return 'customer';
+  });
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(livoStore.getCurrentUser());
 
   useEffect(() => {

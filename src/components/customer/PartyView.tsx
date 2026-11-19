@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Search,
   Plus,
@@ -15,13 +15,16 @@ import { UserProfile, VoiceRoom } from '../../types';
 import { livoStore } from '../../services/livoStore';
 import { RoyalVoiceRoomModal } from './RoyalVoiceRoomModal';
 import { LiveStreamView } from './LiveStreamView';
+import { AvatarWithFrame } from '../common/AvatarWithFrame';
+import { LivoVerifiedBadge } from '../common/LivoVerifiedBadge';
 
 interface PartyViewProps {
-  currentUser: UserProfile;
+  currentUser: UserProfile | null;
   onOpenRecharge: () => void;
+  onRequireAuth?: () => void;
 }
 
-export const PartyView: React.FC<PartyViewProps> = ({ currentUser, onOpenRecharge }) => {
+export const PartyView: React.FC<PartyViewProps> = ({ currentUser, onOpenRecharge, onRequireAuth }) => {
   const [activeSubTab, setActiveSubTab] = useState<'follow' | 'trending' | 'party' | 'live'>('party');
   const [activeFilterPill, setActiveFilterPill] = useState<string>('recommend');
   const [searchQuery, setSearchQuery] = useState('');
@@ -31,10 +34,12 @@ export const PartyView: React.FC<PartyViewProps> = ({ currentUser, onOpenRecharg
   // Active modals
   const [selectedVoiceRoomId, setSelectedVoiceRoomId] = useState<string | null>(null);
   const [activeLiveRoomId, setActiveLiveRoomId] = useState<string | null>(null);
+  const lastSelectedVoiceRoomRef = useRef<VoiceRoom | null>(null);
 
   // Create Room / Go Live modal
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newRoomType, setNewRoomType] = useState<'voice' | 'live'>('voice');
+  const [newRoomSeatCount, setNewRoomSeatCount] = useState<6 | 12>(12);
   const [newRoomTitle, setNewRoomTitle] = useState('');
   const [newRoomCategory, setNewRoomCategory] = useState('دردشة صوتية');
 
@@ -50,7 +55,9 @@ export const PartyView: React.FC<PartyViewProps> = ({ currentUser, onOpenRecharg
     setTimeout(() => setToastMsg(null), 3000);
   };
 
-  const isOwnerUser = currentUser.role === 'owner' || livoStore.isOwnerEmail(currentUser.email);
+  const isOwnerUser = Boolean(
+    currentUser && (currentUser.role === 'owner' || livoStore.isOwnerEmail(currentUser.email))
+  );
 
   // Official Room unified with 'room-official-livo'
   const officialRoom = rooms.find(r => r.isOfficial || r.id === 'room-official-livo');
@@ -60,8 +67,7 @@ export const PartyView: React.FC<PartyViewProps> = ({ currentUser, onOpenRecharg
     if (!officialRoom) return;
 
     if (!isOfficialOpen) {
-      if (isOwnerUser) {
-        // Owner automatically opens the official room and sits on Seat #1
+      if (isOwnerUser && currentUser) {
         livoStore.setOfficialRoomStatus('open');
         livoStore.joinRoomSeat(officialRoom.id, 0, currentUser.uid);
         setSelectedVoiceRoomId(officialRoom.id);
@@ -71,7 +77,7 @@ export const PartyView: React.FC<PartyViewProps> = ({ currentUser, onOpenRecharg
       return;
     }
 
-    if (isOwnerUser) {
+    if (isOwnerUser && currentUser) {
       const alreadySeated = officialRoom.seats.some(s => s.occupiedByUid === currentUser.uid);
       if (!alreadySeated) {
         livoStore.joinRoomSeat(officialRoom.id, 0, currentUser.uid);
@@ -80,13 +86,29 @@ export const PartyView: React.FC<PartyViewProps> = ({ currentUser, onOpenRecharg
     setSelectedVoiceRoomId(officialRoom.id);
   };
 
+  const openCreateDialog = (type: 'voice' | 'live', category: string) => {
+    if (!currentUser) {
+      showToast('سجّل الدخول أولاً لفتح غرفة صوتية أو بث مباشر');
+      onRequireAuth?.();
+      return;
+    }
+    setNewRoomType(type);
+    setNewRoomCategory(category);
+    setShowCreateModal(true);
+  };
+
   const handleCreateRoomSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!currentUser) {
+      onRequireAuth?.();
+      return;
+    }
     const created = livoStore.createRoom({
       title: newRoomTitle.trim() || (newRoomType === 'live' ? `بث ${currentUser.displayName} المباشر` : `غرفة ${currentUser.displayName}`),
       category: newRoomCategory,
       roomType: newRoomType,
-      ownerUid: currentUser.uid
+      ownerUid: currentUser.uid,
+      seatCount: newRoomSeatCount
     });
     setShowCreateModal(false);
     setNewRoomTitle('');
@@ -107,7 +129,7 @@ export const PartyView: React.FC<PartyViewProps> = ({ currentUser, onOpenRecharg
       if (!r.title.toLowerCase().includes(q) && !r.ownerName.toLowerCase().includes(q)) return false;
     }
     if (activeSubTab === 'follow') {
-      return (currentUser.followingUids || []).includes(r.ownerUid);
+      return Boolean(currentUser && (currentUser.followingUids || []).includes(r.ownerUid));
     }
     if (activeSubTab === 'live') {
       return r.roomType === 'live';
@@ -118,9 +140,17 @@ export const PartyView: React.FC<PartyViewProps> = ({ currentUser, onOpenRecharg
     return true;
   });
 
-  const selectedVoiceRoom = selectedVoiceRoomId
+  const foundVoiceRoom = selectedVoiceRoomId
     ? rooms.find(r => r.id === selectedVoiceRoomId) || null
     : null;
+  if (foundVoiceRoom) {
+    lastSelectedVoiceRoomRef.current = foundVoiceRoom;
+  } else if (!selectedVoiceRoomId) {
+    lastSelectedVoiceRoomRef.current = null;
+  }
+  const selectedVoiceRoom =
+    foundVoiceRoom || (selectedVoiceRoomId ? lastSelectedVoiceRoomRef.current : null);
+
   const activeLiveRoom = activeLiveRoomId
     ? rooms.find(r => r.id === activeLiveRoomId) || null
     : null;
@@ -148,10 +178,7 @@ export const PartyView: React.FC<PartyViewProps> = ({ currentUser, onOpenRecharg
           </div>
 
           <button
-            onClick={() => {
-              setNewRoomType(activeSubTab === 'live' ? 'live' : 'voice');
-              setShowCreateModal(true);
-            }}
+            onClick={() => openCreateDialog(activeSubTab === 'live' ? 'live' : 'voice', activeSubTab === 'live' ? 'بث مباشر' : 'دردشة صوتية')}
             className="h-8 px-3 rounded-full bg-[#FFE600] text-black font-black text-xs flex items-center gap-1 shadow hover:bg-yellow-400 active:scale-95 transition-all shrink-0"
             title="فتح بث مباشر أو غرفة صوتية"
           >
@@ -271,11 +298,7 @@ export const PartyView: React.FC<PartyViewProps> = ({ currentUser, onOpenRecharg
         {/* Quick Go Live & Voice Room Launch Cards */}
         <div className="grid grid-cols-2 gap-2.5">
           <button
-            onClick={() => {
-              setNewRoomType('live');
-              setNewRoomCategory('بث مباشر');
-              setShowCreateModal(true);
-            }}
+            onClick={() => openCreateDialog('live', 'بث مباشر')}
             className="bg-gradient-to-br from-rose-500 to-pink-600 text-white rounded-2xl p-3 flex items-center justify-between shadow-sm hover:opacity-95 active:scale-[0.98] transition-all text-right"
           >
             <div>
@@ -288,16 +311,12 @@ export const PartyView: React.FC<PartyViewProps> = ({ currentUser, onOpenRecharg
           </button>
 
           <button
-            onClick={() => {
-              setNewRoomType('voice');
-              setNewRoomCategory('دردشة صوتية');
-              setShowCreateModal(true);
-            }}
+            onClick={() => openCreateDialog('voice', 'دردشة صوتية')}
             className="bg-gradient-to-br from-purple-700 to-indigo-800 text-white rounded-2xl p-3 flex items-center justify-between shadow-sm hover:opacity-95 active:scale-[0.98] transition-all text-right"
           >
             <div>
               <span className="text-xs font-black block">غرفة دردشة صوتية</span>
-              <span className="text-[10px] text-purple-200">12 مقعد مايك مباشر</span>
+              <span className="text-[10px] text-purple-200">6 أو 12 مقعد مايك</span>
             </div>
             <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center">
               <Mic className="w-4 h-4" />
@@ -350,25 +369,54 @@ export const PartyView: React.FC<PartyViewProps> = ({ currentUser, onOpenRecharg
                 );
               }
 
+              const hostUser = livoStore.getUserByUid(r.ownerUid);
+              const roomCap = r.seatCount === 6 ? 6 : 12;
+
               return (
                 <div
                   key={r.id}
                   onClick={() => setSelectedVoiceRoomId(r.id)}
                   className="bg-white rounded-2xl border border-gray-100 p-3 flex items-center justify-between gap-3 shadow-xs hover:shadow-md transition-all cursor-pointer"
                 >
-                  <div className="relative w-16 h-16 rounded-2xl overflow-hidden shrink-0 bg-purple-950">
-                    <img src={r.ownerAvatar} alt={r.title} className="w-full h-full object-cover" />
-                    <span className="absolute top-1 right-1 bg-emerald-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded-full">
+                  <div className="relative flex items-center justify-center shrink-0">
+                    <AvatarWithFrame
+                      sizePx={62}
+                      avatarUrl={hostUser?.avatar || r.ownerAvatar}
+                      displayName={r.ownerName}
+                      frameUrl={hostUser?.equippedFrameUrl}
+                      frameGlowColor={hostUser?.frameGlowColor}
+                      frameAnimated={hostUser?.frameAnimated}
+                      customIconUrl={hostUser?.customIconUrl}
+                      customIconGlow={hostUser?.customIconGlow}
+                    />
+                    <span className="absolute -bottom-1 bg-emerald-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded-full shadow z-20">
                       {r.category}
                     </span>
                   </div>
 
                   <div className="flex-1 min-w-0">
                     <h4 className="font-black text-xs text-gray-900 truncate mb-1">{r.title}</h4>
-                    <p className="text-[11px] text-gray-500 font-bold truncate mb-1">{r.ownerName}</p>
+                    <div className="flex items-center gap-1 mb-1 truncate">
+                      <p
+                        className={`text-[11px] font-bold truncate ${
+                          hostUser?.nameGlowColor && hostUser.nameGlowColor !== 'none'
+                            ? `name-glow-${hostUser.nameGlowColor}`
+                            : 'text-gray-600'
+                        }`}
+                      >
+                        {r.ownerName}
+                      </p>
+                      {hostUser?.isVerified && (
+                        <LivoVerifiedBadge
+                          size={12}
+                          color={hostUser.verifiedBadgeColor}
+                          shape={hostUser.verifiedBadgeShape}
+                        />
+                      )}
+                    </div>
                     <div className="flex items-center gap-2 text-[10px] text-emerald-600 font-bold">
                       <Radio className="w-3 h-3 animate-pulse" />
-                      <span>{occupiedCount} / 12 على المايك</span>
+                      <span>{occupiedCount} / {roomCap} على المايك</span>
                     </div>
                   </div>
 
@@ -456,6 +504,28 @@ export const PartyView: React.FC<PartyViewProps> = ({ currentUser, onOpenRecharg
                 />
               </div>
 
+              {newRoomType === 'voice' && (
+                <div>
+                  <label className="text-[11px] font-bold text-gray-700 block mb-1">عدد المقاعد الصوتية</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[6, 12].map((sc) => (
+                      <button
+                        key={sc}
+                        type="button"
+                        onClick={() => setNewRoomSeatCount(sc as 6 | 12)}
+                        className={`py-2 rounded-xl border text-xs font-black transition-all ${
+                          newRoomSeatCount === sc
+                            ? 'bg-[#FFE600] border-amber-400 text-black'
+                            : 'bg-gray-50 border-gray-200 text-gray-600'
+                        }`}
+                      >
+                        {sc} مقاعد
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div>
                 <label className="text-[11px] font-bold text-gray-700 block mb-1">التصنيف</label>
                 <select
@@ -490,6 +560,7 @@ export const PartyView: React.FC<PartyViewProps> = ({ currentUser, onOpenRecharg
           isOpen={true}
           onClose={() => setSelectedVoiceRoomId(null)}
           onOpenRecharge={onOpenRecharge}
+          onRequireAuth={onRequireAuth}
           onAdminLeaveRoom={() => {
             livoStore.closeAndRemoveRoom(selectedVoiceRoom.id);
             setSelectedVoiceRoomId(null);
@@ -498,7 +569,7 @@ export const PartyView: React.FC<PartyViewProps> = ({ currentUser, onOpenRecharg
       )}
 
       {/* Real Video Live Stream Modal */}
-      {activeLiveRoom && (
+      {activeLiveRoom && currentUser && (
         <div className="fixed inset-0 z-50 bg-black flex items-center justify-center">
           <div className="w-full max-w-[430px] h-[100dvh]">
             <LiveStreamView

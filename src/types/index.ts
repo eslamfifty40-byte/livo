@@ -18,9 +18,20 @@ export interface UserProfile {
   level: number; // Strictly Level 0 to 50
   eligibleRechargedCoins: number; // Cumulative recharge count for level progression
   unlockedLevelRewards: number[]; // Array of level numbers whose diamond rewards have been claimed
-  isVerified: boolean; // Blue verification check
+  isVerified: boolean; // Verified check badge (Admin/Verification only)
   verifiedUntil?: string;
+  verifiedBadgeColor?: 'blue' | 'gold' | 'crimson' | 'emerald' | 'purple' | 'cyan';
+  verifiedBadgeShape?: 'rosette' | 'crown' | 'shield' | 'diamond';
+  verifiedBadgeGlow?: boolean;
+  nameGlowColor?: 'none' | 'gold' | 'cyan' | 'crimson' | 'purple' | 'emerald' | 'rainbow';
   equippedFrame?: string;
+  equippedFrameUrl?: string;
+  frameGlowColor?: string;
+  frameAnimated?: boolean;
+  customIconUrl?: string;
+  customIconLabel?: string;
+  customIconGlow?: string;
+  customIconAnimated?: boolean;
   equippedEntrance?: string;
   bio?: string;
   followingCount: number;
@@ -200,6 +211,25 @@ export interface RoomMessage {
   text: string;
   isVip?: boolean;
   isVerified?: boolean;
+  verifiedBadgeColor?: 'blue' | 'gold' | 'crimson' | 'emerald' | 'purple' | 'cyan';
+  verifiedBadgeShape?: 'rosette' | 'crown' | 'shield' | 'diamond';
+  nameGlowColor?: 'none' | 'gold' | 'cyan' | 'crimson' | 'purple' | 'emerald' | 'rainbow';
+  emojiSize?: 'small' | 'large';
+  createdAt: string;
+}
+
+export interface RoomGiftBlast {
+  id: string;
+  giftId: string;
+  giftName: string;
+  giftIcon: string;
+  giftImageUrl?: string;
+  animationType: GiftItem['animationType'];
+  senderUid: string;
+  senderName: string;
+  recipientName?: string;
+  count: number;
+  coinsEach: number;
   createdAt: string;
 }
 
@@ -211,6 +241,8 @@ export interface VoiceRoom {
   ownerAvatar: string;
   isOfficial: boolean; // "LIVO Admin" official room
   roomType?: 'voice' | 'live';
+  seatCount?: 6 | 12;
+  moderatorUids?: string[];
   coverImage?: string;
   backgroundUrl?: string;
   viewersCount?: number;
@@ -222,6 +254,7 @@ export interface VoiceRoom {
   allChatDisabled: boolean;
   announcement?: string;
   messages?: RoomMessage[];
+  latestGiftBlast?: RoomGiftBlast;
 }
 
 export interface RoomSeat {
@@ -230,6 +263,14 @@ export interface RoomSeat {
   occupiedByName?: string;
   occupiedByAvatar?: string;
   isVerified?: boolean;
+  verifiedBadgeColor?: 'blue' | 'gold' | 'crimson' | 'emerald' | 'purple' | 'cyan';
+  verifiedBadgeShape?: 'rosette' | 'crown' | 'shield' | 'diamond';
+  nameGlowColor?: 'none' | 'gold' | 'cyan' | 'crimson' | 'purple' | 'emerald' | 'rainbow';
+  equippedFrameUrl?: string;
+  frameGlowColor?: string;
+  frameAnimated?: boolean;
+  customIconUrl?: string;
+  customIconGlow?: string;
   isMuted: boolean;
   isLocked: boolean;
   isMicBlocked?: boolean;
@@ -298,6 +339,8 @@ export interface StoreItem {
   type: 'frame' | 'entrance';
   priceCoins: number;
   image: string;
+  imageUrl?: string;
+  glowColor?: string;
   description: string;
   isActive?: boolean;
   updatedAt?: string;

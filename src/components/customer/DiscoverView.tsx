@@ -3,10 +3,12 @@ import { RefreshCw, Compass, Mic, Music, MapPin, Check, Plus, Sparkles, MessageC
 import { UserProfile } from '../../types';
 import { livoStore } from '../../services/livoStore';
 import { LivoVerifiedBadge } from '../common/LivoVerifiedBadge';
+import { AvatarWithFrame } from '../common/AvatarWithFrame';
 
 interface DiscoverViewProps {
-  currentUser: UserProfile;
+  currentUser: UserProfile | null;
   onStartChat?: (uid: string) => void;
+  onRequireAuth?: () => void;
 }
 
 const ORBIT_SLOTS = [
@@ -19,7 +21,7 @@ const ORBIT_SLOTS = [
   { top: '84%', left: '40%' }
 ];
 
-export const DiscoverView: React.FC<DiscoverViewProps> = ({ currentUser, onStartChat }) => {
+export const DiscoverView: React.FC<DiscoverViewProps> = ({ currentUser, onStartChat, onRequireAuth }) => {
   const [activeCategory, setActiveCategory] = useState<'party' | 'sing' | 'popular'>('party');
   const [genuineUsers, setGenuineUsers] = useState<UserProfile[]>(() => livoStore.getGenuineUsers());
   const [shuffleOffset, setShuffleOffset] = useState(0);
@@ -31,11 +33,11 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({ currentUser, onStart
     return () => unsub();
   }, []);
 
-  const blockedSet = new Set(currentUser.blockedUids || []);
-  const followingSet = new Set(currentUser.followingUids || []);
+  const blockedSet = new Set(currentUser?.blockedUids || []);
+  const followingSet = new Set(currentUser?.followingUids || []);
 
   const candidates = genuineUsers.filter(
-    u => u.uid !== currentUser.uid && !blockedSet.has(u.uid)
+    u => u.uid !== currentUser?.uid && !blockedSet.has(u.uid)
   );
 
   // Rotate real users across the 7 radar orbit positions when user taps "تغيير"
@@ -57,7 +59,19 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({ currentUser, onStart
   };
 
   const handleToggleFollow = (targetUid: string) => {
+    if (!currentUser) {
+      onRequireAuth?.();
+      return;
+    }
     livoStore.toggleFollowUser(currentUser.uid, targetUid);
+  };
+
+  const handleOpenUserChat = (targetUid: string) => {
+    if (!currentUser) {
+      onRequireAuth?.();
+      return;
+    }
+    onStartChat?.(targetUid);
   };
 
   return (
@@ -105,7 +119,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({ currentUser, onStart
           </div>
 
           <div className="flex items-center gap-1 bg-gray-100 px-2.5 py-1 rounded-full text-xs font-bold text-gray-700">
-            <span>🇪🇬 {currentUser.country || 'مصر'}</span>
+            <span>🇪🇬 {currentUser?.country || 'مصر'}</span>
           </div>
         </div>
       </div>
@@ -134,19 +148,27 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({ currentUser, onStart
             radarUsers.map(({ user, top, left }) => (
               <div
                 key={user.uid}
-                onClick={() => onStartChat?.(user.uid)}
+                onClick={() => handleOpenUserChat(user.uid)}
                 style={{ top, left }}
                 className="absolute z-10 flex flex-col items-center cursor-pointer group transition-transform hover:scale-110"
               >
-                <div className="relative">
-                  <img
-                    src={user.avatar}
-                    alt={user.displayName}
-                    className="w-10 h-10 rounded-full object-cover border-2 border-[#FFE600] shadow-md"
-                  />
-                  <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-green-500 border border-white" />
-                </div>
-                <span className="text-[10px] text-white font-bold bg-black/60 backdrop-blur-xs px-1.5 rounded-full mt-0.5 whitespace-nowrap max-w-[75px] truncate">
+                <AvatarWithFrame
+                  sizePx={42}
+                  avatarUrl={user.avatar}
+                  displayName={user.displayName}
+                  frameUrl={user.equippedFrameUrl}
+                  frameGlowColor={user.frameGlowColor}
+                  frameAnimated={user.frameAnimated}
+                  customIconUrl={user.customIconUrl}
+                  customIconGlow={user.customIconGlow}
+                  customIconAnimated={user.customIconAnimated}
+                  showOnlineDot
+                />
+                <span
+                  className={`text-[10px] text-white font-bold bg-black/60 backdrop-blur-xs px-1.5 rounded-full mt-0.5 whitespace-nowrap max-w-[75px] truncate ${
+                    user.nameGlowColor && user.nameGlowColor !== 'none' ? `name-glow-${user.nameGlowColor}` : ''
+                  }`}
+                >
                   {user.displayName}
                 </span>
               </div>
@@ -198,21 +220,36 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({ currentUser, onStart
                   key={user.uid}
                   className="bg-white rounded-2xl border border-gray-100 p-3 flex items-center justify-between gap-2.5 shadow-2xs hover:shadow-xs transition-all"
                 >
-                  <div className="relative shrink-0">
-                    <img
-                      src={user.avatar}
-                      alt={user.displayName}
-                      className="w-12 h-12 rounded-full object-cover border border-gray-200"
-                    />
-                    <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-green-500 border-2 border-white" />
-                  </div>
+                  <AvatarWithFrame
+                    sizePx={52}
+                    avatarUrl={user.avatar}
+                    displayName={user.displayName}
+                    frameUrl={user.equippedFrameUrl}
+                    frameGlowColor={user.frameGlowColor}
+                    frameAnimated={user.frameAnimated}
+                    customIconUrl={user.customIconUrl}
+                    customIconGlow={user.customIconGlow}
+                    customIconAnimated={user.customIconAnimated}
+                    showOnlineDot
+                  />
 
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
-                      <h4 className="font-extrabold text-xs text-gray-900 truncate">
+                      <h4
+                        className={`font-extrabold text-xs text-gray-900 truncate ${
+                          user.nameGlowColor && user.nameGlowColor !== 'none' ? `name-glow-${user.nameGlowColor}` : ''
+                        }`}
+                      >
                         {user.displayName}
                       </h4>
-                      {user.isVerified && <LivoVerifiedBadge size={14} />}
+                      {user.isVerified && (
+                        <LivoVerifiedBadge
+                          size={14}
+                          color={user.verifiedBadgeColor}
+                          shape={user.verifiedBadgeShape}
+                          glow={user.verifiedBadgeGlow}
+                        />
+                      )}
                       <span className="bg-amber-100 text-amber-800 text-[8px] font-extrabold px-1 rounded font-digits">
                         Lv.{user.level || 0}
                       </span>
@@ -228,7 +265,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({ currentUser, onStart
                   <div className="flex items-center gap-1.5 shrink-0">
                     {onStartChat && (
                       <button
-                        onClick={() => onStartChat(user.uid)}
+                        onClick={() => handleOpenUserChat(user.uid)}
                         className="w-8 h-8 rounded-full bg-gray-100 hover:bg-purple-100 text-purple-700 flex items-center justify-center transition-colors"
                         title="إرسال رسالة"
                       >

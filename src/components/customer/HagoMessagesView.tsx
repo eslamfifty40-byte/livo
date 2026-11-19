@@ -17,15 +17,19 @@ import {
   Check,
   Clock,
   MessageSquarePlus,
-  Ban
+  Ban,
+  LogIn
 } from 'lucide-react';
 import { UserProfile, DirectMessage, MessageRequest } from '../../types';
 import { livoStore } from '../../services/livoStore';
+import { AvatarWithFrame } from '../common/AvatarWithFrame';
+import { LivoVerifiedBadge, VerifiedBadgeColor, VerifiedBadgeShape } from '../common/LivoVerifiedBadge';
 
 interface HagoMessagesViewProps {
-  currentUser: UserProfile;
+  currentUser: UserProfile | null;
   initialChatPartnerUid?: string | null;
   onClearInitialPartner?: () => void;
+  onRequireAuth?: () => void;
 }
 
 interface ChatThreadItem {
@@ -34,6 +38,16 @@ interface ChatThreadItem {
   avatar: string;
   isBot?: boolean;
   isVerified?: boolean;
+  verifiedBadgeColor?: VerifiedBadgeColor;
+  verifiedBadgeShape?: VerifiedBadgeShape;
+  verifiedBadgeGlow?: boolean;
+  nameGlowColor?: UserProfile['nameGlowColor'];
+  equippedFrameUrl?: string;
+  frameGlowColor?: string;
+  frameAnimated?: boolean;
+  customIconUrl?: string;
+  customIconGlow?: string;
+  customIconAnimated?: boolean;
   time: string;
   lastMessage: string;
   unreadCount: number;
@@ -45,7 +59,8 @@ interface ChatThreadItem {
 export const HagoMessagesView: React.FC<HagoMessagesViewProps> = ({
   currentUser,
   initialChatPartnerUid,
-  onClearInitialPartner
+  onClearInitialPartner,
+  onRequireAuth
 }) => {
   const [activeTab, setActiveTab] = useState<'chats' | 'requests' | 'suspended'>('chats');
   const [showSyncBanner, setShowSyncBanner] = useState(true);
@@ -91,21 +106,15 @@ export const HagoMessagesView: React.FC<HagoMessagesViewProps> = ({
 
   // Mark incoming messages read whenever opening/viewing an active conversation
   useEffect(() => {
-    if (!activeChatTarget) return;
+    if (!activeChatTarget || !currentUser) return;
     if (livoStore.canChatPrivately(currentUser.uid, activeChatTarget.id)) {
       livoStore.markThreadAsRead(currentUser.uid, activeChatTarget.id);
     }
-  }, [activeChatTarget, currentUser.uid, messages.length]);
-
-  const blockedSet = new Set(currentUser.blockedUids || []);
-  const followingSet = new Set(currentUser.followingUids || []);
-  const otherUsers = genuineUsers.filter(
-    u => u.uid !== currentUser.uid && !blockedSet.has(u.uid)
-  );
+  }, [activeChatTarget, currentUser?.uid, messages.length]);
 
   // Open direct chat automatically when routed from Discover or elsewhere
   useEffect(() => {
-    if (!initialChatPartnerUid) return;
+    if (!initialChatPartnerUid || !currentUser) return;
     if (initialChatPartnerUid === '10000') {
       setActiveChatTarget({
         id: '10000',
@@ -126,7 +135,38 @@ export const HagoMessagesView: React.FC<HagoMessagesViewProps> = ({
       }
     }
     onClearInitialPartner?.();
-  }, [initialChatPartnerUid, onClearInitialPartner]);
+  }, [initialChatPartnerUid, currentUser, onClearInitialPartner]);
+
+  if (!currentUser) {
+    return (
+      <div className="flex flex-col h-full bg-[#FAFAFA] text-black select-none items-center justify-center p-6 text-center">
+        <div className="bg-white rounded-3xl border border-gray-100 shadow-sm p-6 max-w-sm w-full space-y-4">
+          <div className="w-16 h-16 rounded-full bg-[#FFE600] text-black flex items-center justify-center mx-auto shadow-sm">
+            <MessageSquare className="w-7 h-7" />
+          </div>
+          <div className="space-y-1">
+            <h3 className="font-black text-base text-gray-900">الرسائل والمحادثات الخاصة</h3>
+            <p className="text-xs text-gray-500 leading-relaxed">
+              قم بتسجيل الدخول لتلقي الرسائل وطلبات المراسلة والتواصل المباشر مع أعضاء LIVO والدعم الفني.
+            </p>
+          </div>
+          <button
+            onClick={() => onRequireAuth?.()}
+            className="w-full py-3 rounded-2xl bg-[#FFE600] hover:bg-yellow-400 text-black font-black text-xs shadow-sm flex items-center justify-center gap-2 transition-all active:scale-95"
+          >
+            <LogIn className="w-4 h-4" />
+            <span>تسجيل الدخول لفتح الرسائل</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const blockedSet = new Set(currentUser.blockedUids || []);
+  const followingSet = new Set(currentUser.followingUids || []);
+  const otherUsers = genuineUsers.filter(
+    u => u.uid !== currentUser.uid && !blockedSet.has(u.uid)
+  );
 
   const {
     incomingPending,
@@ -148,6 +188,8 @@ export const HagoMessagesView: React.FC<HagoMessagesViewProps> = ({
       avatar: '/assets/livo/customer_icon.jpg',
       isBot: true,
       isVerified: true,
+      verifiedBadgeColor: 'gold',
+      verifiedBadgeShape: 'crown',
       time: lastSupportMsg
         ? new Date(lastSupportMsg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         : 'متاح دائماً',
@@ -188,6 +230,16 @@ export const HagoMessagesView: React.FC<HagoMessagesViewProps> = ({
         name: u.displayName || u.username,
         avatar: u.avatar,
         isVerified: u.isVerified,
+        verifiedBadgeColor: u.verifiedBadgeColor,
+        verifiedBadgeShape: u.verifiedBadgeShape,
+        verifiedBadgeGlow: u.verifiedBadgeGlow,
+        nameGlowColor: u.nameGlowColor,
+        equippedFrameUrl: u.equippedFrameUrl,
+        frameGlowColor: u.frameGlowColor,
+        frameAnimated: u.frameAnimated,
+        customIconUrl: u.customIconUrl,
+        customIconGlow: u.customIconGlow,
+        customIconAnimated: u.customIconAnimated,
         time: lastMsg
           ? new Date(lastMsg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
           : `UID: ${u.uid}`,
@@ -447,18 +499,26 @@ export const HagoMessagesView: React.FC<HagoMessagesViewProps> = ({
                       className="flex flex-col items-center shrink-0 cursor-pointer group"
                     >
                       <div className="relative">
-                        <div className="w-13 h-13 rounded-full p-0.5 bg-gradient-to-tr from-[#FFE600] to-yellow-300">
-                          <img
-                            src={friend.avatar}
-                            alt={friend.displayName}
-                            className="w-full h-full rounded-full object-cover border-2 border-white"
-                          />
-                        </div>
-                        <span className="absolute bottom-0 right-0 w-4 h-4 rounded-full bg-[#FFE600] border-2 border-white flex items-center justify-center text-[8px]">
+                        <AvatarWithFrame
+                          sizePx={50}
+                          avatarUrl={friend.avatar}
+                          displayName={friend.displayName}
+                          frameUrl={friend.equippedFrameUrl}
+                          frameGlowColor={friend.frameGlowColor}
+                          frameAnimated={friend.frameAnimated}
+                          customIconUrl={friend.customIconUrl}
+                          customIconGlow={friend.customIconGlow}
+                          customIconAnimated={friend.customIconAnimated}
+                        />
+                        <span className="absolute bottom-0 right-0 z-20 w-4 h-4 rounded-full bg-[#FFE600] border-2 border-white flex items-center justify-center text-[8px]">
                           💬
                         </span>
                       </div>
-                      <span className="text-[10px] font-bold text-gray-800 mt-1 truncate max-w-[60px] text-center">
+                      <span
+                        className={`text-[10px] font-bold text-gray-800 mt-1 truncate max-w-[60px] text-center ${
+                          friend.nameGlowColor && friend.nameGlowColor !== 'none' ? `name-glow-${friend.nameGlowColor}` : ''
+                        }`}
+                      >
                         {friend.displayName || friend.username}
                       </span>
                       <span className="text-[8px] text-gray-400 font-digits">UID {friend.uid}</span>
@@ -482,13 +542,20 @@ export const HagoMessagesView: React.FC<HagoMessagesViewProps> = ({
                         ☻
                       </div>
                     ) : (
-                      <img
-                        src={thread.avatar}
-                        alt={thread.name}
-                        className="w-12 h-12 rounded-full object-cover border border-gray-100"
+                      <AvatarWithFrame
+                        sizePx={48}
+                        avatarUrl={thread.avatar}
+                        displayName={thread.name}
+                        frameUrl={thread.equippedFrameUrl}
+                        frameGlowColor={thread.frameGlowColor}
+                        frameAnimated={thread.frameAnimated}
+                        customIconUrl={thread.customIconUrl}
+                        customIconGlow={thread.customIconGlow}
+                        customIconAnimated={thread.customIconAnimated}
+                        showOnlineDot={thread.isOnline}
                       />
                     )}
-                    {thread.isOnline && (
+                    {thread.isBot && thread.isOnline && (
                       <span className="absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full bg-green-500 border-2 border-white" />
                     )}
                   </div>
@@ -496,13 +563,20 @@ export const HagoMessagesView: React.FC<HagoMessagesViewProps> = ({
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between mb-0.5">
                       <div className="flex items-center gap-1.5 truncate">
-                        <h4 className="font-extrabold text-sm text-gray-900 truncate">
+                        <h4
+                          className={`font-extrabold text-sm text-gray-900 truncate ${
+                            thread.nameGlowColor && thread.nameGlowColor !== 'none' ? `name-glow-${thread.nameGlowColor}` : ''
+                          }`}
+                        >
                           {thread.name}
                         </h4>
                         {thread.isVerified && (
-                          <span className="text-amber-500 font-bold text-xs" title="موثق رسمياً">
-                            ✓
-                          </span>
+                          <LivoVerifiedBadge
+                            size={14}
+                            color={thread.verifiedBadgeColor}
+                            shape={thread.verifiedBadgeShape}
+                            glow={thread.verifiedBadgeGlow}
+                          />
                         )}
                       </div>
                       <span className="text-[10px] text-gray-400 font-digits shrink-0 mr-1">

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   HelpCircle,
@@ -23,11 +23,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onClose,
   onSuccess,
   initialMode = 'login',
-  canClose = false
+  canClose = true
 }) => {
   const [authMode, setAuthMode] = useState<'login' | 'signup'>(initialMode);
   const [authMethod, setAuthMethod] = useState<'main' | 'email' | 'phone'>('main');
   const [agreedToTerms, setAgreedToTerms] = useState(true);
+
+  useEffect(() => {
+    if (isOpen) {
+      setAuthMode(initialMode);
+      setErrorMsg('');
+      setInfoMsg('');
+    }
+  }, [initialMode, isOpen]);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -223,42 +231,35 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
   return (
     <div className="w-full h-full bg-white flex flex-col justify-between overflow-y-auto select-none relative">
-      {/* Close button ONLY shown when switching accounts while already logged in */}
-      {canClose && (
-        <button
-          onClick={onClose}
-          className="absolute top-3 left-3 z-20 w-8 h-8 rounded-full bg-black/40 hover:bg-black/60 text-white flex items-center justify-center transition-colors backdrop-blur-md"
-          title="إغلاق"
-        >
-          <X className="w-4 h-4" />
-        </button>
-      )}
-
-      {/* Full-Width Prominent LIVO App Icon Hero (replaces old banner/code) */}
-      <div className="relative w-full h-[250px] shrink-0 overflow-hidden bg-gradient-to-b from-[#160b2c] via-[#2b1055] to-white flex items-center justify-center">
-        <img
-          src="/assets/livo/customer_icon.jpg"
-          alt="LIVO App Icon"
-          className="w-full h-full object-cover opacity-95"
-        />
-        <div className="absolute inset-0 bg-gradient-to-t from-white via-white/10 to-black/25" />
-        <div className="absolute bottom-3 left-0 right-0 flex flex-col items-center">
-          <div className="w-24 h-24 rounded-[26px] overflow-hidden shadow-2xl border-[3px] border-white bg-black">
+      {/* Compact LIVO Header (Directly leads into unified Login/Signup without oversized banner) */}
+      <div className="px-5 pt-4 pb-3 border-b border-gray-100 flex items-center justify-between bg-gradient-to-l from-amber-50/70 via-white to-white shrink-0">
+        <div className="flex items-center gap-3 text-right">
+          <div className="w-11 h-11 rounded-2xl overflow-hidden shadow-sm border border-amber-200 bg-black shrink-0">
             <img
               src="/assets/livo/customer_icon.jpg"
               alt="LIVO"
               className="w-full h-full object-cover"
             />
           </div>
+          <div>
+            <h1 className="text-base font-black text-gray-900 tracking-tight leading-tight">مرحباً بك في LIVO</h1>
+            <p className="text-[11px] text-gray-500 font-semibold">بث مباشر وغرف صوتية حقيقية</p>
+          </div>
         </div>
+
+        {canClose && (
+          <button
+            onClick={onClose}
+            className="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700 flex items-center justify-center transition-colors shrink-0"
+            title="إغلاق"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        )}
       </div>
 
       {/* Main Content Area */}
-      <div className="px-5 pb-5 pt-1 flex-1 flex flex-col justify-between space-y-3 text-center">
-        <div>
-          <h1 className="text-xl font-black text-gray-900 tracking-tight">مرحباً بك في LIVO</h1>
-          <p className="text-[11px] text-gray-500 font-medium">بث مباشر وغرف صوتية حقيقية</p>
-        </div>
+      <div className="px-5 pb-5 pt-4 flex-1 flex flex-col justify-between space-y-3 text-center">
 
         {errorMsg && (
           <div className="bg-red-50 border border-red-200 text-red-600 text-xs p-2.5 rounded-2xl font-bold flex items-center justify-center gap-1.5 animate-in fade-in">

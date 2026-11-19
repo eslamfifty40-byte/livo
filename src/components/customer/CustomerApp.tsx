@@ -43,31 +43,18 @@ export const CustomerApp: React.FC<CustomerAppProps> = ({ currentUser }) => {
   const [isDistributorAgentOpen, setIsDistributorAgentOpen] = useState(false);
   const [isGiftHistoryOpen, setIsGiftHistoryOpen] = useState(false);
 
-  const [isAuthOpen, setIsAuthOpen] = useState(() => {
-    if (typeof window === 'undefined') return true;
-    return localStorage.getItem('livo_auth_logged_in') !== 'true' || !livoStore.getCurrentUser();
-  });
+  const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [authInitialMode, setAuthInitialMode] = useState<'login' | 'signup'>('login');
 
-  // Strict Firebase Auth & UID session isolation listener
+  // Non-destructive Firebase Auth listener: keeps active sessions synced without kicking out users mid-session
   useEffect(() => {
     const unsubAuth = firebaseService.onAuthStateChanged((fbUser) => {
       if (fbUser && localStorage.getItem('livo_auth_logged_in') === 'true') {
-        const synced = livoStore.syncFirebaseUser(fbUser);
-        if (synced) {
-          setIsAuthOpen(false);
-        }
+        livoStore.syncFirebaseUser(fbUser);
       }
     });
     return () => unsubAuth();
   }, []);
-
-  // Re-evaluate auth blocking if currentUser becomes null
-  useEffect(() => {
-    if (!currentUser) {
-      setIsAuthOpen(true);
-    }
-  }, [currentUser]);
 
   const handleOpenAuth = (mode: 'login' | 'signup' = 'login') => {
     setAuthInitialMode(mode);
@@ -87,8 +74,20 @@ export const CustomerApp: React.FC<CustomerAppProps> = ({ currentUser }) => {
   };
 
   const handleStartChatWithUser = (uid: string) => {
+    if (!currentUser) {
+      handleOpenAuth('login');
+      return;
+    }
     setChatTargetUid(uid);
     setActiveTab('messages');
+  };
+
+  const requireAuthThen = (action: () => void) => {
+    if (!currentUser) {
+      handleOpenAuth('login');
+      return;
+    }
+    action();
   };
 
   const unreadCount = currentUser
@@ -96,7 +95,7 @@ export const CustomerApp: React.FC<CustomerAppProps> = ({ currentUser }) => {
     : 0;
 
   return (
-    <div className="flex flex-col w-full h-[100dvh] md:h-[852px] md:max-h-[95vh] md:max-w-[430px] mx-auto bg-white text-gray-900 md:rounded-[44px] md:border-[8px] md:border-[#1c1c1e] md:shadow-[0_25px_70px_rgba(0,0,0,0.45)] overflow-hidden relative select-none">
+    <div className="light-surface flex flex-col w-full h-[100dvh] md:h-[852px] md:max-h-[95vh] md:max-w-[430px] mx-auto bg-white text-gray-900 md:rounded-[44px] md:border-[8px] md:border-[#1c1c1e] md:shadow-[0_25px_70px_rgba(0,0,0,0.45)] overflow-hidden relative select-none">
       {/* iOS-Style Status Bar & Dynamic Island */}
       <div className="bg-white/95 backdrop-blur-md px-6 pt-2.5 pb-1.5 flex items-center justify-between text-[11px] font-digits font-bold text-gray-900 z-30 select-none border-b border-gray-100/80 shrink-0">
         <span>9:41</span>
@@ -111,81 +110,105 @@ export const CustomerApp: React.FC<CustomerAppProps> = ({ currentUser }) => {
         </div>
       </div>
 
-      {/* Require authenticated real user before showing main app */}
-      {!currentUser || isAuthOpen ? (
-        <div className="flex-1 overflow-hidden relative bg-white">
-          <AuthModal
-            isOpen={true}
-            canClose={Boolean(currentUser)}
-            initialMode={authInitialMode}
-            onClose={() => {
-              if (currentUser) setIsAuthOpen(false);
-            }}
-            onSuccess={() => {
-              setIsAuthOpen(false);
-            }}
-          />
+      {/* Guest Quick Sign-In Bar when browsing without an active account */}
+      {!currentUser && (
+        <div className="bg-amber-50 border-b border-amber-200 px-3 py-1.5 flex items-center justify-between gap-2 text-[11px] shrink-0">
+          <span className="font-bold text-amber-900 truncate">تصفح كزائر • سجّل للدخول للمايك والدردشة</span>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              onClick={() => handleOpenAuth('login')}
+              className="bg-[#FFE600] hover:bg-yellow-400 text-black font-black px-2.5 py-1 rounded-lg text-[10px] shadow-xs"
+            >
+              دخول
+            </button>
+            <button
+              onClick={() => handleOpenAuth('signup')}
+              className="bg-white border border-amber-300 text-gray-800 font-bold px-2 py-1 rounded-lg text-[10px]"
+            >
+              حساب جديد
+            </button>
+          </div>
         </div>
-      ) : (
-        <>
-          {/* Main Screen Content Area */}
-          <div className="flex-1 overflow-hidden relative bg-[#FAFAFA]">
-            {activeTab === 'party' && (
-              <PartyView
-                currentUser={currentUser}
-                onOpenRecharge={() => setIsRechargeOpen(true)}
-              />
-            )}
+      )}
 
-            {activeTab === 'discover' && (
-              <DiscoverView
-                currentUser={currentUser}
-                onStartChat={handleStartChatWithUser}
-              />
-            )}
-
-            {activeTab === 'messages' && (
-              <HagoMessagesView
-                currentUser={currentUser}
-                initialChatPartnerUid={chatTargetUid}
-                onClearInitialPartner={() => setChatTargetUid(null)}
-              />
-            )}
-
-            {activeTab === 'me' && (
-              <HagoProfileView
-                user={currentUser}
-                onOpenRecharge={() => setIsRechargeOpen(true)}
-                onOpenStore={() => setIsStoreOpen(true)}
-                onOpenAgency={() => setIsAgencyOpen(true)}
-                onOpenVerification={() => setIsVerificationOpen(true)}
-                onOpenWithdrawal={() => setIsWithdrawalOpen(true)}
-                onOpenSettings={() => setIsSettingsOpen(true)}
-                onOpenAds={() => setIsAdCenterOpen(true)}
-                onOpenSupport={() => setIsSupportOpen(true)}
-                onOpenAuth={handleOpenAuth}
-                onLogout={handleLogout}
-                onOpenLevelCenter={() => setIsLevelCenterOpen(true)}
-                onOpenChargingAgent={() => setIsChargingAgentOpen(true)}
-                onOpenDistributorAgent={() => setIsDistributorAgentOpen(true)}
-                onOpenGiftHistory={() => setIsGiftHistoryOpen(true)}
-              />
-            )}
-          </div>
-
-          {/* 4-Tab Bottom Navigation Bar */}
-          <HagoBottomNav
-            activeTab={activeTab}
-            setActiveTab={setActiveTab}
-            unreadCount={unreadCount}
+      {/* Main Screen Content Area (Always mounted to prevent mid-session voice room drops) */}
+      <div className="flex-1 overflow-hidden relative bg-[#FAFAFA]">
+        {activeTab === 'party' && (
+          <PartyView
+            currentUser={currentUser}
+            onOpenRecharge={() => requireAuthThen(() => setIsRechargeOpen(true))}
+            onRequireAuth={() => handleOpenAuth('login')}
           />
+        )}
 
-          {/* iOS Home Indicator */}
-          <div className="bg-white pb-1.5 pt-0.5 flex justify-center shrink-0">
-            <div className="w-32 h-1 bg-gray-900/80 rounded-full" />
+        {activeTab === 'discover' && (
+          <DiscoverView
+            currentUser={currentUser}
+            onStartChat={handleStartChatWithUser}
+            onRequireAuth={() => handleOpenAuth('login')}
+          />
+        )}
+
+        {activeTab === 'messages' && (
+          <HagoMessagesView
+            currentUser={currentUser}
+            initialChatPartnerUid={chatTargetUid}
+            onClearInitialPartner={() => setChatTargetUid(null)}
+            onRequireAuth={() => handleOpenAuth('login')}
+          />
+        )}
+
+        {activeTab === 'me' && (
+          <HagoProfileView
+            user={currentUser}
+            onOpenRecharge={() => requireAuthThen(() => setIsRechargeOpen(true))}
+            onOpenStore={() => requireAuthThen(() => setIsStoreOpen(true))}
+            onOpenAgency={() => requireAuthThen(() => setIsAgencyOpen(true))}
+            onOpenVerification={() => requireAuthThen(() => setIsVerificationOpen(true))}
+            onOpenWithdrawal={() => requireAuthThen(() => setIsWithdrawalOpen(true))}
+            onOpenSettings={() => requireAuthThen(() => setIsSettingsOpen(true))}
+            onOpenAds={() => requireAuthThen(() => setIsAdCenterOpen(true))}
+            onOpenSupport={() => setIsSupportOpen(true)}
+            onOpenAuth={handleOpenAuth}
+            onLogout={handleLogout}
+            onOpenLevelCenter={() => requireAuthThen(() => setIsLevelCenterOpen(true))}
+            onOpenChargingAgent={() => requireAuthThen(() => setIsChargingAgentOpen(true))}
+            onOpenDistributorAgent={() => requireAuthThen(() => setIsDistributorAgentOpen(true))}
+            onOpenGiftHistory={() => requireAuthThen(() => setIsGiftHistoryOpen(true))}
+          />
+        )}
+      </div>
+
+      {/* 4-Tab Bottom Navigation Bar */}
+      <HagoBottomNav
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        unreadCount={unreadCount}
+      />
+
+      {/* iOS Home Indicator */}
+      <div className="bg-white pb-1.5 pt-0.5 flex justify-center shrink-0">
+        <div className="w-32 h-1 bg-gray-900/80 rounded-full" />
+      </div>
+
+      {/* Dismissible Auth Overlay (never blocks or unmounts main app shell) */}
+      {isAuthOpen && (
+        <div className="absolute inset-0 z-50 bg-black/55 backdrop-blur-xs flex items-center justify-center md:p-2 animate-in fade-in">
+          <div className="w-full h-full md:h-auto md:max-h-[92%] bg-white md:rounded-3xl overflow-hidden shadow-2xl border border-gray-200 flex flex-col">
+            <AuthModal
+              isOpen={isAuthOpen}
+              canClose={true}
+              initialMode={authInitialMode}
+              onClose={() => setIsAuthOpen(false)}
+              onSuccess={() => setIsAuthOpen(false)}
+            />
           </div>
+        </div>
+      )}
 
-          {/* Global Customer Modals */}
+      {/* Global Customer Modals */}
+      {currentUser && (
+        <>
           <RechargeModal
             user={currentUser}
             isOpen={isRechargeOpen}
@@ -234,12 +257,6 @@ export const CustomerApp: React.FC<CustomerAppProps> = ({ currentUser }) => {
             currentUser={currentUser}
           />
 
-          <SupportTicketsModal
-            isOpen={isSupportOpen}
-            onClose={() => setIsSupportOpen(false)}
-            currentUser={currentUser}
-          />
-
           <LevelCenterModal
             user={currentUser}
             isOpen={isLevelCenterOpen}
@@ -269,6 +286,12 @@ export const CustomerApp: React.FC<CustomerAppProps> = ({ currentUser }) => {
           />
         </>
       )}
+
+      <SupportTicketsModal
+        isOpen={isSupportOpen}
+        onClose={() => setIsSupportOpen(false)}
+        currentUser={currentUser}
+      />
     </div>
   );
 };

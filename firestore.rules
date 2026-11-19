@@ -22,6 +22,22 @@ service cloud.firestore {
       return role in ['owner', 'supervisor', 'agent', 'charging_agent', 'distributor_agent', 'user'];
     }
 
+    function adminCosmeticKeys() {
+      return [
+        'verifiedBadgeColor',
+        'verifiedBadgeShape',
+        'verifiedBadgeGlow',
+        'nameGlowColor',
+        'customIconUrl',
+        'customIconLabel',
+        'customIconGlow',
+        'customIconAnimated',
+        'frameGlowColor',
+        'frameAnimated',
+        'equippedFrameUrl'
+      ];
+    }
+
     // Users Collection (keyed by 5-digit LIVO UID, bound via authUid == request.auth.uid)
     match /users/{userId} {
       allow read: if isAuthenticated();
@@ -32,7 +48,8 @@ service cloud.firestore {
         request.resource.data.authUid == request.auth.uid &&
         request.resource.data.role == 'user' &&
         request.resource.data.coins == 0 &&
-        request.resource.data.isVerified == false
+        request.resource.data.isVerified == false &&
+        !request.resource.data.keys().hasAny(adminCosmeticKeys())
       );
 
       allow update: if isOwner() || (
@@ -41,7 +58,8 @@ service cloud.firestore {
         request.resource.data.role == resource.data.role &&
         request.resource.data.isVerified == resource.data.isVerified &&
         request.resource.data.coins is number &&
-        request.resource.data.coins >= 0
+        request.resource.data.coins >= 0 &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(adminCosmeticKeys())
       );
 
       allow delete: if isOwner();
