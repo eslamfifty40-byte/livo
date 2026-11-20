@@ -115,8 +115,15 @@ class LivoStore {
     return () => this.listeners.delete(listener);
   }
 
+  private notifying = false;
   public notify() {
-    this.listeners.forEach(fn => fn());
+    if (this.notifying) return;
+    this.notifying = true;
+    try {
+      this.listeners.forEach(fn => fn());
+    } finally {
+      this.notifying = false;
+    }
   }
 
   private isLegacyDemoMessage(msg: DirectMessage): boolean {
