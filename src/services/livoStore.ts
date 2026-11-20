@@ -31,6 +31,7 @@ import {
   RechargeCode,
   CoinPackage,
   SupervisorRecord,
+  RoomSeat,
   RoomMessage,
   RoomGiftBlast
 } from '../types';
@@ -45,6 +46,7 @@ import {
 } from '../data/initialData';
 import { firebaseService } from './firebase';
 import { User as FirebaseUser } from 'firebase/auth';
+import { Unsubscribe } from 'firebase/firestore';
 
 const OWNER_EMAILS = ['livo.admin@gmail.com', 'eslamfifty11@gmail.com'];
 const LEGACY_DEMO_UIDS = new Set(['10245', '10246', '10247']);
@@ -98,8 +100,13 @@ class LivoStore {
   private supervisors: SupervisorRecord[] = [];
 
   private isInitialized = false;
-  private coreBound = false;
-  private lastMsgAuthUid: string | null = null;
+  private publicBound = false;
+  private usersLoadedOnce = false;
+  private autoPurgedFakeRooms = false;
+  private rawFirestoreRooms: VoiceRoom[] = [];
+  private lastAuthSessionKey: string | null = null;
+  private currentAuthEmail: string | null = null;
+  private authProtectedUnsubs: Unsubscribe[] = [];
   private recentRoomTouchMs: Map<string, number> = new Map();
   private recentUserTouchMs: Map<string, number> = new Map();
   private messagesUnsub: (() => void) | null = null;
@@ -180,10 +187,28 @@ class LivoStore {
     this.persistMessageRequestsCache();
   }
 
+  private isFakeUserRecord(u: UserProfile): boolean {
+    if (!u || !u.uid) return true;
+    if (LEGACY_DEMO_UIDS.has(u.uid) && !u.authUid) return true;
+    const lowerEmail = (u.email || '').trim().toLowerCase();
+    const lowerUsername = (u.username || '').trim().toLowerCase();
+    if (!u.authUid && !this.isOwnerEmail(lowerEmail)) {
+      if (
+        lowerEmail.endsWith('@demo.livo') ||
+        lowerEmail.endsWith('@fake.livo') ||
+        lowerUsername.startsWith('demo_') ||
+        u.uid.startsWith('demo_')
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   private persistUsersCache() {
     if (typeof window === 'undefined') return;
     try {
-      const clean = this.users.filter(u => !(LEGACY_DEMO_UIDS.has(u.uid) && !u.authUid));
+      const clean = this.users.filter(u => !this.isFakeUserRecord(u));
       localStorage.setItem(USERS_CACHE_KEY, JSON.stringify(clean));
     } catch {}
   }
@@ -193,14 +218,14 @@ class LivoStore {
     const map = new Map<string, UserProfile>();
 
     for (const u of firestoreUsers) {
-      if (!(LEGACY_DEMO_UIDS.has(u.uid) && !u.authUid)) {
+      if (!this.isFakeUserRecord(u)) {
         map.set(u.uid, u);
       }
     }
 
     // Protect recently modified or active local session user (e.g. Phone OTP or pre-echo profile writes)
     for (const localU of this.users) {
-      if (LEGACY_DEMO_UIDS.has(localU.uid) && !localU.authUid) continue;
+      if (this.isFakeUserRecord(localU)) continue;
       const touchedAt = this.recentUserTouchMs.get(localU.uid) || 0;
       const isActiveLocal = localU.uid === this.currentUid;
       if (!map.has(localU.uid) && (isActiveLocal || now - touchedAt < 10000)) {
@@ -220,18 +245,68 @@ class LivoStore {
     }
   }
 
+  public isFakeRoomRecord(r: VoiceRoom): boolean {
+    if (!r || !r.id || !r.ownerUid) return true;
+    if (r.isOfficial || r.id === 'room-official-livo') return false;
+    const lowerId = r.id.toLowerCase();
+    const lowerOwnerUid = r.ownerUid.toLowerCase();
+    if (
+      LEGACY_DEMO_UIDS.has(r.ownerUid) ||
+      lowerId.startsWith('room-demo') ||
+      lowerId.includes('demo-') ||
+      lowerId.startsWith('demo_') ||
+      lowerId.startsWith('fake_') ||
+      lowerOwnerUid.startsWith('demo_') ||
+      lowerOwnerUid.startsWith('fake_')
+    ) {
+      return true;
+    }
+    const touchedAt = this.recentRoomTouchMs.get(r.id) || 0;
+    if (Date.now() - touchedAt < 12000) {
+      return false;
+    }
+    if (this.usersLoadedOnce) {
+      const ownerExists = this.users.some(
+        (u) => u.uid === r.ownerUid && !this.isFakeUserRecord(u)
+      );
+      if (!ownerExists) return true;
+    }
+    return false;
+  }
+
+  private dedupeRoomSeats(seats: RoomSeat[] = []): RoomSeat[] {
+    const seenUids = new Set<string>();
+    return seats.map((s, idx) => {
+      const seatIndex = typeof s.seatIndex === 'number' ? s.seatIndex : idx;
+      if (!s.occupiedByUid) {
+        return { ...s, seatIndex };
+      }
+      if (seenUids.has(s.occupiedByUid)) {
+        return { seatIndex, isMuted: false, isLocked: Boolean(s.isLocked), points: 0 };
+      }
+      seenUids.add(s.occupiedByUid);
+      return { ...s, seatIndex };
+    });
+  }
+
   private mergeRoomsSafe(firestoreRooms: VoiceRoom[]) {
+    this.rawFirestoreRooms = firestoreRooms;
     const now = Date.now();
     const map = new Map<string, VoiceRoom>();
 
     for (const r of firestoreRooms) {
-      map.set(r.id, r);
+      if (this.isFakeRoomRecord(r)) continue;
+      map.set(r.id, { ...r, seats: this.dedupeRoomSeats(r.seats || []) });
     }
 
     for (const localRoom of this.rooms) {
+      if (this.isFakeRoomRecord(localRoom)) continue;
       const touchedAt = this.recentRoomTouchMs.get(localRoom.id) || 0;
       if (now - touchedAt < 6000) {
-        map.set(localRoom.id, localRoom);
+        map.set(localRoom.id, {
+          ...localRoom,
+          seats: this.dedupeRoomSeats(localRoom.seats || [])
+        });
       }
     }
 
@@ -250,7 +325,7 @@ class LivoStore {
       if (rawUsers) {
         const parsedUsers = JSON.parse(rawUsers) as UserProfile[];
         if (Array.isArray(parsedUsers)) {
-          this.users = parsedUsers.filter(u => !(LEGACY_DEMO_UIDS.has(u.uid) && !u.authUid));
+          this.users = parsedUsers.filter(u => !this.isFakeUserRecord(u));
         }
       }
 
@@ -297,11 +372,8 @@ class LivoStore {
       this.messageRequestsUnsub = null;
     }
     if (!authUid) {
-      this.lastMsgAuthUid = null;
       return;
     }
-
-    this.lastMsgAuthUid = `${authUid}_${isOwner ? '1' : '0'}`;
 
     this.messagesUnsub = firebaseService.subscribeToMessages(
       (msgs) => {
@@ -320,185 +392,187 @@ class LivoStore {
     );
   }
 
-  /**
-   * Connect real-time Firestore listeners once without tearing down active
-   * room/user streams when Firebase Auth emits token refresh / state updates.
-   */
-  private initFirebaseSubscriptions() {
-    if (typeof window === 'undefined' || this.isInitialized) return;
-    this.isInitialized = true;
-
-    const bindCoreListenersOnce = () => {
-      if (this.coreBound) return;
-      this.coreBound = true;
-
-      // 1. Users sync (ZERO fake user seeding, safe merge)
-      firebaseService.subscribeToUsers((firestoreUsers) => {
-        this.mergeUsersSafe(firestoreUsers);
-        this.notify();
-      });
-
-      // 2. Recharge requests sync
-      firebaseService.subscribeToRechargeRequests((requests) => {
-        this.rechargeRequests = requests;
-        this.notify();
-      });
-
-      // 3. Rooms sync (safe merge protects active room/mic state from transient overwrites)
-      firebaseService.subscribeToRooms((firestoreRooms) => {
-        if (firestoreRooms.length > 0) {
-          this.mergeRoomsSafe(firestoreRooms);
-          this.notify();
-        } else {
-          INITIAL_ROOMS.forEach(r => firebaseService.saveRoom(r));
-        }
-      });
-
-      // 4. Agencies sync
-      firebaseService.subscribeToAgencies((list) => {
-        this.agencies = list;
-        this.notify();
-      });
-
-      // 5. Verifications sync
-      firebaseService.subscribeToVerifications((list) => {
-        this.verifications = list;
-        this.notify();
-      });
-
-      // 6. Withdrawals sync
-      firebaseService.subscribeToWithdrawals((list) => {
-        this.withdrawals = list;
-        this.notify();
-      });
-
-      // 7. Bans sync
-      firebaseService.subscribeToBans((list) => {
-        this.bans = list;
-        this.notify();
-      });
-
-      // 8. Coin audits sync
-      firebaseService.subscribeToCoinAudits((audits) => {
-        this.coinAudits = audits;
-        this.notify();
-      });
-
-      this.attachSecondaryListeners();
-    };
-
-    bindCoreListenersOnce();
-
-    firebaseService.onAuthStateChanged((fbUser) => {
-      bindCoreListenersOnce();
-      if (fbUser) {
-        const isOwner = this.isOwnerEmail(fbUser.email);
-        const key = `${fbUser.uid}_${isOwner ? '1' : '0'}`;
-        if (this.lastMsgAuthUid !== key) {
-          this.attachMessageListeners(fbUser.uid, isOwner);
-        }
-      } else if (this.lastMsgAuthUid !== null) {
-        this.attachMessageListeners(undefined, false);
-      }
+  private teardownAuthProtectedListeners() {
+    this.authProtectedUnsubs.forEach((unsub) => {
+      try {
+        unsub();
+      } catch {}
     });
+    this.authProtectedUnsubs = [];
   }
 
-  private attachSecondaryListeners() {
+  private bindPublicListenersOnce() {
+    if (this.publicBound) return;
+    this.publicBound = true;
 
-    // 10. Advertisements sync
+    // Rooms sync (safe merge protects active room/mic state)
+    firebaseService.subscribeToRooms((firestoreRooms) => {
+      if (firestoreRooms.length > 0) {
+        this.mergeRoomsSafe(firestoreRooms);
+        this.notify();
+      } else if (firebaseService.getCurrentAuthUid()) {
+        INITIAL_ROOMS.forEach((r) => firebaseService.saveRoom(r));
+      }
+    });
+
+    // Advertisements sync
     firebaseService.subscribeToAdvertisements((ads) => {
       this.advertisements = ads;
       this.notify();
     });
 
-    // 11. Support Tickets sync
-    firebaseService.subscribeToSupportTickets((tickets) => {
-      this.supportTickets = tickets;
-      this.notify();
-    });
-
-    // 12. Level Configs sync (Levels 0 to 50)
+    // Level Configs sync (Levels 0 to 50)
     firebaseService.subscribeToLevelConfigs((configs) => {
       if (configs.length > 0) {
         this.levelConfigs = configs;
         this.notify();
-      } else {
+      } else if (this.isAuthorizedAdminEmail(this.currentAuthEmail)) {
         firebaseService.saveLevelConfigs(INITIAL_LEVEL_CONFIGS);
       }
     });
 
-    // 13. Distributors sync
-    firebaseService.subscribeToDistributors((distList) => {
-      this.distributors = distList;
-      this.notify();
-    });
-
-    // 14. Agent Transfers sync
-    firebaseService.subscribeToAgentTransfers((transfers) => {
-      this.agentTransfers = transfers;
-      this.notify();
-    });
-
-    // 15. Payment Methods sync
+    // Payment Methods sync (live Admin <-> Customer recharge numbers)
     firebaseService.subscribeToPaymentMethods((methods) => {
       if (methods.length > 0) {
         this.paymentMethods = methods;
         this.notify();
-      } else {
-        INITIAL_PAYMENT_METHODS.forEach(pm => firebaseService.savePaymentMethod(pm));
+      } else if (this.isAuthorizedAdminEmail(this.currentAuthEmail)) {
+        INITIAL_PAYMENT_METHODS.forEach((pm) => firebaseService.savePaymentMethod(pm));
       }
     });
 
-    // 16. Gifts sync
+    // Gifts sync (live Admin <-> Customer gifts & prices)
     firebaseService.subscribeToGifts((giftsList) => {
       if (giftsList.length > 0) {
         this.gifts = giftsList;
         this.notify();
-      } else {
-        INITIAL_GIFTS.forEach(g => firebaseService.saveGift(g));
+      } else if (this.isAuthorizedAdminEmail(this.currentAuthEmail)) {
+        INITIAL_GIFTS.forEach((g) => firebaseService.saveGift(g));
       }
     });
 
-    // 17. Store Items sync (Frames & Entrances)
+    // Store Items sync
     firebaseService.subscribeToStoreItems((itemsList) => {
       if (itemsList.length > 0) {
         this.storeItems = itemsList;
         this.notify();
-      } else {
-        INITIAL_STORE_ITEMS.forEach(it => firebaseService.saveStoreItem(it));
+      } else if (this.isAuthorizedAdminEmail(this.currentAuthEmail)) {
+        INITIAL_STORE_ITEMS.forEach((it) => firebaseService.saveStoreItem(it));
       }
     });
 
-    // 18. Recharge Codes sync
-    firebaseService.subscribeToRechargeCodes((codesList) => {
-      if (codesList.length > 0) {
-        this.rechargeCodes = codesList;
-        this.notify();
-      } else {
-        INITIAL_RECHARGE_CODES.forEach(rc => firebaseService.saveRechargeCode(rc));
-      }
-    });
-
-    // 19. Coin Packages sync
+    // Coin Packages sync
     firebaseService.subscribeToCoinPackages((pkgs) => {
       if (pkgs.length > 0) {
         this.coinPackages = pkgs;
         this.notify();
-      } else {
-        INITIAL_COIN_PACKAGES.forEach(pkg => firebaseService.saveCoinPackage({ ...pkg, isActive: true }));
+      } else if (this.isAuthorizedAdminEmail(this.currentAuthEmail)) {
+        INITIAL_COIN_PACKAGES.forEach((pkg) => firebaseService.saveCoinPackage({ ...pkg, isActive: true }));
       }
     });
 
-    // 20. Supervisors sync
-    firebaseService.subscribeToSupervisors((sups) => {
-      this.supervisors = sups;
-      this.notify();
-    });
-
-    // 21. Videos sync
+    // Videos sync
     firebaseService.subscribeToVideos((vids) => {
       this.videos = vids;
       this.notify();
+    });
+  }
+
+  private bindAuthProtectedListeners(fbUser: FirebaseUser | null) {
+    const isOwner = this.isOwnerEmail(fbUser?.email);
+    const nextKey = fbUser ? `${fbUser.uid}_${isOwner ? '1' : '0'}` : 'anon';
+    if (this.lastAuthSessionKey === nextKey && fbUser && this.authProtectedUnsubs.length > 0) {
+      return;
+    }
+
+    this.teardownAuthProtectedListeners();
+    this.lastAuthSessionKey = nextKey;
+    this.currentAuthEmail = fbUser?.email || null;
+
+    if (!fbUser) {
+      this.attachMessageListeners(undefined, false);
+      return;
+    }
+
+    this.authProtectedUnsubs.push(
+      firebaseService.subscribeToUsers((firestoreUsers) => {
+        this.usersLoadedOnce = true;
+        this.mergeUsersSafe(firestoreUsers);
+        if (this.rawFirestoreRooms.length > 0) {
+          this.mergeRoomsSafe(this.rawFirestoreRooms);
+        }
+        if (isOwner && !this.autoPurgedFakeRooms && this.rawFirestoreRooms.length > 0) {
+          this.autoPurgedFakeRooms = true;
+          this.purgeFakeRoomsFromFirestore();
+        }
+        this.notify();
+      }),
+      firebaseService.subscribeToRechargeRequests((requests) => {
+        this.rechargeRequests = requests;
+        this.notify();
+      }),
+      firebaseService.subscribeToAgencies((list) => {
+        this.agencies = list;
+        this.notify();
+      }),
+      firebaseService.subscribeToVerifications((list) => {
+        this.verifications = list;
+        this.notify();
+      }),
+      firebaseService.subscribeToWithdrawals((list) => {
+        this.withdrawals = list;
+        this.notify();
+      }),
+      firebaseService.subscribeToBans((list) => {
+        this.bans = list;
+        this.notify();
+      }),
+      firebaseService.subscribeToCoinAudits((audits) => {
+        this.coinAudits = audits;
+        this.notify();
+      }),
+      firebaseService.subscribeToSupportTickets((tickets) => {
+        this.supportTickets = tickets;
+        this.notify();
+      }),
+      firebaseService.subscribeToDistributors((distList) => {
+        this.distributors = distList;
+        this.notify();
+      }),
+      firebaseService.subscribeToAgentTransfers((transfers) => {
+        this.agentTransfers = transfers;
+        this.notify();
+      }),
+      firebaseService.subscribeToRechargeCodes((codesList) => {
+        if (codesList.length > 0) {
+          this.rechargeCodes = codesList;
+          this.notify();
+        } else if (this.isAuthorizedAdminEmail(fbUser.email)) {
+          INITIAL_RECHARGE_CODES.forEach((rc) => firebaseService.saveRechargeCode(rc));
+        }
+      }),
+      firebaseService.subscribeToSupervisors((sups) => {
+        this.supervisors = sups;
+        this.notify();
+      })
+    );
+
+    this.attachMessageListeners(fbUser.uid, isOwner);
+  }
+
+  /**
+   * Connect public Firestore listeners once on boot, and re-bind auth-protected
+   * listeners cleanly whenever Firebase Auth signs in or switches accounts.
+   */
+  private initFirebaseSubscriptions() {
+    if (typeof window === 'undefined' || this.isInitialized) return;
+    this.isInitialized = true;
+
+    this.bindPublicListenersOnce();
+
+    firebaseService.onAuthStateChanged((fbUser) => {
+      this.bindPublicListenersOnce();
+      this.bindAuthProtectedListeners(fbUser);
     });
   }
 
@@ -508,7 +582,7 @@ class LivoStore {
   }
 
   public getGenuineUsers(): UserProfile[] {
-    return this.users.filter(u => !(LEGACY_DEMO_UIDS.has(u.uid) && !u.authUid));
+    return this.users.filter((u) => !this.isFakeUserRecord(u));
   }
 
   public searchUsersByQuery(queryText: string): UserProfile[] {
@@ -516,7 +590,7 @@ class LivoStore {
     const list = this.getGenuineUsers();
     if (!clean) return list;
     return list.filter(
-      u =>
+      (u) =>
         u.uid.toLowerCase().includes(clean) ||
         (u.authUid && u.authUid.toLowerCase().includes(clean)) ||
         u.username.toLowerCase().includes(clean) ||
@@ -524,6 +598,77 @@ class LivoStore {
         (u.email && u.email.toLowerCase().includes(clean)) ||
         (u.phoneNumber && u.phoneNumber.toLowerCase().includes(clean))
     );
+  }
+
+  /**
+   * Universal UID lookup (supports 10000 - 100000+ even if not yet cached in memory)
+   */
+  public async lookupUserInFirestore(queryText: string): Promise<UserProfile[]> {
+    const clean = queryText.trim();
+    const localMatches = this.searchUsersByQuery(clean);
+    if (localMatches.length > 0 || !clean) {
+      return localMatches;
+    }
+    if (/^\d{4,8}$/.test(clean)) {
+      const serverUser = await firebaseService.findUserByUid(clean);
+      if (serverUser && !this.isFakeUserRecord(serverUser)) {
+        this.mergeUsersSafe([serverUser]);
+        this.notify();
+        return this.searchUsersByQuery(clean);
+      }
+    }
+    return localMatches;
+  }
+
+  public async searchUsersAsync(queryText: string): Promise<UserProfile[]> {
+    return this.lookupUserInFirestore(queryText);
+  }
+
+  public updateUserLocation(
+    uid: string,
+    coords: { lat: number; lng: number } | null,
+    enabled: boolean
+  ): void {
+    if (!uid) return;
+    if (coords && enabled) {
+      this.updateUserProfile(uid, {
+        locationEnabled: true,
+        locationCoords: {
+          lat: coords.lat,
+          lng: coords.lng,
+          updatedAt: new Date().toISOString()
+        }
+      });
+    } else {
+      this.updateUserProfile(uid, {
+        locationEnabled: false
+      });
+    }
+  }
+
+  public getUserDistanceKm(u1?: UserProfile | null, u2?: UserProfile | null): number | null {
+    if (!u1?.locationEnabled || !u1.locationCoords || !u2?.locationEnabled || !u2.locationCoords) {
+      return null;
+    }
+    const { lat: lat1, lng: lon1 } = u1.locationCoords;
+    const { lat: lat2, lng: lon2 } = u2.locationCoords;
+    if (
+      typeof lat1 !== 'number' ||
+      typeof lon1 !== 'number' ||
+      typeof lat2 !== 'number' ||
+      typeof lon2 !== 'number'
+    ) {
+      return null;
+    }
+    const toRad = (deg: number) => (deg * Math.PI) / 180;
+    const R = 6371;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return Math.round(R * c * 10) / 10;
   }
 
   public getSavedAccounts(): SavedAccountSummary[] {
@@ -622,6 +767,33 @@ class LivoStore {
   }
 
   /**
+   * Async version of syncFirebaseUser: queries Firestore directly by authUid / email
+   * before deciding to allocate a new UID, preventing duplicate accounts on login/redirect.
+   */
+  public async syncFirebaseUserAsync(
+    fbUser: FirebaseUser,
+    options?: { accountType?: 'personal' | 'business'; displayName?: string }
+  ): Promise<UserProfile> {
+    const fbEmail = fbUser.email?.trim().toLowerCase();
+    const localMatch =
+      this.users.find((u) => u.authUid === fbUser.uid) ||
+      (fbEmail
+        ? this.users.find(
+            (u) => u.email?.trim().toLowerCase() === fbEmail && (!u.authUid || u.authUid === fbUser.uid)
+          )
+        : undefined);
+
+    if (!localMatch) {
+      const serverMatch = await firebaseService.findUserByAuthUidOrEmail(fbUser.uid, fbEmail);
+      if (serverMatch && !this.isFakeUserRecord(serverMatch)) {
+        this.mergeUsersSafe([serverMatch]);
+      }
+    }
+
+    return this.syncFirebaseUser(fbUser, options);
+  }
+
+  /**
    * Synchronize a real Firebase Auth user to their exact bound Livo UserProfile
    * Never mixes profiles or falls back to another user's account.
    */
@@ -649,6 +821,9 @@ class LivoStore {
       const updates: Partial<UserProfile> = {};
       if (!matched.authUid) updates.authUid = fbUser.uid;
       if (fbEmail && !matched.email) updates.email = fbEmail;
+      if (fbUser.photoURL && (!matched.avatar || matched.avatar === '/assets/livo/customer_icon.jpg')) {
+        updates.avatar = fbUser.photoURL;
+      }
       if (isOwner && matched.role !== 'owner') {
         updates.role = 'owner';
         updates.isVerified = true;
@@ -663,7 +838,7 @@ class LivoStore {
     }
 
     // 3. Create brand new profile strictly bound to fbUser.uid
-    const newUid = this.generateUniqueUid();
+    const newUid = isOwner && !this.getUserByUid('10000') ? '10000' : this.generateUniqueUid();
     const fallbackName = options?.displayName?.trim() || fbUser.displayName?.trim() || (fbEmail ? fbEmail.split('@')[0] : `عضو_${newUid}`);
     const cleanUsername = fallbackName.toLowerCase().replace(/[^a-z0-9_]/g, '') || `user_${newUid}`;
     const resolvedRole = isOwner ? 'owner' : activeSupervisor ? 'supervisor' : 'user';
@@ -1687,7 +1862,30 @@ class LivoStore {
 
   // --- ROOMS & OFFICIAL ADMIN ROOM CONTROL (STRICT SINGLE-MIC & OWNER SEAT #1 RULES) ---
   public getRooms(): VoiceRoom[] {
-    return this.rooms.filter(r => r.isOfficial || !LEGACY_DEMO_UIDS.has(r.ownerUid));
+    return this.rooms.filter(
+      (r) => !this.isFakeRoomRecord(r) && (r.isOfficial || r.status === 'open')
+    );
+  }
+
+  public getAllRoomsForAdmin(): VoiceRoom[] {
+    return this.rooms.filter((r) => !this.isFakeRoomRecord(r));
+  }
+
+  public async purgeFakeRoomsFromFirestore(): Promise<number> {
+    const fakeRooms = this.rawFirestoreRooms.filter((r) => this.isFakeRoomRecord(r));
+    if (fakeRooms.length === 0) return 0;
+    let deletedCount = 0;
+    for (const r of fakeRooms) {
+      try {
+        const ok = await firebaseService.deleteRoom(r.id);
+        if (ok) deletedCount += 1;
+      } catch {}
+    }
+    const fakeIds = new Set(fakeRooms.map((r) => r.id));
+    this.rawFirestoreRooms = this.rawFirestoreRooms.filter((r) => !fakeIds.has(r.id));
+    this.rooms = this.rooms.filter((r) => !fakeIds.has(r.id) && !this.isFakeRoomRecord(r));
+    this.notify();
+    return deletedCount;
   }
 
   public getVoiceRoomPersonalBg(uid: string): string | undefined {
@@ -1860,12 +2058,14 @@ class LivoStore {
             isVerified: owner.isVerified,
             verifiedBadgeColor: owner.verifiedBadgeColor,
             verifiedBadgeShape: owner.verifiedBadgeShape,
+            verifiedBadgeGlow: owner.verifiedBadgeGlow,
             nameGlowColor: owner.nameGlowColor,
             equippedFrameUrl: owner.equippedFrameUrl,
             frameGlowColor: owner.frameGlowColor,
             frameAnimated: owner.frameAnimated,
             customIconUrl: owner.customIconUrl,
             customIconGlow: owner.customIconGlow,
+            customIconAnimated: owner.customIconAnimated,
             isMuted: false,
             isLocked: false,
             points: 0
@@ -1961,20 +2161,14 @@ class LivoStore {
       return { success: false, message: 'المقعد رقم 1 مخصص لصاحب الغرفة أو المشرف فقط' };
     }
 
-    // Strict 1-Mic-Per-UID enforcement
-    const existingSeat = room.seats.find(s => s.occupiedByUid === uid);
-    if (existingSeat) {
-      if (existingSeat.seatIndex === seatIndex) {
-        return { success: true, message: 'أنت جالس بالفعل على هذا المقعد' };
-      }
-      return { success: false, message: 'لا يمكنك الجلوس على أكثر من مايك واحد في نفس الوقت! انزل من المايك الحالي أولاً.' };
-    }
-
-    const seats = [...room.seats];
+    const seats = [...(room.seats || [])];
     while (seats.length <= seatIndex) {
       seats.push({ seatIndex: seats.length, isMuted: false, isLocked: false });
     }
     const targetSeat = seats[seatIndex];
+    if (targetSeat.occupiedByUid === uid) {
+      return { success: true, message: 'أنت جالس بالفعل على هذا المقعد' };
+    }
     if (targetSeat.isLocked && !isOwnerOrMod) {
       return { success: false, message: 'هذا المقعد مغلق من قِبل المالك' };
     }
@@ -1982,8 +2176,17 @@ class LivoStore {
       return { success: false, message: 'هذا المقعد مشغول بمستخدم آخر' };
     }
 
-    seats[seatIndex] = {
-      ...targetSeat,
+    // Smooth single-mic move: automatically vacate any previous seat(s) occupied by this UID
+    const prevSeat = seats.find(s => s.occupiedByUid === uid);
+    const preservedMuted = prevSeat ? Boolean(prevSeat.isMuted) : false;
+    const cleanedSeats = seats.map((s, idx) =>
+      s.occupiedByUid === uid
+        ? { seatIndex: idx, isMuted: false, isLocked: Boolean(s.isLocked), points: s.points || 0 }
+        : { ...s, seatIndex: idx }
+    );
+
+    cleanedSeats[seatIndex] = {
+      ...cleanedSeats[seatIndex],
       seatIndex,
       occupiedByUid: user.uid,
       occupiedByName: user.displayName,
@@ -1991,21 +2194,28 @@ class LivoStore {
       isVerified: user.isVerified,
       verifiedBadgeColor: user.verifiedBadgeColor,
       verifiedBadgeShape: user.verifiedBadgeShape,
+      verifiedBadgeGlow: user.verifiedBadgeGlow,
       nameGlowColor: user.nameGlowColor,
       equippedFrameUrl: user.equippedFrameUrl,
       frameGlowColor: user.frameGlowColor,
       frameAnimated: user.frameAnimated,
       customIconUrl: user.customIconUrl,
       customIconGlow: user.customIconGlow,
-      isMuted: false
+      customIconAnimated: user.customIconAnimated,
+      isMuted: preservedMuted
     };
 
-    const updatedRoom = { ...room, seats };
+    const updatedRoom = { ...room, seats: this.dedupeRoomSeats(cleanedSeats) };
     this.markRoomTouched(roomId);
     this.rooms[rIndex] = updatedRoom;
     this.notify();
     firebaseService.saveRoom(updatedRoom);
-    return { success: true, message: `تم الجلوس على المايك رقم ${seatIndex + 1}` };
+    return {
+      success: true,
+      message: prevSeat
+        ? `تم الانتقال إلى المايك رقم ${seatIndex + 1} ✓`
+        : `تم الجلوس على المايك رقم ${seatIndex + 1}`
+    };
   }
 
   public leaveRoomSeat(roomId: string, uid: string): void {
@@ -2087,7 +2297,11 @@ class LivoStore {
         isVerified: msg.isVerified ?? sender?.isVerified,
         verifiedBadgeColor: msg.verifiedBadgeColor ?? sender?.verifiedBadgeColor,
         verifiedBadgeShape: msg.verifiedBadgeShape ?? sender?.verifiedBadgeShape,
+        verifiedBadgeGlow: msg.verifiedBadgeGlow ?? sender?.verifiedBadgeGlow,
         nameGlowColor: msg.nameGlowColor ?? sender?.nameGlowColor,
+        customIconUrl: msg.customIconUrl ?? sender?.customIconUrl,
+        customIconGlow: msg.customIconGlow ?? sender?.customIconGlow,
+        customIconAnimated: msg.customIconAnimated ?? sender?.customIconAnimated,
         id: `rmsg-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
         createdAt: new Date().toISOString()
       }
@@ -2164,7 +2378,11 @@ class LivoStore {
       isVerified: sender.isVerified,
       verifiedBadgeColor: sender.verifiedBadgeColor,
       verifiedBadgeShape: sender.verifiedBadgeShape,
+      verifiedBadgeGlow: sender.verifiedBadgeGlow,
       nameGlowColor: sender.nameGlowColor,
+      customIconUrl: sender.customIconUrl,
+      customIconGlow: sender.customIconGlow,
+      customIconAnimated: sender.customIconAnimated,
       createdAt: new Date().toISOString()
     };
 
@@ -2325,12 +2543,14 @@ class LivoStore {
               isVerified: updatedUser.isVerified,
               verifiedBadgeColor: updatedUser.verifiedBadgeColor,
               verifiedBadgeShape: updatedUser.verifiedBadgeShape,
+              verifiedBadgeGlow: updatedUser.verifiedBadgeGlow,
               nameGlowColor: updatedUser.nameGlowColor,
               equippedFrameUrl: updatedUser.equippedFrameUrl,
               frameGlowColor: updatedUser.frameGlowColor,
               frameAnimated: updatedUser.frameAnimated,
               customIconUrl: updatedUser.customIconUrl,
-              customIconGlow: updatedUser.customIconGlow
+              customIconGlow: updatedUser.customIconGlow,
+              customIconAnimated: updatedUser.customIconAnimated
             };
           }
           return s;
@@ -2464,6 +2684,7 @@ class LivoStore {
     const newVideo: VideoPost = {
       id: `vid-${Date.now()}`,
       authorUid: author.uid,
+      authorAuthUid: author.authUid || firebaseService.getCurrentAuthUid(),
       authorName: author.displayName,
       authorAvatar: author.avatar,
       isVerified: author.isVerified,

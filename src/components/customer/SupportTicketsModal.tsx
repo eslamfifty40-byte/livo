@@ -1,32 +1,49 @@
-import React, { useState } from 'react';
-import { X, Headphones, Send, AlertCircle, CheckCircle2, MessageSquare, Clock, FileText } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, Headphones, Send, CheckCircle2, MessageSquare, FileText, ImagePlus } from 'lucide-react';
 import { UserProfile, SupportTicket } from '../../types';
 import { livoStore } from '../../services/livoStore';
+import { compressImageForFirestore } from '../../utils/imageCompression';
 
 interface SupportTicketsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  currentUser: UserProfile;
+  currentUser: UserProfile | null;
 }
 
 export const SupportTicketsModal: React.FC<SupportTicketsModalProps> = ({ isOpen, onClose, currentUser }) => {
-  const [tickets, setTickets] = useState<SupportTicket[]>(() => livoStore.getSupportTickets(currentUser?.uid));
+  const activeUid = currentUser?.uid || 'guest_help';
+  const [tickets, setTickets] = useState<SupportTicket[]>(() => livoStore.getSupportTickets(activeUid));
   const [isCreating, setIsCreating] = useState(false);
   const [category, setCategory] = useState<'complaint' | 'inquiry' | 'report' | 'technical' | 'financial'>('inquiry');
   const [priority, setPriority] = useState<'normal' | 'high' | 'urgent'>('normal');
   const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
   const [attachmentUrl, setAttachmentUrl] = useState('');
+  const [previewImg, setPreviewImg] = useState<string | null>(null);
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
 
+  useEffect(() => {
+    setTickets(livoStore.getSupportTickets(activeUid));
+    return livoStore.subscribe(() => {
+      setTickets(livoStore.getSupportTickets(activeUid));
+    });
+  }, [activeUid]);
+
   if (!isOpen) return null;
+
+  const handleUploadAttachment = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const compressed = await compressImageForFirestore(file, { maxDim: 900, quality: 0.74, maxBytes: 220_000 });
+    setAttachmentUrl(compressed);
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!subject.trim() || !message.trim()) return;
 
     livoStore.submitSupportTicket({
-      uid: currentUser?.uid,
+      uid: activeUid,
       category,
       subject: subject.trim(),
       message: message.trim(),
@@ -34,7 +51,7 @@ export const SupportTicketsModal: React.FC<SupportTicketsModalProps> = ({ isOpen
       priority
     });
 
-    setTickets(livoStore.getSupportTickets(currentUser?.uid));
+    setTickets(livoStore.getSupportTickets(activeUid));
     setIsCreating(false);
     setSubject('');
     setMessage('');
@@ -148,14 +165,26 @@ export const SupportTicketsModal: React.FC<SupportTicketsModalProps> = ({ isOpen
               </div>
 
               <div>
-                <label className="block text-[11px] font-bold text-gray-700 mb-1">رابط صورة أو سكرين شوت (اختياري)</label>
-                <input
-                  type="url"
-                  value={attachmentUrl}
-                  onChange={(e) => setAttachmentUrl(e.target.value)}
-                  placeholder="https://..."
-                  className="w-full bg-white border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-[#FFE600] font-mono text-[10px]"
-                />
+                <label className="block text-[11px] font-bold text-gray-700 mb-1">إرفاق صورة أو سكرين شوت (اختياري)</label>
+                <div className="flex items-center gap-2">
+                  <label className="flex-1 cursor-pointer bg-gray-50 hover:bg-gray-100 border border-dashed border-gray-300 rounded-xl px-3 py-2 text-xs font-bold text-gray-700 flex items-center justify-center gap-1.5">
+                    <ImagePlus className="w-4 h-4 text-purple-700" />
+                    <span>{attachmentUrl ? 'تم إرفاق الصورة ✓ (اضغط للتغيير)' : 'رفع صورة من الجهاز'}</span>
+                    <input type="file" accept="image/*" onChange={handleUploadAttachment} className="hidden" />
+                  </label>
+                  {attachmentUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setAttachmentUrl('')}
+                      className="text-[11px] font-bold text-red-600 px-2.5 py-2 bg-red-50 rounded-xl"
+                    >
+                      حذف
+                    </button>
+                  )}
+                </div>
+                {attachmentUrl && attachmentUrl.startsWith('data:image') && (
+                  <img src={attachmentUrl} alt="Attachment preview" className="mt-2 h-24 rounded-xl object-cover border border-gray-200" />
+                )}
               </div>
 
               <div>
@@ -210,15 +239,14 @@ export const SupportTicketsModal: React.FC<SupportTicketsModalProps> = ({ isOpen
                   <p className="text-[11px] text-gray-600 leading-relaxed bg-gray-50 p-2 rounded-xl">{t.message}</p>
 
                   {t.attachmentUrl && (
-                    <a
-                      href={t.attachmentUrl}
-                      target="_blank"
-                      rel="noreferrer"
+                    <button
+                      type="button"
+                      onClick={() => setPreviewImg(t.attachmentUrl || null)}
                       className="text-[10px] text-purple-700 font-bold inline-flex items-center gap-1 hover:underline"
                     >
                       <FileText className="w-3 h-3" />
                       <span>عرض المرفق</span>
-                    </a>
+                    </button>
                   )}
 
                   {/* Admin Reply if resolved */}
@@ -241,6 +269,23 @@ export const SupportTicketsModal: React.FC<SupportTicketsModalProps> = ({ isOpen
           )}
         </div>
       </div>
+
+      {previewImg && (
+        <div
+          onClick={() => setPreviewImg(null)}
+          className="fixed inset-0 z-60 bg-black/80 flex items-center justify-center p-4"
+        >
+          <div onClick={(e) => e.stopPropagation()} className="relative max-w-md w-full bg-white rounded-2xl p-2">
+            <button
+              onClick={() => setPreviewImg(null)}
+              className="absolute -top-3 -left-3 w-8 h-8 rounded-full bg-white text-black shadow-lg flex items-center justify-center"
+            >
+              <X className="w-4 h-4" />
+            </button>
+            <img src={previewImg} alt="مرفق التذكرة" className="w-full max-h-[75vh] object-contain rounded-xl" />
+          </div>
+        </div>
+      )}
     </div>
   );
 };

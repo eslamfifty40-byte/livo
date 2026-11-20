@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
-import { X, Camera, Check, User, AtSign, FileText, Sparkles, Image as ImageIcon, Phone } from 'lucide-react';
+import { X, Camera, Check, User, AtSign, Phone, Wand2, Download } from 'lucide-react';
 import { UserProfile } from '../../types';
 import { livoStore } from '../../services/livoStore';
 import { firebaseService } from '../../services/firebase';
+import { compressImageForFirestore } from '../../utils/imageCompression';
+import { MagicCutoutModal } from '../common/MagicCutoutModal';
 
 interface EditProfileModalProps {
   user: UserProfile;
@@ -34,11 +36,14 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ user, isOpen
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [phoneNotice, setPhoneNotice] = useState<string | null>(null);
+  const [showMagicCutout, setShowMagicCutout] = useState(false);
+  const [cutoutSource, setCutoutSource] = useState<string | File | null>(null);
 
   if (!isOpen) return null;
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
 
     if (!file.type.startsWith('image/')) {
@@ -46,21 +51,64 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ user, isOpen
       return;
     }
 
+    const isPng = file.type === 'image/png' || file.name.toLowerCase().endsWith('.png');
     setIsUploading(true);
     setErrorMsg('');
     try {
-      const downloadUrl = await firebaseService.uploadImage(`avatars/${user.uid}_${Date.now()}`, file);
-      setAvatarUrl(downloadUrl);
+      const compressed = await compressImageForFirestore(file, {
+        maxDim: 512,
+        quality: 0.82,
+        preserveAlpha: isPng,
+        maxBytes: 180_000
+      });
+      setAvatarUrl(compressed);
+      try {
+        const downloadUrl = await firebaseService.uploadImage(`avatars/${user.uid}_${Date.now()}`, compressed, {
+          maxDim: 512,
+          quality: 0.82,
+          preserveAlpha: isPng,
+          maxBytes: 180_000
+        });
+        setAvatarUrl(downloadUrl);
+      } catch {
+        // Already compressed cleanly as fallback
+      }
     } catch {
-      // Fallback local reader
-      const reader = new FileReader();
-      reader.onload = (uploadEvent) => {
-        setAvatarUrl(uploadEvent.target?.result as string);
-      };
-      reader.readAsDataURL(file);
+      setErrorMsg('تعذر معالجة الصورة المختارة');
     } finally {
       setIsUploading(false);
     }
+  };
+
+  const handleApplyCutoutAvatar = async (transparentPng: string) => {
+    setIsUploading(true);
+    setErrorMsg('');
+    try {
+      setAvatarUrl(transparentPng);
+      try {
+        const uploaded = await firebaseService.uploadImage(`avatars/${user.uid}_${Date.now()}.png`, transparentPng, {
+          preserveAlpha: true,
+          maxDim: 512,
+          maxBytes: 180_000
+        });
+        setAvatarUrl(uploaded);
+      } catch {
+        // transparentPng is already compressed for Firestore
+      }
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleDownloadAvatar = () => {
+    try {
+      const a = document.createElement('a');
+      a.href = avatarUrl;
+      a.download = `livo-avatar-${user.uid}.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch {}
   };
 
   const handleSave = (e: React.FormEvent) => {
@@ -138,8 +186,53 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ user, isOpen
             </div>
 
             <span className="text-[11px] text-gray-500 font-bold">
-              {isUploading ? 'جاري رفع الصورة...' : 'اضغط على الكاميرا لاختيار صورة من هاتفك'}
+              {isUploading ? 'جاري رفع وحفظ الصورة...' : 'اضغط على الكاميرا لاختيار صورة أو استخدم القص السحري'}
             </span>
+
+            {/* Magic Background Remover + Save Photo */}
+            <div className="flex items-center gap-2 flex-wrap justify-center">
+              <label className="px-3 py-1.5 rounded-full bg-purple-600 hover:bg-purple-700 text-white font-black text-[11px] flex items-center gap-1.5 cursor-pointer shadow-xs transition-all">
+                <Wand2 className="w-3.5 h-3.5" />
+                <span>قص الخلفية سحرياً (اختر صورة)</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    e.target.value = '';
+                    if (f) {
+                      setCutoutSource(f);
+                      setShowMagicCutout(true);
+                    }
+                  }}
+                />
+              </label>
+
+              {avatarUrl && avatarUrl.startsWith('data:image') && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCutoutSource(avatarUrl);
+                    setShowMagicCutout(true);
+                  }}
+                  className="px-3 py-1.5 rounded-full bg-amber-100 hover:bg-amber-200 text-amber-900 font-black text-[11px] flex items-center gap-1"
+                >
+                  <Wand2 className="w-3 h-3" />
+                  <span>تنظيف الصورة الحالية</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={handleDownloadAvatar}
+                className="px-2.5 py-1.5 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-[11px] flex items-center gap-1"
+                title="حفظ الصورة على الجهاز"
+              >
+                <Download className="w-3 h-3" />
+                <span>حفظ الصورة</span>
+              </button>
+            </div>
 
             {/* Quick Preset Avatars */}
             <div className="flex items-center gap-1.5 mt-1 overflow-x-auto max-w-full py-1">
@@ -333,6 +426,16 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ user, isOpen
           </button>
         </form>
       </div>
+
+      <MagicCutoutModal
+        isOpen={showMagicCutout}
+        initialImage={cutoutSource}
+        title="قص خلفية الصورة الشخصية سحرياً"
+        maxOutputDim={480}
+        maxBytes={180_000}
+        onClose={() => setShowMagicCutout(false)}
+        onApply={handleApplyCutoutAvatar}
+      />
     </div>
   );
 };

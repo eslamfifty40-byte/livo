@@ -37,6 +37,8 @@
         "customIconLabel": { "type": "string", "maxLength": 64 },
         "customIconGlow": { "type": "string", "maxLength": 32 },
         "customIconAnimated": { "type": "boolean" },
+        "locationEnabled": { "type": "boolean" },
+        "locationCoords": { "type": "object" },
         "createdAt": { "type": "string" }
       },
       "required": ["uid", "username", "displayName", "role", "coins"]
@@ -364,6 +366,7 @@
       "properties": {
         "id": { "type": "string", "maxLength": 64 },
         "authorUid": { "type": "string", "maxLength": 32 },
+        "authorAuthUid": { "type": "string", "maxLength": 128 },
         "authorName": { "type": "string", "maxLength": 64 },
         "videoUrl": { "type": "string", "maxLength": 500000 },
         "caption": { "type": "string", "maxLength": 500 },

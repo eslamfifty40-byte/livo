@@ -10,11 +10,13 @@ import {
   Image as ImageIcon,
   CreditCard,
   KeyRound,
-  CheckCircle2
+  CheckCircle2,
+  Edit3
 } from 'lucide-react';
 import { INITIAL_COIN_PACKAGES, INITIAL_PAYMENT_METHODS } from '../../data/initialData';
 import { CoinPackage, UserProfile, PaymentMethodConfig } from '../../types';
 import { livoStore } from '../../services/livoStore';
+import { compressImageForFirestore } from '../../utils/imageCompression';
 
 interface RechargeModalProps {
   user: UserProfile;
@@ -61,6 +63,14 @@ export const RechargeModal: React.FC<RechargeModalProps> = ({ user, isOpen, onCl
   const [voucherSuccess, setVoucherSuccess] = useState<string | null>(null);
   const [voucherError, setVoucherError] = useState<string | null>(null);
 
+  // Owner Inline Payment Method Edit
+  const isOwnerAdmin = user.role === 'owner' || livoStore.isOwnerEmail(user.email);
+  const [editingMethod, setEditingMethod] = useState(false);
+  const [editTitle, setEditTitle] = useState('');
+  const [editAccountNumber, setEditAccountNumber] = useState('');
+  const [editAccountHolder, setEditAccountHolder] = useState('');
+  const [editSavedNotice, setEditSavedNotice] = useState(false);
+
   // Sync payment methods & coin packages in real time when Admin modifies them
   useEffect(() => {
     const syncStore = () => {
@@ -80,13 +90,34 @@ export const RechargeModal: React.FC<RechargeModalProps> = ({ user, isOpen, onCl
 
   const currentMethod = paymentMethods.find(m => m.id === selectedMethodId) || paymentMethods[0];
 
+  const openMethodInlineEdit = () => {
+    if (!currentMethod) return;
+    setEditTitle(currentMethod.title);
+    setEditAccountNumber(currentMethod.accountNumber);
+    setEditAccountHolder(currentMethod.accountHolder || '');
+    setEditingMethod(v => !v);
+  };
+
+  const handleSaveInlinePaymentMethod = () => {
+    if (!currentMethod || !editAccountNumber.trim()) return;
+    livoStore.savePaymentMethod({
+      ...currentMethod,
+      title: editTitle.trim() || currentMethod.title,
+      accountNumber: editAccountNumber.trim(),
+      accountHolder: editAccountHolder.trim() || currentMethod.accountHolder
+    });
+    setEditingMethod(false);
+    setEditSavedNotice(true);
+    setTimeout(() => setEditSavedNotice(false), 2200);
+  };
+
   const handleCopy = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
     setCopiedMethodId(id);
     setTimeout(() => setCopiedMethodId(null), 2000);
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     setErrorMsg('');
     const file = e.target.files?.[0];
     if (file) {
@@ -95,11 +126,16 @@ export const RechargeModal: React.FC<RechargeModalProps> = ({ user, isOpen, onCl
         return;
       }
       setReceiptFileName(file.name);
-      const reader = new FileReader();
-      reader.onload = (uploadEvent) => {
-        setReceiptImage(uploadEvent.target?.result as string);
-      };
-      reader.readAsDataURL(file);
+      try {
+        const compressed = await compressImageForFirestore(file, {
+          maxDim: 900,
+          quality: 0.75,
+          maxBytes: 220_000
+        });
+        setReceiptImage(compressed);
+      } catch {
+        setErrorMsg('تعذر معالجة صورة الإيصال، يرجى تجربة صورة أخرى');
+      }
     }
   };
 
@@ -351,33 +387,84 @@ export const RechargeModal: React.FC<RechargeModalProps> = ({ user, isOpen, onCl
               {/* Active Method Details Box */}
               {currentMethod && (
                 <div className="bg-gradient-to-r from-purple-950/90 via-indigo-950/90 to-purple-950/90 p-3.5 rounded-2xl border border-purple-700/40 space-y-2.5 text-right">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-2">
                     <span className="text-xs text-purple-200 font-bold">{currentMethod.title}:</span>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/20 text-green-300 border border-green-500/30 font-bold">
-                      {currentMethod.isDefault ? 'وسيلة الدفع الافتراضية' : 'مفعل ومعتمد'}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      {isOwnerAdmin && (
+                        <button
+                          type="button"
+                          onClick={openMethodInlineEdit}
+                          className="text-[10px] px-2 py-0.5 rounded-full bg-[#FFE600] text-black font-black flex items-center gap-1"
+                        >
+                          <Edit3 className="w-3 h-3" />
+                          <span>{editingMethod ? 'إغلاق' : 'تعديل الرقم'}</span>
+                        </button>
+                      )}
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/20 text-green-300 border border-green-500/30 font-bold">
+                        {currentMethod.isDefault ? 'وسيلة الدفع الافتراضية' : 'مفعل ومعتمد'}
+                      </span>
+                    </div>
                   </div>
 
-                  <div className="flex items-center justify-between bg-black/40 px-3 py-2 rounded-xl border border-purple-800/40">
-                    <div>
-                      <span className="font-digits text-sm font-black text-amber-400 tracking-wider">
-                        {currentMethod.accountNumber}
-                      </span>
-                      {currentMethod.accountHolder && (
-                        <span className="text-[11px] text-purple-300 block">
-                          اسم صاحب الحساب: <strong className="text-white">{currentMethod.accountHolder}</strong>
-                        </span>
-                      )}
+                  {editSavedNotice && (
+                    <div className="text-[11px] bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 px-3 py-1.5 rounded-xl font-bold">
+                      ✓ تم تحديث رقم الدفع وحفظه لجميع المستخدمين واللوحة الإدارية
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => handleCopy(currentMethod.accountNumber, currentMethod.id)}
-                      className="flex items-center gap-1 text-xs bg-purple-800/80 hover:bg-purple-700 text-white px-3 py-1.5 rounded-lg transition-colors font-bold"
-                    >
-                      {copiedMethodId === currentMethod.id ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
-                      <span>{copiedMethodId === currentMethod.id ? 'تم النسخ' : 'نسخ'}</span>
-                    </button>
-                  </div>
+                  )}
+
+                  {isOwnerAdmin && editingMethod ? (
+                    <div className="bg-black/50 p-3 rounded-xl border border-amber-400/50 space-y-2">
+                      <input
+                        type="text"
+                        value={editTitle}
+                        onChange={(e) => setEditTitle(e.target.value)}
+                        placeholder="اسم الوسيلة (فودافون كاش / انستاباي)"
+                        className="w-full bg-[#120824] border border-purple-700 rounded-lg px-2.5 py-1.5 text-xs text-white outline-none"
+                      />
+                      <input
+                        type="text"
+                        value={editAccountNumber}
+                        onChange={(e) => setEditAccountNumber(e.target.value)}
+                        placeholder="رقم التحويل الجديد"
+                        className="w-full bg-[#120824] border border-purple-700 rounded-lg px-2.5 py-1.5 text-xs text-amber-300 font-digits font-bold outline-none"
+                      />
+                      <input
+                        type="text"
+                        value={editAccountHolder}
+                        onChange={(e) => setEditAccountHolder(e.target.value)}
+                        placeholder="اسم صاحب الحساب (اختياري)"
+                        className="w-full bg-[#120824] border border-purple-700 rounded-lg px-2.5 py-1.5 text-xs text-white outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleSaveInlinePaymentMethod}
+                        className="w-full py-2 rounded-lg bg-[#FFE600] text-black font-black text-xs"
+                      >
+                        حفظ رقم الدفع الآن ✓
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between bg-black/40 px-3 py-2 rounded-xl border border-purple-800/40">
+                      <div>
+                        <span className="font-digits text-sm font-black text-amber-400 tracking-wider">
+                          {currentMethod.accountNumber}
+                        </span>
+                        {currentMethod.accountHolder && (
+                          <span className="text-[11px] text-purple-300 block">
+                            اسم صاحب الحساب: <strong className="text-white">{currentMethod.accountHolder}</strong>
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleCopy(currentMethod.accountNumber, currentMethod.id)}
+                        className="flex items-center gap-1 text-xs bg-purple-800/80 hover:bg-purple-700 text-white px-3 py-1.5 rounded-lg transition-colors font-bold"
+                      >
+                        {copiedMethodId === currentMethod.id ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+                        <span>{copiedMethodId === currentMethod.id ? 'تم النسخ' : 'نسخ'}</span>
+                      </button>
+                    </div>
+                  )}
 
                   {currentMethod.instructions && (
                     <p className="text-[11px] text-purple-200 leading-relaxed bg-purple-950/50 p-2 rounded-lg border border-purple-800/30">

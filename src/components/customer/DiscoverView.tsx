@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { RefreshCw, Compass, Mic, Music, MapPin, Check, Plus, Sparkles, MessageCircle, Users } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { RefreshCw, Compass, Mic, Music, MapPin, Check, Plus, Sparkles, MessageCircle, Users, Search, Navigation, Loader2 } from 'lucide-react';
 import { UserProfile } from '../../types';
 import { livoStore } from '../../services/livoStore';
-import { LivoVerifiedBadge } from '../common/LivoVerifiedBadge';
+import { UserNameWithBadges } from '../common/UserNameWithBadges';
 import { AvatarWithFrame } from '../common/AvatarWithFrame';
 
 interface DiscoverViewProps {
@@ -22,23 +22,158 @@ const ORBIT_SLOTS = [
 ];
 
 export const DiscoverView: React.FC<DiscoverViewProps> = ({ currentUser, onStartChat, onRequireAuth }) => {
-  const [activeCategory, setActiveCategory] = useState<'party' | 'sing' | 'popular'>('party');
+  const [activeCategory, setActiveCategory] = useState<'party' | 'sing' | 'popular' | 'nearby'>('party');
   const [genuineUsers, setGenuineUsers] = useState<UserProfile[]>(() => livoStore.getGenuineUsers());
+  const [rooms, setRooms] = useState(() => livoStore.getRooms());
   const [shuffleOffset, setShuffleOffset] = useState(0);
   const [showAll, setShowAll] = useState(false);
 
+  // UID (10000 - 100000+) & Name Search
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchingUid, setSearchingUid] = useState(false);
+  const [remoteMatchedUsers, setRemoteMatchedUsers] = useState<UserProfile[]>([]);
+
+  // Nearby Geolocation
+  const [locLoading, setLocLoading] = useState(false);
+  const [locError, setLocError] = useState<string | null>(null);
+
   useEffect(() => {
-    const sync = () => setGenuineUsers([...livoStore.getGenuineUsers()]);
+    const sync = () => {
+      setGenuineUsers([...livoStore.getGenuineUsers()]);
+      setRooms([...livoStore.getRooms()]);
+    };
     const unsub = livoStore.subscribe(sync);
     return () => unsub();
   }, []);
 
+  // Firestore UID/Name lookup when typing 4+ chars (covers 10000 - 100000+ UIDs)
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (q.length < 4) {
+      setRemoteMatchedUsers([]);
+      setSearchingUid(false);
+      return;
+    }
+    let cancelled = false;
+    setSearchingUid(true);
+    const timer = setTimeout(async () => {
+      try {
+        const found = await livoStore.lookupUserInFirestore(q);
+        if (!cancelled) {
+          setRemoteMatchedUsers(found);
+        }
+      } finally {
+        if (!cancelled) setSearchingUid(false);
+      }
+    }, 280);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [searchQuery]);
+
+  const requestMyLocation = () => {
+    if (!currentUser) {
+      onRequireAuth?.();
+      return;
+    }
+    if (!navigator.geolocation) {
+      setLocError('المتصفح الحالي لا يدعم خدمة تحديد الموقع الجغرافي');
+      return;
+    }
+    setLocLoading(true);
+    setLocError(null);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        await livoStore.updateUserLocation(
+          currentUser.uid,
+          { lat: pos.coords.latitude, lng: pos.coords.longitude },
+          true
+        );
+        setLocLoading(false);
+      },
+      () => {
+        setLocError('يرجى السماح بصلاحية الموقع لعرض الأعضاء القريبين منك');
+        setLocLoading(false);
+      },
+      { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 }
+    );
+  };
+
+  const handleSelectCategory = (cat: 'party' | 'sing' | 'popular' | 'nearby') => {
+    setActiveCategory(cat);
+    if (cat === 'nearby' && currentUser && !currentUser.locationEnabled) {
+      requestMyLocation();
+    }
+  };
+
   const blockedSet = new Set(currentUser?.blockedUids || []);
   const followingSet = new Set(currentUser?.followingUids || []);
 
-  const candidates = genuineUsers.filter(
-    u => u.uid !== currentUser?.uid && !blockedSet.has(u.uid)
+  const openRooms = useMemo(
+    () => rooms.filter(r => r.status === 'open'),
+    [rooms]
   );
+  const openRoomOwnerUids = useMemo(
+    () => new Set(openRooms.map(r => r.ownerUid)),
+    [openRooms]
+  );
+  const musicRoomOwnerUids = useMemo(
+    () => new Set(openRooms.filter(r => (r.category || '').includes('موسيق') || (r.title || '').includes('طرب') || (r.title || '').includes('غناء')).map(r => r.ownerUid)),
+    [openRooms]
+  );
+
+  const mergedUsers = useMemo(() => {
+    const map = new Map<string, UserProfile>();
+    genuineUsers.forEach(u => map.set(u.uid, u));
+    remoteMatchedUsers.forEach(u => map.set(u.uid, u));
+    return Array.from(map.values());
+  }, [genuineUsers, remoteMatchedUsers]);
+
+  const candidates = useMemo(() => {
+    const base = mergedUsers.filter(
+      u => u.uid !== currentUser?.uid && !blockedSet.has(u.uid)
+    );
+
+    const q = searchQuery.trim().toLowerCase();
+    const searched = q
+      ? base.filter(
+          u =>
+            u.uid.toLowerCase().includes(q) ||
+            (u.username || '').toLowerCase().includes(q) ||
+            (u.displayName || '').toLowerCase().includes(q)
+        )
+      : base;
+
+    const sorted = [...searched].sort((a, b) => {
+      if (activeCategory === 'nearby') {
+        const da = currentUser ? livoStore.getUserDistanceKm(currentUser, a) : null;
+        const db = currentUser ? livoStore.getUserDistanceKm(currentUser, b) : null;
+        if (da !== null && db !== null) return da - db;
+        if (da !== null) return -1;
+        if (db !== null) return 1;
+        return (b.level || 0) - (a.level || 0);
+      }
+      if (activeCategory === 'popular') {
+        const scoreA = (a.followersCount || 0) * 10 + (a.level || 0) * 5 + (a.isVerified ? 50 : 0);
+        const scoreB = (b.followersCount || 0) * 10 + (b.level || 0) * 5 + (b.isVerified ? 50 : 0);
+        return scoreB - scoreA;
+      }
+      if (activeCategory === 'sing') {
+        const aMusic = musicRoomOwnerUids.has(a.uid) ? 2 : openRoomOwnerUids.has(a.uid) ? 1 : 0;
+        const bMusic = musicRoomOwnerUids.has(b.uid) ? 2 : openRoomOwnerUids.has(b.uid) ? 1 : 0;
+        if (bMusic !== aMusic) return bMusic - aMusic;
+        return (b.level || 0) - (a.level || 0);
+      }
+      // 'party' default: active open room owners first, then verified/level
+      const aHost = openRoomOwnerUids.has(a.uid) ? 1 : 0;
+      const bHost = openRoomOwnerUids.has(b.uid) ? 1 : 0;
+      if (bHost !== aHost) return bHost - aHost;
+      return (b.followersCount || 0) - (a.followersCount || 0);
+    });
+
+    return sorted;
+  }, [mergedUsers, currentUser, searchQuery, activeCategory, musicRoomOwnerUids, openRoomOwnerUids]);
 
   // Rotate real users across the 7 radar orbit positions when user taps "تغيير"
   const rotatedCandidates = candidates.length > 0
@@ -50,7 +185,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({ currentUser, onStart
     ...ORBIT_SLOTS[idx]
   }));
 
-  const suggestedUsers = showAll ? rotatedCandidates : rotatedCandidates.slice(0, 12);
+  const suggestedUsers = showAll ? candidates : candidates.slice(0, 20);
 
   const handleShuffleRadar = () => {
     if (candidates.length > 1) {
@@ -77,122 +212,193 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({ currentUser, onStart
   return (
     <div className="flex flex-col h-full bg-[#FAFAFA] text-black select-none overflow-y-auto pb-8">
       
-      {/* Top Header & Filter Pills */}
-      <div className="bg-white px-3 pt-3 pb-2 border-b border-gray-100 shadow-2xs sticky top-0 z-10">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1.5 font-bold text-xs">
-            <button
-              onClick={() => setActiveCategory('party')}
-              className={`px-3 py-1 rounded-full transition-all flex items-center gap-1 ${
-                activeCategory === 'party'
-                  ? 'bg-[#FFE600] text-black font-extrabold shadow-2xs'
-                  : 'bg-gray-100 text-gray-600'
-              }`}
-            >
-              <Mic className="w-3.5 h-3.5" />
-              حفلة
-            </button>
-
-            <button
-              onClick={() => setActiveCategory('sing')}
-              className={`px-3 py-1 rounded-full transition-all flex items-center gap-1 ${
-                activeCategory === 'sing'
-                  ? 'bg-[#FFE600] text-black font-extrabold shadow-2xs'
-                  : 'bg-gray-100 text-gray-600'
-              }`}
-            >
-              <Music className="w-3.5 h-3.5" />
-              غناء
-            </button>
-
-            <button
-              onClick={() => setActiveCategory('popular')}
-              className={`px-3 py-1 rounded-full transition-all flex items-center gap-1 ${
-                activeCategory === 'popular'
-                  ? 'bg-[#FFE600] text-black font-extrabold shadow-2xs'
-                  : 'bg-gray-100 text-gray-600'
-              }`}
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              الشائع
-            </button>
+      {/* Top Header, Search (UID 10000-100000+) & Filter Pills */}
+      <div className="bg-white px-3 pt-3 pb-2.5 border-b border-gray-100 shadow-2xs sticky top-0 z-10 space-y-2">
+        <div className="flex items-center gap-2">
+          <div className="flex-1 flex items-center bg-[#F3F4F6] rounded-full px-3 py-1.5 text-xs text-gray-500">
+            <Search className="w-3.5 h-3.5 text-gray-400 ml-1.5 shrink-0" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="ابحث بالـ UID (10000 - 100000+) أو الاسم..."
+              className="w-full bg-transparent outline-none text-xs text-gray-800 placeholder-gray-400"
+            />
+            {searchingUid && <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-500 shrink-0" />}
           </div>
 
-          <div className="flex items-center gap-1 bg-gray-100 px-2.5 py-1 rounded-full text-xs font-bold text-gray-700">
+          <div className="flex items-center gap-1 bg-gray-100 px-2.5 py-1.5 rounded-full text-[11px] font-bold text-gray-700 shrink-0">
             <span>🇪🇬 {currentUser?.country || 'مصر'}</span>
           </div>
         </div>
-      </div>
 
-      {/* Circular Radar Match Section */}
-      <div className="px-3 pt-4 pb-2">
-        <div className="relative w-full aspect-square max-h-[300px] mx-auto bg-gradient-to-b from-[#180829] to-[#290d40] rounded-3xl overflow-hidden shadow-md flex items-center justify-center p-4">
-          
-          <div className="absolute inset-8 rounded-full border border-purple-500/20 animate-pulse pointer-events-none" />
-          <div className="absolute inset-16 rounded-full border border-purple-400/30 pointer-events-none" />
-          <div className="absolute inset-24 rounded-full border border-purple-300/40 pointer-events-none" />
-
-          {/* Central 3D Disc */}
-          <div className="relative z-10 w-20 h-20 rounded-full bg-gradient-to-tr from-purple-700 to-indigo-500 p-1 shadow-[0_0_30px_rgba(168,85,247,0.5)] flex items-center justify-center text-white">
-            <div className="w-full h-full rounded-full bg-[#1b082c] flex flex-col items-center justify-center">
-              <Compass className="w-6 h-6 text-[#FFE600]" />
-              <span className="text-[9px] font-extrabold text-[#FFE600] tracking-wider mt-0.5">LIVO</span>
-            </div>
-          </div>
-
-          {radarUsers.length === 0 ? (
-            <span className="absolute bottom-4 left-4 text-[10px] text-purple-200/80 bg-black/40 px-2.5 py-1 rounded-full">
-              في انتظار انضمام أعضاء جدد قريباً
-            </span>
-          ) : (
-            radarUsers.map(({ user, top, left }) => (
-              <div
-                key={user.uid}
-                onClick={() => handleOpenUserChat(user.uid)}
-                style={{ top, left }}
-                className="absolute z-10 flex flex-col items-center cursor-pointer group transition-transform hover:scale-110"
-              >
-                <AvatarWithFrame
-                  sizePx={42}
-                  avatarUrl={user.avatar}
-                  displayName={user.displayName}
-                  frameUrl={user.equippedFrameUrl}
-                  frameGlowColor={user.frameGlowColor}
-                  frameAnimated={user.frameAnimated}
-                  customIconUrl={user.customIconUrl}
-                  customIconGlow={user.customIconGlow}
-                  customIconAnimated={user.customIconAnimated}
-                  showOnlineDot
-                />
-                <span
-                  className={`text-[10px] text-white font-bold bg-black/60 backdrop-blur-xs px-1.5 rounded-full mt-0.5 whitespace-nowrap max-w-[75px] truncate ${
-                    user.nameGlowColor && user.nameGlowColor !== 'none' ? `name-glow-${user.nameGlowColor}` : ''
-                  }`}
-                >
-                  {user.displayName}
-                </span>
-              </div>
-            ))
-          )}
+        <div className="flex items-center gap-1.5 font-bold text-xs overflow-x-auto no-scrollbar">
+          <button
+            onClick={() => handleSelectCategory('party')}
+            className={`px-3 py-1 rounded-full transition-all flex items-center gap-1 shrink-0 ${
+              activeCategory === 'party'
+                ? 'bg-[#FFE600] text-black font-extrabold shadow-2xs'
+                : 'bg-gray-100 text-gray-600'
+            }`}
+          >
+            <Mic className="w-3.5 h-3.5" />
+            حفلة
+          </button>
 
           <button
-            onClick={handleShuffleRadar}
-            className="absolute bottom-3 right-3 z-20 bg-[#FFE600] hover:bg-yellow-400 text-black font-extrabold text-xs px-3 py-1.5 rounded-full flex items-center gap-1 shadow-lg active:scale-95 transition-all"
+            onClick={() => handleSelectCategory('sing')}
+            className={`px-3 py-1 rounded-full transition-all flex items-center gap-1 shrink-0 ${
+              activeCategory === 'sing'
+                ? 'bg-[#FFE600] text-black font-extrabold shadow-2xs'
+                : 'bg-gray-100 text-gray-600'
+            }`}
           >
-            <RefreshCw className="w-3.5 h-3.5 stroke-[2.5]" />
-            <span>تغيير</span>
+            <Music className="w-3.5 h-3.5" />
+            غناء
+          </button>
+
+          <button
+            onClick={() => handleSelectCategory('popular')}
+            className={`px-3 py-1 rounded-full transition-all flex items-center gap-1 shrink-0 ${
+              activeCategory === 'popular'
+                ? 'bg-[#FFE600] text-black font-extrabold shadow-2xs'
+                : 'bg-gray-100 text-gray-600'
+            }`}
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            الشائع
+          </button>
+
+          <button
+            onClick={() => handleSelectCategory('nearby')}
+            className={`px-3 py-1 rounded-full transition-all flex items-center gap-1 shrink-0 ${
+              activeCategory === 'nearby'
+                ? 'bg-[#FFE600] text-black font-extrabold shadow-2xs'
+                : 'bg-gray-100 text-gray-600'
+            }`}
+          >
+            <Navigation className="w-3.5 h-3.5" />
+            القريبون مني
           </button>
         </div>
       </div>
+
+      {/* Geolocation Bar for Nearby Mode */}
+      {activeCategory === 'nearby' && (
+        <div className="px-3 pt-3">
+          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3 flex items-center justify-between gap-2">
+            <div className="text-right min-w-0">
+              <p className="text-xs font-black text-amber-900 flex items-center gap-1">
+                <MapPin className="w-3.5 h-3.5 text-amber-600" />
+                {currentUser?.locationEnabled ? 'موقعك مفعّل للبحث عن القريبين' : 'تحديد القريبين بالموقع الجغرافي الحقيقي'}
+              </p>
+              {locError && <p className="text-[10px] text-red-600 font-bold mt-0.5">{locError}</p>}
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                onClick={requestMyLocation}
+                disabled={locLoading}
+                className="bg-[#FFE600] hover:bg-yellow-400 text-black font-black text-[11px] px-3 py-1.5 rounded-full shadow-2xs flex items-center gap-1"
+              >
+                {locLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Navigation className="w-3 h-3" />}
+                <span>{currentUser?.locationEnabled ? 'تحديث الموقع' : 'تفعيل الآن'}</span>
+              </button>
+              {currentUser?.locationEnabled && (
+                <button
+                  onClick={() => livoStore.updateUserLocation(currentUser.uid, null, false)}
+                  className="bg-white border border-gray-200 text-gray-600 font-bold text-[10px] px-2.5 py-1.5 rounded-full"
+                >
+                  إيقاف
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Circular Radar Match Section */}
+      {!searchQuery.trim() && (
+        <div className="px-3 pt-4 pb-2">
+          <div className="relative w-full aspect-square max-h-[300px] mx-auto bg-gradient-to-b from-[#180829] to-[#290d40] rounded-3xl overflow-hidden shadow-md flex items-center justify-center p-4">
+            
+            <div className="absolute inset-8 rounded-full border border-purple-500/20 animate-pulse pointer-events-none" />
+            <div className="absolute inset-16 rounded-full border border-purple-400/30 pointer-events-none" />
+            <div className="absolute inset-24 rounded-full border border-purple-300/40 pointer-events-none" />
+
+            {/* Central 3D Disc */}
+            <div className="relative z-10 w-20 h-20 rounded-full bg-gradient-to-tr from-purple-700 to-indigo-500 p-1 shadow-[0_0_30px_rgba(168,85,247,0.5)] flex items-center justify-center text-white">
+              <div className="w-full h-full rounded-full bg-[#1b082c] flex flex-col items-center justify-center">
+                <Compass className="w-6 h-6 text-[#FFE600]" />
+                <span className="text-[9px] font-extrabold text-[#FFE600] tracking-wider mt-0.5">LIVO</span>
+              </div>
+            </div>
+
+            {radarUsers.length === 0 ? (
+              <span className="absolute bottom-4 left-4 text-[10px] text-purple-200/80 bg-black/40 px-2.5 py-1 rounded-full">
+                في انتظار انضمام أعضاء جدد قريباً
+              </span>
+            ) : (
+              radarUsers.map(({ user, top, left }) => (
+                <div
+                  key={user.uid}
+                  onClick={() => handleOpenUserChat(user.uid)}
+                  style={{ top, left }}
+                  className="absolute z-10 flex flex-col items-center cursor-pointer group transition-transform hover:scale-110"
+                >
+                  <AvatarWithFrame
+                    sizePx={42}
+                    avatarUrl={user.avatar}
+                    displayName={user.displayName}
+                    frameUrl={user.equippedFrameUrl}
+                    frameGlowColor={user.frameGlowColor}
+                    frameAnimated={user.frameAnimated}
+                    customIconUrl={user.customIconUrl}
+                    customIconGlow={user.customIconGlow}
+                    customIconAnimated={user.customIconAnimated}
+                    showOnlineDot
+                  />
+                  <div className="bg-black/60 backdrop-blur-xs px-1.5 rounded-full mt-0.5 max-w-[92px]">
+                    <UserNameWithBadges
+                      displayName={user.displayName}
+                      nameGlowColor={user.nameGlowColor}
+                      isVerified={user.isVerified}
+                      verifiedBadgeColor={user.verifiedBadgeColor}
+                      verifiedBadgeShape={user.verifiedBadgeShape}
+                      verifiedBadgeGlow={user.verifiedBadgeGlow}
+                      customIconUrl={user.customIconUrl}
+                      customIconGlow={user.customIconGlow}
+                      customIconAnimated={user.customIconAnimated}
+                      customIconLabel={user.customIconLabel}
+                      badgeSize={10}
+                      iconSize={13}
+                      nameClassName="text-[10px] text-white font-bold"
+                    />
+                  </div>
+                </div>
+              ))
+            )}
+
+            <button
+              onClick={handleShuffleRadar}
+              className="absolute bottom-3 right-3 z-20 bg-[#FFE600] hover:bg-yellow-400 text-black font-extrabold text-xs px-3 py-1.5 rounded-full flex items-center gap-1 shadow-lg active:scale-95 transition-all"
+            >
+              <RefreshCw className="w-3.5 h-3.5 stroke-[2.5]" />
+              <span>تغيير</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Suggested Real Community Users */}
       <div className="px-3 pt-3">
         <div className="flex items-center justify-between mb-2">
           <h3 className="font-extrabold text-sm text-gray-900 flex items-center gap-1.5">
             <MapPin className="w-4 h-4 text-[#FFE600] fill-[#FFE600]" />
-            أعضاء مجتمع LIVO المسجلون ({candidates.length})
+            {searchQuery.trim()
+              ? `نتائج البحث (${candidates.length})`
+              : `أعضاء مجتمع LIVO المسجلون (${candidates.length})`}
           </h3>
-          {candidates.length > 12 && (
+          {candidates.length > 20 && (
             <button
               onClick={() => setShowAll(prev => !prev)}
               className="text-xs text-purple-700 font-bold hover:underline"
@@ -205,15 +411,21 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({ currentUser, onStart
         {suggestedUsers.length === 0 ? (
           <div className="bg-white rounded-2xl border border-gray-100 p-8 text-center space-y-2 shadow-2xs">
             <Users className="w-9 h-9 text-gray-300 mx-auto" />
-            <p className="text-xs font-extrabold text-gray-700">لا يوجد مستخدمون مسجلون آخرون بعد</p>
+            <p className="text-xs font-extrabold text-gray-700">
+              {searchQuery.trim() ? 'لا يوجد عضو بهذا المعرف أو الاسم' : 'لا يوجد مستخدمون مسجلون آخرون بعد'}
+            </p>
             <p className="text-[11px] text-gray-400">
-              يظهر هنا فقط الأعضاء الحقيقيون المسجلون عبر Google أو البريد أو الهاتف داخل المنصة.
+              {searchQuery.trim()
+                ? 'تأكد من كتابة رقم الـ UID الصحيح (من 10000 فأعلى).'
+                : 'يظهر هنا فقط الأعضاء الحقيقيون المسجلون عبر Google أو البريد أو الهاتف داخل المنصة.'}
             </p>
           </div>
         ) : (
           <div className="space-y-2.5">
             {suggestedUsers.map((user) => {
               const isFollowed = followingSet.has(user.uid);
+              const distKm = currentUser ? livoStore.getUserDistanceKm(currentUser, user) : null;
+              const hasOpenRoom = openRoomOwnerUids.has(user.uid);
 
               return (
                 <div
@@ -234,25 +446,35 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({ currentUser, onStart
                   />
 
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <h4
-                        className={`font-extrabold text-xs text-gray-900 truncate ${
-                          user.nameGlowColor && user.nameGlowColor !== 'none' ? `name-glow-${user.nameGlowColor}` : ''
-                        }`}
-                      >
-                        {user.displayName}
-                      </h4>
-                      {user.isVerified && (
-                        <LivoVerifiedBadge
-                          size={14}
-                          color={user.verifiedBadgeColor}
-                          shape={user.verifiedBadgeShape}
-                          glow={user.verifiedBadgeGlow}
-                        />
-                      )}
-                      <span className="bg-amber-100 text-amber-800 text-[8px] font-extrabold px-1 rounded font-digits">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <UserNameWithBadges
+                        displayName={user.displayName}
+                        nameGlowColor={user.nameGlowColor}
+                        isVerified={user.isVerified}
+                        verifiedBadgeColor={user.verifiedBadgeColor}
+                        verifiedBadgeShape={user.verifiedBadgeShape}
+                        verifiedBadgeGlow={user.verifiedBadgeGlow}
+                        customIconUrl={user.customIconUrl}
+                        customIconGlow={user.customIconGlow}
+                        customIconAnimated={user.customIconAnimated}
+                        customIconLabel={user.customIconLabel}
+                        badgeSize={14}
+                        iconSize={18}
+                        nameClassName="font-extrabold text-xs text-gray-900"
+                      />
+                      <span className="bg-amber-100 text-amber-800 text-[8px] font-extrabold px-1 rounded font-digits shrink-0">
                         Lv.{user.level || 0}
                       </span>
+                      {distKm !== null && (
+                        <span className="bg-emerald-100 text-emerald-800 text-[8px] font-extrabold px-1.5 py-0.5 rounded-full font-digits shrink-0">
+                          {distKm < 1 ? 'أقل من 1 كم' : `${distKm} كم`}
+                        </span>
+                      )}
+                      {hasOpenRoom && (
+                        <span className="bg-rose-100 text-rose-700 text-[8px] font-extrabold px-1.5 py-0.5 rounded-full shrink-0">
+                          مباشر الآن
+                        </span>
+                      )}
                     </div>
                     <span className="text-[10px] text-gray-400 font-digits block">
                       UID: {user.uid} • @{user.username}
@@ -303,4 +525,5 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({ currentUser, onStart
     </div>
   );
 };
+
 

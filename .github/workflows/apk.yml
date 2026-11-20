@@ -17,11 +17,11 @@ jobs:
             appid: com.livo.client
             icon: livo.icon.png
             mode: customer
-          - name: admin #
-            appname: Livo Admin #
-            appid: com.livo.admin #
-            icon: livoadmin.icon.png #
-            mode: admin #
+          - name: admin
+            appname: Livo Admin
+            appid: com.livo.admin
+            icon: livoadmin.icon.png
+            mode: admin
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

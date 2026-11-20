@@ -33,7 +33,7 @@ import {
   UserCheck
 } from 'lucide-react';
 import { UserProfile, VideoPost } from '../../types';
-import { LivoVerifiedBadge } from '../common/LivoVerifiedBadge';
+import { UserNameWithBadges } from '../common/UserNameWithBadges';
 import { AvatarWithFrame } from '../common/AvatarWithFrame';
 import { EditProfileModal } from './EditProfileModal';
 import { VideosView } from './VideosView';
@@ -161,8 +161,12 @@ export const HagoProfileView: React.FC<HagoProfileViewProps> = ({
                     />
                     <div className="min-w-0">
                       <div className="flex items-center gap-1">
-                        <span className="font-black text-xs text-gray-900 truncate">{acc.displayName}</span>
-                        {acc.isVerified && <LivoVerifiedBadge size={13} />}
+                        <UserNameWithBadges
+                          displayName={acc.displayName}
+                          isVerified={acc.isVerified}
+                          badgeSize={13}
+                          nameClassName="font-black text-xs text-gray-900"
+                        />
                       </div>
                       <span className="text-[10px] text-gray-500 font-digits block truncate">
                         UID: {acc.uid} {acc.email ? `• ${acc.email}` : ''}
@@ -253,17 +257,22 @@ export const HagoProfileView: React.FC<HagoProfileViewProps> = ({
 
             <div>
               <div className="flex items-center gap-1.5 flex-wrap">
-                <h3 className={`font-black text-base text-gray-900 ${nameGlowClass}`}>
-                  {user.displayName}
-                </h3>
-                {user.isVerified && (
-                  <LivoVerifiedBadge
-                    size={18}
-                    color={user.verifiedBadgeColor}
-                    shape={user.verifiedBadgeShape}
-                    glow={user.verifiedBadgeGlow}
-                  />
-                )}
+                <UserNameWithBadges
+                  displayName={user.displayName}
+                  nameGlowColor={user.nameGlowColor}
+                  isVerified={user.isVerified}
+                  verifiedBadgeColor={user.verifiedBadgeColor}
+                  verifiedBadgeShape={user.verifiedBadgeShape}
+                  verifiedBadgeGlow={user.verifiedBadgeGlow}
+                  customIconUrl={user.customIconUrl}
+                  customIconGlow={user.customIconGlow}
+                  customIconAnimated={user.customIconAnimated}
+                  customIconLabel={user.customIconLabel}
+                  badgeSize={18}
+                  iconSize={22}
+                  nameClassName="font-black text-base text-gray-900"
+                  truncate={false}
+                />
                 {/* Charging Agent Badge (Requirement 3: Appears next to name after Admin approval) */}
                 {(user.role === 'charging_agent' || (user.agencyType === 'charging_agent' && user.canChargeUsers)) && (
                   <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-400 to-yellow-300 text-black text-[10px] font-black border border-amber-500/60 shadow-xs">
@@ -823,7 +832,21 @@ export const HagoProfileView: React.FC<HagoProfileViewProps> = ({
                   className="w-14 h-14 rounded-full border-2 border-black object-cover shadow"
                 />
                 <div>
-                  <h4 className="font-black text-base">{user.displayName}</h4>
+                  <UserNameWithBadges
+                    displayName={user.displayName}
+                    nameGlowColor={user.nameGlowColor}
+                    isVerified={user.isVerified}
+                    verifiedBadgeColor={user.verifiedBadgeColor}
+                    verifiedBadgeShape={user.verifiedBadgeShape}
+                    verifiedBadgeGlow={user.verifiedBadgeGlow}
+                    customIconUrl={user.customIconUrl}
+                    customIconGlow={user.customIconGlow}
+                    customIconAnimated={user.customIconAnimated}
+                    customIconLabel={user.customIconLabel}
+                    badgeSize={15}
+                    iconSize={19}
+                    nameClassName="font-black text-base text-black"
+                  />
                   <p className="text-xs font-bold font-digits text-gray-800">UID: {user.uid}</p>
                   <span className="text-[10px] font-extrabold bg-black text-[#FFE600] px-2 py-0.5 rounded-full inline-block mt-1">
                     🇪🇬 LIVO Official User
@@ -928,8 +951,12 @@ export const HagoProfileView: React.FC<HagoProfileViewProps> = ({
                         />
                         <div className="min-w-0">
                           <div className="flex items-center gap-1.5">
-                            <span className="font-black text-xs text-gray-900 truncate">{acc.displayName}</span>
-                            {acc.isVerified && <LivoVerifiedBadge size={13} />}
+                            <UserNameWithBadges
+                              displayName={acc.displayName}
+                              isVerified={acc.isVerified}
+                              badgeSize={13}
+                              nameClassName="font-black text-xs text-gray-900"
+                            />
                             {isActive && (
                               <span className="text-[9px] bg-emerald-100 text-emerald-700 font-black px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
                                 <UserCheck className="w-2.5 h-2.5" /> نشط

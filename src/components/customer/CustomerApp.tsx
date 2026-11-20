@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { UserProfile } from '../../types';
+import React, { useState, useEffect, useRef } from 'react';
+import { Maximize2, Mic, MicOff, Radio, ShieldAlert, Video, X } from 'lucide-react';
+import { UserProfile, VoiceRoom } from '../../types';
 import { HagoBottomNav, HagoTab } from './HagoBottomNav';
 import { PartyView } from './PartyView';
 import { DiscoverView } from './DiscoverView';
@@ -18,6 +19,8 @@ import { LevelCenterModal } from './LevelCenterModal';
 import { ChargingAgentModal } from './ChargingAgentModal';
 import { DistributorAgentModal } from './DistributorAgentModal';
 import { GiftHistoryModal } from './GiftHistoryModal';
+import { RoyalVoiceRoomModal } from './RoyalVoiceRoomModal';
+import { LiveStreamView } from './LiveStreamView';
 import { livoStore } from '../../services/livoStore';
 import { firebaseService } from '../../services/firebase';
 
@@ -28,6 +31,14 @@ interface CustomerAppProps {
 export const CustomerApp: React.FC<CustomerAppProps> = ({ currentUser }) => {
   const [activeTab, setActiveTab] = useState<HagoTab>('party');
   const [chatTargetUid, setChatTargetUid] = useState<string | null>(null);
+  const [rooms, setRooms] = useState<VoiceRoom[]>(() => livoStore.getRooms());
+
+  // Lifted active Voice Room & Video Live state for seamless Mini-Live PiP
+  const [activeVoiceRoomId, setActiveVoiceRoomId] = useState<string | null>(null);
+  const [voiceRoomMinimized, setVoiceRoomMinimized] = useState(false);
+  const [activeLiveRoomId, setActiveLiveRoomId] = useState<string | null>(null);
+  const [liveMinimized, setLiveMinimized] = useState(false);
+  const lastVoiceRoomRef = useRef<VoiceRoom | null>(null);
 
   // Customer Modals
   const [isRechargeOpen, setIsRechargeOpen] = useState(false);
@@ -45,16 +56,146 @@ export const CustomerApp: React.FC<CustomerAppProps> = ({ currentUser }) => {
 
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [authInitialMode, setAuthInitialMode] = useState<'login' | 'signup'>('login');
+  const [authNotice, setAuthNotice] = useState<string | null>(null);
 
-  // Non-destructive Firebase Auth listener: keeps active sessions synced without kicking out users mid-session
+  // Anti-Screenshot Privacy Shield state
+  const [privacyVeilActive, setPrivacyVeilActive] = useState(false);
+  const [privacyToast, setPrivacyToast] = useState<string | null>(null);
+
   useEffect(() => {
-    const unsubAuth = firebaseService.onAuthStateChanged((fbUser) => {
-      if (fbUser && localStorage.getItem('livo_auth_logged_in') === 'true') {
-        livoStore.syncFirebaseUser(fbUser);
+    const unsub = livoStore.subscribe(() => {
+      setRooms([...livoStore.getRooms()]);
+    });
+    return () => unsub();
+  }, []);
+
+  // Sync Firebase Auth sessions & redirect logins cleanly without requiring localStorage pre-flag
+  useEffect(() => {
+    let active = true;
+    firebaseService.consumeGoogleRedirectResult().then(async (res) => {
+      if (!active) return;
+      if (res.user) {
+        await livoStore.syncFirebaseUserAsync(res.user);
+        setIsAuthOpen(false);
+        setAuthNotice(null);
+      } else if (res.error) {
+        setAuthNotice(res.error);
       }
     });
-    return () => unsubAuth();
+
+    const unsubAuth = firebaseService.onAuthStateChanged(async (fbUser) => {
+      if (!active) return;
+      if (fbUser) {
+        await livoStore.syncFirebaseUserAsync(fbUser);
+      }
+    });
+    return () => {
+      active = false;
+      unsubAuth();
+    };
   }, []);
+
+  // Anti-Screenshot shield is OFF only when viewing user's own personal profile ("me") with no active room/live/modals
+  const isOwnProfileOnly =
+    activeTab === 'me' &&
+    !activeVoiceRoomId &&
+    !activeLiveRoomId &&
+    !isAuthOpen &&
+    !isRechargeOpen &&
+    !isStoreOpen &&
+    !isAgencyOpen &&
+    !isVerificationOpen &&
+    !isWithdrawalOpen &&
+    !isSettingsOpen &&
+    !isAdCenterOpen &&
+    !isSupportOpen &&
+    !isLevelCenterOpen &&
+    !isChargingAgentOpen &&
+    !isDistributorAgentOpen &&
+    !isGiftHistoryOpen;
+
+  const isPrivacyProtected = !isOwnProfileOnly;
+
+  useEffect(() => {
+    document.body.dataset.livoPrivacyShield = isPrivacyProtected ? 'protected' : 'self-profile';
+    if (!isPrivacyProtected) {
+      setPrivacyVeilActive(false);
+      return;
+    }
+
+    const triggerShieldNotice = () => {
+      setPrivacyVeilActive(true);
+      setPrivacyToast('🔒 لقطات الشاشة محمية داخل التطبيق — متاحة في حسابك الشخصي فقط');
+      setTimeout(() => {
+        setPrivacyVeilActive(false);
+      }, 1400);
+      setTimeout(() => {
+        setPrivacyToast(null);
+      }, 2800);
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const k = (e.key || '').toLowerCase();
+      const isPrintScreen = e.key === 'PrintScreen';
+      const isCaptureShortcut =
+        (e.ctrlKey || e.metaKey) && e.shiftKey && ['s', '3', '4', '5', '6'].includes(k);
+      const isPrintShortcut = (e.ctrlKey || e.metaKey) && k === 'p';
+      if (isPrintScreen || isCaptureShortcut || isPrintShortcut) {
+        e.preventDefault();
+        try {
+          navigator.clipboard?.writeText('');
+        } catch {
+          // ignore
+        }
+        triggerShieldNotice();
+      }
+    };
+
+    const handleContextMenu = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return;
+      e.preventDefault();
+    };
+
+    const handleDragStart = (e: DragEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'IMG' || target.tagName === 'VIDEO')) {
+        e.preventDefault();
+      }
+    };
+
+    const handleWindowBlur = () => {
+      if (isPrivacyProtected) setPrivacyVeilActive(true);
+    };
+
+    const handleWindowFocus = () => {
+      setPrivacyVeilActive(false);
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden' && isPrivacyProtected) {
+        setPrivacyVeilActive(true);
+      } else {
+        setPrivacyVeilActive(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    window.addEventListener('contextmenu', handleContextMenu);
+    window.addEventListener('dragstart', handleDragStart);
+    window.addEventListener('blur', handleWindowBlur);
+    window.addEventListener('focus', handleWindowFocus);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, true);
+      window.removeEventListener('contextmenu', handleContextMenu);
+      window.removeEventListener('dragstart', handleDragStart);
+      window.removeEventListener('blur', handleWindowBlur);
+      window.removeEventListener('focus', handleWindowFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [isPrivacyProtected]);
 
   const handleOpenAuth = (mode: 'login' | 'signup' = 'login') => {
     setAuthInitialMode(mode);
@@ -62,6 +203,10 @@ export const CustomerApp: React.FC<CustomerAppProps> = ({ currentUser }) => {
   };
 
   const handleLogout = async () => {
+    setActiveVoiceRoomId(null);
+    setVoiceRoomMinimized(false);
+    setActiveLiveRoomId(null);
+    setLiveMinimized(false);
     try {
       livoStore.logoutSession();
       await firebaseService.logout();
@@ -90,12 +235,69 @@ export const CustomerApp: React.FC<CustomerAppProps> = ({ currentUser }) => {
     action();
   };
 
+  const handleOpenVoiceRoom = (roomId: string) => {
+    setActiveVoiceRoomId(roomId);
+    setVoiceRoomMinimized(false);
+    setActiveLiveRoomId(null);
+    setLiveMinimized(false);
+  };
+
+  const handleOpenLiveRoom = (roomId: string) => {
+    setActiveLiveRoomId(roomId);
+    setLiveMinimized(false);
+    setActiveVoiceRoomId(null);
+    setVoiceRoomMinimized(false);
+  };
+
+  const foundVoiceRoom = activeVoiceRoomId
+    ? rooms.find(r => r.id === activeVoiceRoomId) || null
+    : null;
+  if (foundVoiceRoom) {
+    lastVoiceRoomRef.current = foundVoiceRoom;
+  } else if (!activeVoiceRoomId) {
+    lastVoiceRoomRef.current = null;
+  }
+  const activeVoiceRoom =
+    foundVoiceRoom || (activeVoiceRoomId ? lastVoiceRoomRef.current : null);
+
+  const activeLiveRoom = activeLiveRoomId
+    ? rooms.find(r => r.id === activeLiveRoomId) || null
+    : null;
+
+  const myMiniSeat =
+    activeVoiceRoom && currentUser
+      ? activeVoiceRoom.seats.find(s => s.occupiedByUid === currentUser.uid) || null
+      : null;
+
   const unreadCount = currentUser
     ? livoStore.getChatThreads(currentUser?.uid).reduce((acc, t) => acc + (t.unreadCount || 0), 0)
     : 0;
 
   return (
-    <div className="light-surface flex flex-col w-full h-[100dvh] md:h-[852px] md:max-h-[95vh] md:max-w-[430px] mx-auto bg-white text-gray-900 md:rounded-[44px] md:border-[8px] md:border-[#1c1c1e] md:shadow-[0_25px_70px_rgba(0,0,0,0.45)] overflow-hidden relative select-none">
+    <div
+      className={`light-surface flex flex-col w-full h-[100dvh] md:h-[852px] md:max-h-[95vh] md:max-w-[430px] mx-auto bg-white text-gray-900 md:rounded-[44px] md:border-[8px] md:border-[#1c1c1e] md:shadow-[0_25px_70px_rgba(0,0,0,0.45)] overflow-hidden relative select-none ${
+        isPrivacyProtected ? 'livo-privacy-protected' : ''
+      }`}
+    >
+      {/* Privacy Capture Curtain when PrintScreen / blur triggers inside protected pages */}
+      {isPrivacyProtected && privacyVeilActive && (
+        <div className="absolute inset-0 z-[90] bg-black/95 backdrop-blur-2xl flex flex-col items-center justify-center p-6 text-center text-white">
+          <div className="w-16 h-16 rounded-full bg-[#FFE600]/20 border border-[#FFE600] flex items-center justify-center mb-3">
+            <ShieldAlert className="w-8 h-8 text-[#FFE600]" />
+          </div>
+          <h3 className="font-black text-sm text-[#FFE600]">حماية الخصوصية مفعّلة</h3>
+          <p className="text-xs text-gray-300 mt-1 max-w-xs leading-relaxed">
+            التقاط الشاشة وتسجيل محتوى الغرف والمحادثات محمي داخل LIVO. يمكنك التصوير فقط داخل صفحة حسابك الشخصي.
+          </p>
+        </div>
+      )}
+
+      {privacyToast && (
+        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-[95] bg-gray-950 text-[#FFE600] border border-[#FFE600]/40 px-4 py-2 rounded-full text-[11px] font-black shadow-2xl whitespace-nowrap max-w-[92%] truncate">
+          {privacyToast}
+        </div>
+      )}
+
       {/* iOS-Style Status Bar & Dynamic Island */}
       <div className="bg-white/95 backdrop-blur-md px-6 pt-2.5 pb-1.5 flex items-center justify-between text-[11px] font-digits font-bold text-gray-900 z-30 select-none border-b border-gray-100/80 shrink-0">
         <span>9:41</span>
@@ -131,6 +333,14 @@ export const CustomerApp: React.FC<CustomerAppProps> = ({ currentUser }) => {
         </div>
       )}
 
+      {/* Redirect Auth Error Notice (if any) */}
+      {authNotice && (
+        <div className="bg-red-50 border-b border-red-200 px-3 py-1.5 flex items-center justify-between gap-2 text-[11px] text-red-700 font-bold shrink-0">
+          <span className="truncate">{authNotice}</span>
+          <button onClick={() => setAuthNotice(null)} className="text-red-900 px-1.5 font-black">×</button>
+        </div>
+      )}
+
       {/* Main Screen Content Area (Always mounted to prevent mid-session voice room drops) */}
       <div className="flex-1 overflow-hidden relative bg-[#FAFAFA]">
         {activeTab === 'party' && (
@@ -138,6 +348,9 @@ export const CustomerApp: React.FC<CustomerAppProps> = ({ currentUser }) => {
             currentUser={currentUser}
             onOpenRecharge={() => requireAuthThen(() => setIsRechargeOpen(true))}
             onRequireAuth={() => handleOpenAuth('login')}
+            onOpenVoiceRoom={handleOpenVoiceRoom}
+            onOpenLiveRoom={handleOpenLiveRoom}
+            onStartChat={handleStartChatWithUser}
           />
         )}
 
@@ -179,6 +392,116 @@ export const CustomerApp: React.FC<CustomerAppProps> = ({ currentUser }) => {
         )}
       </div>
 
+      {/* Floating Mini-Live / Room PiP Dock ("لايف مصغر") */}
+      {activeVoiceRoom && voiceRoomMinimized && (
+        <div className="absolute bottom-20 left-3 right-3 z-40 bg-[#180a2b]/95 backdrop-blur-md border border-[#FFE600]/60 rounded-2xl p-2 flex items-center justify-between gap-2 shadow-2xl text-white">
+          <div
+            onClick={() => setVoiceRoomMinimized(false)}
+            className="flex items-center gap-2 min-w-0 flex-1 cursor-pointer"
+          >
+            <div className="relative w-10 h-10 rounded-full overflow-hidden border-2 border-[#FFE600] shrink-0">
+              <img
+                src={activeVoiceRoom.ownerAvatar || '/assets/livo/customer_icon.jpg'}
+                alt={activeVoiceRoom.title}
+                className="w-full h-full object-cover"
+              />
+              <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-emerald-500 border border-black animate-pulse" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs font-black text-white truncate flex items-center gap-1">
+                <Radio className="w-3 h-3 text-[#FFE600] animate-pulse shrink-0" />
+                <span className="truncate">{activeVoiceRoom.title}</span>
+              </p>
+              <span className="text-[10px] text-purple-200 truncate block">
+                لايف مصغر • اضغط للعودة للغرفة
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1 shrink-0">
+            {myMiniSeat && (
+              <button
+                onClick={() => livoStore.toggleSeatMute(activeVoiceRoom.id, myMiniSeat.seatIndex)}
+                className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                  myMiniSeat.isMuted ? 'bg-red-600/80 text-white' : 'bg-emerald-600 text-white'
+                }`}
+                title={myMiniSeat.isMuted ? 'فتح المايك' : 'كتم المايك'}
+              >
+                {myMiniSeat.isMuted ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
+              </button>
+            )}
+            <button
+              onClick={() => setVoiceRoomMinimized(false)}
+              className="w-8 h-8 rounded-full bg-[#FFE600] text-black flex items-center justify-center"
+              title="تكبير الغرفة"
+            >
+              <Maximize2 className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => {
+                if (currentUser) livoStore.leaveRoomSeat(activeVoiceRoom.id, currentUser.uid);
+                setActiveVoiceRoomId(null);
+                setVoiceRoomMinimized(false);
+              }}
+              className="w-8 h-8 rounded-full bg-red-600/90 text-white flex items-center justify-center"
+              title="مغادرة الغرفة"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {activeLiveRoom && liveMinimized && currentUser && (
+        <div className="absolute bottom-20 left-3 right-3 z-40 bg-gray-950/95 backdrop-blur-md border border-rose-500/70 rounded-2xl p-2 flex items-center justify-between gap-2 shadow-2xl text-white">
+          <div
+            onClick={() => setLiveMinimized(false)}
+            className="flex items-center gap-2 min-w-0 flex-1 cursor-pointer"
+          >
+            <div className="relative w-10 h-10 rounded-full overflow-hidden border-2 border-rose-500 shrink-0">
+              <img
+                src={activeLiveRoom.ownerAvatar || '/assets/livo/customer_icon.jpg'}
+                alt={activeLiveRoom.title}
+                className="w-full h-full object-cover"
+              />
+              <span className="absolute bottom-0 right-0 bg-red-600 text-[7px] font-black px-1 rounded">LIVE</span>
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs font-black text-white truncate flex items-center gap-1">
+                <Video className="w-3 h-3 text-rose-400 shrink-0" />
+                <span className="truncate">{activeLiveRoom.title}</span>
+              </p>
+              <span className="text-[10px] text-rose-200 truncate block">
+                بث مباشر مصغر • اضغط للعودة للبث
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              onClick={() => setLiveMinimized(false)}
+              className="w-8 h-8 rounded-full bg-[#FFE600] text-black flex items-center justify-center"
+              title="تكبير البث"
+            >
+              <Maximize2 className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => {
+                if (activeLiveRoom.ownerUid === currentUser.uid) {
+                  livoStore.closeAndRemoveRoom(activeLiveRoom.id);
+                }
+                setActiveLiveRoomId(null);
+                setLiveMinimized(false);
+              }}
+              className="w-8 h-8 rounded-full bg-red-600/90 text-white flex items-center justify-center"
+              title="إنهاء البث"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* 4-Tab Bottom Navigation Bar */}
       <HagoBottomNav
         activeTab={activeTab}
@@ -190,6 +513,50 @@ export const CustomerApp: React.FC<CustomerAppProps> = ({ currentUser }) => {
       <div className="bg-white pb-1.5 pt-0.5 flex justify-center shrink-0">
         <div className="w-32 h-1 bg-gray-900/80 rounded-full" />
       </div>
+
+      {/* Kept-alive Lifted Royal Voice Room Modal (supports Mini-Live PiP) */}
+      {activeVoiceRoom && (
+        <RoyalVoiceRoomModal
+          room={activeVoiceRoom}
+          currentUser={currentUser}
+          isOpen={true}
+          isMinimized={voiceRoomMinimized}
+          onMinimize={() => setVoiceRoomMinimized(true)}
+          onClose={() => {
+            setActiveVoiceRoomId(null);
+            setVoiceRoomMinimized(false);
+          }}
+          onOpenRecharge={() => requireAuthThen(() => setIsRechargeOpen(true))}
+          onRequireAuth={() => handleOpenAuth('login')}
+          onAdminLeaveRoom={() => {
+            livoStore.closeAndRemoveRoom(activeVoiceRoom.id);
+            setActiveVoiceRoomId(null);
+            setVoiceRoomMinimized(false);
+          }}
+        />
+      )}
+
+      {/* Kept-alive Lifted Video Live Stream Modal (supports Mini-Live PiP) */}
+      {activeLiveRoom && currentUser && (
+        <div className={liveMinimized ? 'hidden' : 'fixed inset-0 z-50 bg-black flex items-center justify-center'}>
+          <div className="w-full max-w-[430px] h-[100dvh]">
+            <LiveStreamView
+              currentUser={currentUser}
+              room={activeLiveRoom}
+              isHost={activeLiveRoom.ownerUid === currentUser.uid}
+              onOpenRecharge={() => requireAuthThen(() => setIsRechargeOpen(true))}
+              onMinimize={() => setLiveMinimized(true)}
+              onClose={() => {
+                if (activeLiveRoom.ownerUid === currentUser.uid) {
+                  livoStore.closeAndRemoveRoom(activeLiveRoom.id);
+                }
+                setActiveLiveRoomId(null);
+                setLiveMinimized(false);
+              }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Dismissible Auth Overlay (never blocks or unmounts main app shell) */}
       {isAuthOpen && (
@@ -295,3 +662,4 @@ export const CustomerApp: React.FC<CustomerAppProps> = ({ currentUser }) => {
     </div>
   );
 };
+

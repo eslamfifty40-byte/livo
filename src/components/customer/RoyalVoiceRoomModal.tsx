@@ -22,13 +22,19 @@ import {
   Settings,
   Smile,
   ShieldCheck,
-  UserCheck
+  UserCheck,
+  Music,
+  Play,
+  Pause,
+  Volume2,
+  Minimize2
 } from 'lucide-react';
 import { UserProfile, GiftItem, VoiceRoom, RoomSeat } from '../../types';
 import { livoStore } from '../../services/livoStore';
 import { GiftAnimationOverlay } from './GiftAnimationOverlay';
-import { LivoVerifiedBadge } from '../common/LivoVerifiedBadge';
 import { AvatarWithFrame } from '../common/AvatarWithFrame';
+import { UserNameWithBadges } from '../common/UserNameWithBadges';
+import { compressImageForFirestore } from '../../utils/imageCompression';
 
 interface BgPreset {
   id: string;
@@ -86,10 +92,25 @@ function getBgStyle(bgValue?: string): React.CSSProperties {
   };
 }
 
+interface AmbientTrack {
+  id: string;
+  label: string;
+  bpm: number;
+  notes: number[];
+}
+
+const AMBIENT_TRACKS: AmbientTrack[] = [
+  { id: 'lofi', label: 'إيقاع LIVO هادئ 🌙', bpm: 84, notes: [261.63, 329.63, 392.0, 493.88, 392.0, 329.63] },
+  { id: 'oud', label: 'نغمة شرقية دافئة 🎶', bpm: 92, notes: [293.66, 349.23, 440.0, 523.25, 440.0, 369.99] },
+  { id: 'party', label: 'إيقاع حفلات خفيف ⚡', bpm: 112, notes: [329.63, 392.0, 493.88, 587.33, 493.88, 392.0] }
+];
+
 interface RoyalVoiceRoomModalProps {
   room: VoiceRoom;
   currentUser: UserProfile | null;
   isOpen: boolean;
+  isMinimized?: boolean;
+  onMinimize?: () => void;
   onClose: () => void;
   onOpenRecharge: () => void;
   onRequireAuth?: () => void;
@@ -100,6 +121,8 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
   room,
   currentUser,
   isOpen,
+  isMinimized = false,
+  onMinimize,
   onClose,
   onOpenRecharge,
   onRequireAuth,
@@ -125,6 +148,18 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [showSettingsDrawer, setShowSettingsDrawer] = useState(false);
   const [newModUidInput, setNewModUidInput] = useState('');
+
+  // In-Room Music Player state (Local Audio File OR Built-in WebAudio Ambient Synthesizer)
+  const [showMusicPanel, setShowMusicPanel] = useState(false);
+  const [musicPlaying, setMusicPlaying] = useState(false);
+  const [musicVolume, setMusicVolume] = useState(0.45);
+  const [selectedPresetId, setSelectedPresetId] = useState<string>('lofi');
+  const [customAudioUrl, setCustomAudioUrl] = useState<string | null>(null);
+  const [customAudioName, setCustomAudioName] = useState<string>('');
+  const localAudioElRef = useRef<HTMLAudioElement | null>(null);
+  const webAudioCtxRef = useRef<AudioContext | null>(null);
+  const webAudioTimerRef = useRef<number | null>(null);
+  const webAudioGainRef = useRef<GainNode | null>(null);
 
   // Voice Room Background Customization State
   const [personalBg, setPersonalBg] = useState<string | undefined>(() =>
@@ -214,8 +249,100 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
     syncAudioHardware();
   }, [mySeat?.seatIndex, mySeat?.isMuted]);
 
+  // Sync room music playback (Local File OR Built-in WebAudio Synth)
+  const stopAmbientSynth = () => {
+    if (webAudioTimerRef.current !== null) {
+      window.clearInterval(webAudioTimerRef.current);
+      webAudioTimerRef.current = null;
+    }
+    if (webAudioCtxRef.current && webAudioCtxRef.current.state === 'running') {
+      webAudioCtxRef.current.suspend().catch(() => {});
+    }
+  };
+
+  useEffect(() => {
+    if (localAudioElRef.current) {
+      localAudioElRef.current.volume = musicVolume;
+    }
+    if (webAudioGainRef.current) {
+      webAudioGainRef.current.gain.value = musicVolume * 0.16;
+    }
+  }, [musicVolume]);
+
+  useEffect(() => {
+    if (!musicPlaying || !isOpen) {
+      stopAmbientSynth();
+      if (localAudioElRef.current && !localAudioElRef.current.paused) {
+        localAudioElRef.current.pause();
+      }
+      return;
+    }
+
+    if (customAudioUrl && localAudioElRef.current) {
+      stopAmbientSynth();
+      localAudioElRef.current.volume = musicVolume;
+      localAudioElRef.current.play().catch(() => {});
+      return;
+    }
+
+    // Play synthesized ambient preset safely
+    if (localAudioElRef.current && !localAudioElRef.current.paused) {
+      localAudioElRef.current.pause();
+    }
+    const preset = AMBIENT_TRACKS.find(t => t.id === selectedPresetId) || AMBIENT_TRACKS[0];
+    const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    if (!AudioCtx) return;
+
+    if (!webAudioCtxRef.current) {
+      webAudioCtxRef.current = new AudioCtx();
+    }
+    const ctx = webAudioCtxRef.current;
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+    if (!webAudioGainRef.current) {
+      webAudioGainRef.current = ctx.createGain();
+      webAudioGainRef.current.connect(ctx.destination);
+    }
+    webAudioGainRef.current.gain.value = musicVolume * 0.16;
+
+    let step = 0;
+    const playStep = () => {
+      if (!webAudioCtxRef.current || !webAudioGainRef.current) return;
+      const now = webAudioCtxRef.current.currentTime;
+      const osc = webAudioCtxRef.current.createOscillator();
+      const noteGain = webAudioCtxRef.current.createGain();
+      osc.type = 'sine';
+      const freq = preset.notes[step % preset.notes.length];
+      osc.frequency.setValueAtTime(freq, now);
+      noteGain.gain.setValueAtTime(0.001, now);
+      noteGain.gain.exponentialRampToValueAtTime(0.9, now + 0.05);
+      noteGain.gain.exponentialRampToValueAtTime(0.001, now + 0.55);
+      osc.connect(noteGain);
+      noteGain.connect(webAudioGainRef.current);
+      osc.start(now);
+      osc.stop(now + 0.6);
+      step += 1;
+    };
+    playStep();
+    const stepMs = Math.round((60 / preset.bpm) * 1000);
+    webAudioTimerRef.current = window.setInterval(playStep, stepMs);
+
+    return () => {
+      stopAmbientSynth();
+    };
+  }, [musicPlaying, isOpen, customAudioUrl, selectedPresetId]);
+
   useEffect(() => {
     return () => {
+      stopAmbientSynth();
+      if (webAudioCtxRef.current) {
+        webAudioCtxRef.current.close().catch(() => {});
+        webAudioCtxRef.current = null;
+      }
+      if (customAudioUrl) {
+        URL.revokeObjectURL(customAudioUrl);
+      }
       if (audioStreamRef.current) {
         audioStreamRef.current.getTracks().forEach(t => t.stop());
         audioStreamRef.current = null;
@@ -256,6 +383,11 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
   };
 
   const handleCloseAndLeave = (closeRoomForAll: boolean = false) => {
+    setMusicPlaying(false);
+    stopAmbientSynth();
+    if (localAudioElRef.current) {
+      localAudioElRef.current.pause();
+    }
     if (audioStreamRef.current) {
       audioStreamRef.current.getTracks().forEach(t => t.stop());
       audioStreamRef.current = null;
@@ -283,9 +415,9 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
 
   /**
    * Seat Click Logic:
-   * 1. Clicking YOUR OWN occupied seat (including Owner on Seat #1): toggles mute/unmute IN PLACE!
+   * 1. Clicking YOUR OWN occupied seat (including Owner on Seat #1): toggles mute/unmute IN PLACE.
    * 2. Clicking ANOTHER user's occupied seat as Owner/Mod: opens Moderation Menu.
-   * 3. Clicking an EMPTY seat: calls strict single-mic joinRoomSeat (blocks multiple mics!).
+   * 3. Clicking ANY unlocked EMPTY seat (even while seated elsewhere): smoothly vacates old seat and moves to target seat without duplication!
    */
   const handleSeatClick = (index: number) => {
     const actor = ensureAuthenticated();
@@ -305,11 +437,6 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
       } else {
         showToast(`المستخدم ${targetSeat.occupiedByName} على المايك`);
       }
-      return;
-    }
-
-    if (mySeat) {
-      showToast('أنت تجلس بالفعل على مايك! اضغط على مايكك الحالي لكتمه أو انزل منه أولاً.');
       return;
     }
 
@@ -400,7 +527,11 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
       isVerified: actor.isVerified,
       verifiedBadgeColor: actor.verifiedBadgeColor,
       verifiedBadgeShape: actor.verifiedBadgeShape,
+      verifiedBadgeGlow: actor.verifiedBadgeGlow,
       nameGlowColor: actor.nameGlowColor,
+      customIconUrl: actor.customIconUrl,
+      customIconGlow: actor.customIconGlow,
+      customIconAnimated: actor.customIconAnimated,
       emojiSize: 'small'
     });
     setChatInput('');
@@ -425,7 +556,11 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
       isVerified: actor.isVerified,
       verifiedBadgeColor: actor.verifiedBadgeColor,
       verifiedBadgeShape: actor.verifiedBadgeShape,
+      verifiedBadgeGlow: actor.verifiedBadgeGlow,
       nameGlowColor: actor.nameGlowColor,
+      customIconUrl: actor.customIconUrl,
+      customIconGlow: actor.customIconGlow,
+      customIconAnimated: actor.customIconAnimated,
       emojiSize: 'large'
     });
     setShowEmojiPicker(false);
@@ -441,37 +576,20 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
     setShowBgPicker(true);
   };
 
-  const handleGalleryImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleGalleryImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const rawUrl = reader.result as string;
-      const img = new window.Image();
-      img.onload = () => {
-        const maxDim = 900;
-        let { width, height } = img;
-        if (width > maxDim || height > maxDim) {
-          const ratio = Math.min(maxDim / width, maxDim / height);
-          width = Math.round(width * ratio);
-          height = Math.round(height * ratio);
-        }
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.drawImage(img, 0, 0, width, height);
-          const compressed = canvas.toDataURL('image/jpeg', 0.78);
-          setBgPreviewValue(compressed);
-        } else {
-          setBgPreviewValue(rawUrl);
-        }
-      };
-      img.onerror = () => setBgPreviewValue(rawUrl);
-      img.src = rawUrl;
-    };
-    reader.readAsDataURL(file);
+    try {
+      const compressed = await compressImageForFirestore(file, {
+        maxDim: 960,
+        quality: 0.78,
+        maxBytes: 220_000
+      });
+      setBgPreviewValue(compressed);
+    } catch {
+      showToast('تعذر قراءة الصورة المختارة');
+    }
   };
 
   const handleApplyBackground = () => {
@@ -510,8 +628,31 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
     setShowBgPicker(false);
   };
 
+  const handleLocalAudioPick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (customAudioUrl) {
+      URL.revokeObjectURL(customAudioUrl);
+    }
+    const nextUrl = URL.createObjectURL(file);
+    setCustomAudioUrl(nextUrl);
+    setCustomAudioName(file.name);
+    setMusicPlaying(true);
+    showToast(`تم تشغيل: ${file.name} 🎵`);
+  };
+
   return (
-    <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-0 select-none animate-in fade-in">
+    <div
+      className={
+        isMinimized
+          ? 'hidden'
+          : 'fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-0 select-none animate-in fade-in'
+      }
+    >
+      {customAudioUrl && (
+        <audio ref={localAudioElRef} src={customAudioUrl} loop playsInline className="hidden" />
+      )}
       <GiftAnimationOverlay
         gift={activeGiftAnim?.gift || null}
         senderName={activeGiftAnim?.senderName || ''}
@@ -534,8 +675,8 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
         )}
 
         {/* Top Room Bar */}
-        <div className="p-3 pt-4 flex items-center justify-between border-b border-purple-900/40 bg-black/50 backdrop-blur-md z-20 gap-1.5">
-          <div className="flex items-center gap-2 min-w-0">
+        <div className="p-3 pt-4 flex items-center justify-between border-b border-purple-900/40 bg-black/50 backdrop-blur-md z-20 gap-1">
+          <div className="flex items-center gap-1.5 min-w-0">
             <button
               onClick={handleExitButtonTap}
               className="w-8 h-8 rounded-full bg-black/50 hover:bg-black/70 flex items-center justify-center text-white transition-colors shrink-0"
@@ -544,21 +685,38 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
               <ArrowRight className="w-4 h-4" />
             </button>
             <div className="min-w-0">
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1">
                 <span className="text-[9px] bg-[#FFE600] text-black font-black px-1.5 py-0.5 rounded shrink-0">
                   {targetSeatCount} مايك
                 </span>
-                <h3 className="font-bold text-xs text-white truncate max-w-[115px]">{liveRoom.title}</h3>
+                <h3 className="font-bold text-xs text-white truncate max-w-[100px]">{liveRoom.title}</h3>
               </div>
-              <div className="text-[10px] text-purple-300 flex items-center gap-1 mt-0.5">
-                <span className="text-amber-400 font-semibold truncate">{liveRoom.ownerName}</span>
-                <LivoVerifiedBadge size={11} />
-              </div>
+              {(() => {
+                const roomOwner = livoStore.getUserByUid(liveRoom.ownerUid);
+                return (
+                  <div className="text-[10px] text-purple-300 flex items-center gap-1 mt-0.5 max-w-[130px]">
+                    <UserNameWithBadges
+                      displayName={roomOwner?.displayName || liveRoom.ownerName}
+                      nameGlowColor={roomOwner?.nameGlowColor}
+                      isVerified={roomOwner?.isVerified ?? liveRoom.isOfficial}
+                      verifiedBadgeColor={roomOwner?.verifiedBadgeColor || 'gold'}
+                      verifiedBadgeShape={roomOwner?.verifiedBadgeShape || 'rosette'}
+                      verifiedBadgeGlow={roomOwner?.verifiedBadgeGlow}
+                      customIconUrl={roomOwner?.customIconUrl}
+                      customIconGlow={roomOwner?.customIconGlow}
+                      customIconAnimated={roomOwner?.customIconAnimated}
+                      badgeSize={12}
+                      iconSize={15}
+                      nameClassName="text-amber-400 font-semibold text-[10px]"
+                    />
+                  </div>
+                );
+              })()}
             </div>
           </div>
 
           <div className="flex items-center gap-1 shrink-0">
-            <div className="flex items-center gap-1 bg-black/50 px-2 py-1 rounded-full border border-purple-800/40 text-[11px] text-purple-200">
+            <div className="flex items-center gap-1 bg-black/50 px-2 py-1 rounded-full border border-purple-800/40 text-[10px] text-purple-200">
               <Users className="w-3 h-3 text-amber-400" />
               <span className="font-digits font-extrabold">
                 {seats.filter(s => s.occupiedByUid).length || 1}
@@ -568,7 +726,7 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
             {isOwnerOrMod && (
               <button
                 onClick={() => setShowSettingsDrawer(true)}
-                className="px-2 h-8 rounded-full bg-[#FFE600] hover:bg-yellow-400 text-black flex items-center gap-1 text-[10px] font-black shadow transition-colors"
+                className="w-8 h-8 sm:w-auto sm:px-2 rounded-full bg-[#FFE600] hover:bg-yellow-400 text-black flex items-center justify-center gap-1 text-[10px] font-black shadow transition-colors"
                 title="إعدادات الغرفة والمشرفين"
               >
                 <Settings className="w-3.5 h-3.5" />
@@ -577,9 +735,21 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
             )}
 
             <button
+              onClick={() => setShowMusicPanel(v => !v)}
+              className={`w-8 h-8 rounded-full border flex items-center justify-center transition-colors ${
+                musicPlaying
+                  ? 'bg-emerald-600/80 border-emerald-400 text-white animate-pulse'
+                  : 'bg-purple-900/70 hover:bg-purple-800 border-purple-500/40 text-purple-200'
+              }`}
+              title="تشغيل موسيقى داخل الغرفة"
+            >
+              <Music className="w-3.5 h-3.5" />
+            </button>
+
+            <button
               onClick={openBackgroundPicker}
               className="w-8 h-8 rounded-full bg-purple-900/70 hover:bg-purple-800 border border-purple-500/40 flex items-center justify-center text-amber-300 transition-colors"
-              title="تغيير الخلفية"
+              title="تغيير الخلفية من ملفاتي"
             >
               <ImageIcon className="w-3.5 h-3.5" />
             </button>
@@ -595,6 +765,16 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
               <Share2 className="w-3.5 h-3.5" />
             </button>
 
+            {onMinimize && (
+              <button
+                onClick={onMinimize}
+                className="w-8 h-8 rounded-full bg-amber-500/90 hover:bg-amber-400 text-black flex items-center justify-center"
+                title="لايف مصغر (تصغير الغرفة)"
+              >
+                <Minimize2 className="w-3.5 h-3.5" />
+              </button>
+            )}
+
             <button
               onClick={handleExitButtonTap}
               className="w-8 h-8 rounded-full bg-red-600/80 hover:bg-red-600 flex items-center justify-center text-white"
@@ -604,6 +784,82 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
             </button>
           </div>
         </div>
+
+        {/* In-Room Music Player Panel */}
+        {showMusicPanel && (
+          <div className="relative z-30 mx-3 mt-2 bg-[#160826]/95 border border-purple-600/60 rounded-2xl p-3 space-y-2.5 shadow-2xl text-right animate-in fade-in">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-black text-[#FFE600] flex items-center gap-1.5">
+                <Music className="w-3.5 h-3.5" />
+                مشغل موسيقى الغرفة
+              </span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setMusicPlaying(p => !p)}
+                  className={`px-3 py-1 rounded-full text-[10px] font-black flex items-center gap-1 ${
+                    musicPlaying ? 'bg-emerald-500 text-white' : 'bg-[#FFE600] text-black'
+                  }`}
+                >
+                  {musicPlaying ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
+                  <span>{musicPlaying ? 'إيقاف' : 'تشغيل'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowMusicPanel(false)}
+                  className="w-6 h-6 rounded-full bg-purple-900/60 text-purple-200 flex items-center justify-center"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-1.5">
+              {AMBIENT_TRACKS.map(t => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => {
+                    if (customAudioUrl) {
+                      URL.revokeObjectURL(customAudioUrl);
+                      setCustomAudioUrl(null);
+                      setCustomAudioName('');
+                    }
+                    setSelectedPresetId(t.id);
+                    setMusicPlaying(true);
+                  }}
+                  className={`px-2.5 py-1 rounded-xl text-[10px] font-bold border ${
+                    !customAudioUrl && selectedPresetId === t.id
+                      ? 'bg-purple-600 border-amber-400 text-white'
+                      : 'bg-black/40 border-purple-800/60 text-purple-200'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+              <label className="px-2.5 py-1 rounded-xl text-[10px] font-black bg-[#FFE600]/90 hover:bg-[#FFE600] text-black cursor-pointer flex items-center gap-1">
+                <Upload className="w-3 h-3" />
+                <span>{customAudioName ? `ملف: ${customAudioName.slice(0, 14)}` : 'اختر صوت من ملفاتي'}</span>
+                <input type="file" accept="audio/*" className="hidden" onChange={handleLocalAudioPick} />
+              </label>
+            </div>
+
+            <div className="flex items-center gap-2 text-[10px] text-purple-200">
+              <Volume2 className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+              <span className="shrink-0">مستوى الصوت:</span>
+              <input
+                type="range"
+                min={0.05}
+                max={1}
+                step={0.05}
+                value={musicVolume}
+                onChange={(e) => setMusicVolume(Number(e.target.value))}
+                className="flex-1 accent-[#FFE600]"
+              />
+              <span className="font-digits font-bold w-8 text-left">{Math.round(musicVolume * 100)}%</span>
+            </div>
+          </div>
+        )}
 
         {/* 6 or 12 Seats Stage */}
         <div className="relative z-10 flex-1 overflow-y-auto px-3 py-2 flex flex-col justify-between min-h-0">
@@ -645,6 +901,7 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
                           frameAnimated={seat.frameAnimated}
                           customIconUrl={seat.customIconUrl}
                           customIconGlow={seat.customIconGlow}
+                          customIconAnimated={seat.customIconAnimated}
                         />
 
                         {index === 0 && (
@@ -681,22 +938,26 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
                     )}
                   </div>
 
-                  <div className="flex items-center justify-center gap-0.5 mt-1 max-w-[78px] truncate">
-                    <span
-                      className={`text-[10px] truncate font-bold ${
-                        isOccupied && seat.nameGlowColor && seat.nameGlowColor !== 'none'
-                          ? `name-glow-${seat.nameGlowColor}`
-                          : 'text-purple-100'
-                      }`}
-                    >
-                      {isOccupied ? seat.occupiedByName : seatNumber === 1 ? 'مقعد المالك' : `مايك ${seatNumber}`}
-                    </span>
-                    {seat.isVerified && (
-                      <LivoVerifiedBadge
-                        size={10}
-                        color={seat.verifiedBadgeColor}
-                        shape={seat.verifiedBadgeShape}
+                  <div className="flex items-center justify-center gap-0.5 mt-1 max-w-[88px]">
+                    {isOccupied ? (
+                      <UserNameWithBadges
+                        displayName={seat.occupiedByName || ''}
+                        nameGlowColor={seat.nameGlowColor}
+                        isVerified={seat.isVerified}
+                        verifiedBadgeColor={seat.verifiedBadgeColor}
+                        verifiedBadgeShape={seat.verifiedBadgeShape}
+                        verifiedBadgeGlow={seat.verifiedBadgeGlow}
+                        customIconUrl={seat.customIconUrl}
+                        customIconGlow={seat.customIconGlow}
+                        customIconAnimated={seat.customIconAnimated}
+                        badgeSize={10}
+                        iconSize={13}
+                        nameClassName="text-[10px] font-bold text-purple-100"
                       />
+                    ) : (
+                      <span className="text-[10px] truncate font-bold text-purple-100">
+                        {seatNumber === 1 ? 'مقعد المالك' : `مايك ${seatNumber}`}
+                      </span>
                     )}
                   </div>
                 </div>
@@ -711,7 +972,9 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
                 أهلاً بك في الغرفة — اكتب رسالة أو أرسل إيموشن لبدء الدردشة
               </div>
             ) : (
-              roomMessages.slice(-14).map((m) => (
+              roomMessages.slice(-14).map((m) => {
+                const senderUser = m.uid ? livoStore.getUserByUid(m.uid) : undefined;
+                return (
                 <div
                   key={m.id}
                   className={`p-1.5 px-2.5 rounded-xl flex items-center gap-1.5 w-fit max-w-[94%] text-[11px] ${
@@ -720,22 +983,22 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
                       : 'bg-black/55 text-white border border-purple-900/40'
                   }`}
                 >
-                  <span
-                    className={`font-bold shrink-0 ${
-                      m.nameGlowColor && m.nameGlowColor !== 'none'
-                        ? `name-glow-${m.nameGlowColor}`
-                        : 'text-amber-400'
-                    }`}
-                  >
-                    {m.user}:
-                  </span>
-                  {m.isVerified && (
-                    <LivoVerifiedBadge
-                      size={11}
-                      color={m.verifiedBadgeColor}
-                      shape={m.verifiedBadgeShape}
-                    />
-                  )}
+                  <UserNameWithBadges
+                    displayName={`${m.user}:`}
+                    nameGlowColor={senderUser?.nameGlowColor ?? m.nameGlowColor}
+                    isVerified={senderUser?.isVerified ?? m.isVerified}
+                    verifiedBadgeColor={senderUser?.verifiedBadgeColor ?? m.verifiedBadgeColor}
+                    verifiedBadgeShape={senderUser?.verifiedBadgeShape ?? m.verifiedBadgeShape}
+                    verifiedBadgeGlow={senderUser?.verifiedBadgeGlow ?? m.verifiedBadgeGlow}
+                    customIconUrl={senderUser?.customIconUrl ?? m.customIconUrl}
+                    customIconGlow={senderUser?.customIconGlow ?? m.customIconGlow}
+                    customIconAnimated={senderUser?.customIconAnimated ?? m.customIconAnimated}
+                    badgeSize={11}
+                    iconSize={14}
+                    nameClassName="font-bold text-amber-400"
+                    className="shrink-0"
+                    truncate={false}
+                  />
                   <span
                     className={`break-words ${
                       m.emojiSize === 'large' ? 'text-3xl leading-none py-0.5 drop-shadow-md animate-bounce' : ''
@@ -744,7 +1007,8 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
                     {m.text}
                   </span>
                 </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>
@@ -1386,7 +1650,7 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
 
               <label className="w-full py-2.5 px-3 rounded-xl bg-purple-900/50 hover:bg-purple-800/60 border border-dashed border-purple-500/60 text-purple-100 text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors">
                 <Upload className="w-4 h-4 text-amber-400" />
-                <span>اختيار صورة من معرض الهاتف</span>
+                <span>اختيار خلفية من ملفاتي / معرض الهاتف 📁</span>
                 <input
                   type="file"
                   accept="image/*"

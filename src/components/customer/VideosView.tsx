@@ -11,6 +11,8 @@ import {
 } from 'lucide-react';
 import { UserProfile, VideoPost } from '../../types';
 import { livoStore } from '../../services/livoStore';
+import { AvatarWithFrame } from '../common/AvatarWithFrame';
+import { UserNameWithBadges } from '../common/UserNameWithBadges';
 
 interface VideosViewProps {
   currentUser: UserProfile;
@@ -61,7 +63,7 @@ export const VideosView: React.FC<VideosViewProps> = ({ currentUser }) => {
     }
 
     livoStore.uploadVideo({
-      authorUid: currentUser?.uid,
+      authorUid: currentUser.uid,
       caption: caption.trim(),
       videoUrl: videoUrl.trim()
     });
@@ -75,6 +77,11 @@ export const VideosView: React.FC<VideosViewProps> = ({ currentUser }) => {
   const handleVideoFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (file.size > 680 * 1024) {
+      setUploadError('حجم ملف الفيديو كبير للحفظ المباشر! يرجى اختيار مقطع أصغر من 680 كيلوبايت أو لصق رابط الفيديو (.mp4)');
+      return;
+    }
+    setUploadError('');
     const reader = new FileReader();
     reader.onload = () => {
       if (typeof reader.result === 'string') {
@@ -119,7 +126,8 @@ export const VideosView: React.FC<VideosViewProps> = ({ currentUser }) => {
         ) : (
           videos.map(video => {
             const isLiked = likedVideoIds.has(video.id);
-            const canDelete = currentUser?.role === 'owner' || video.authorUid === currentUser?.uid;
+            const canDelete = currentUser.role === 'owner' || video.authorUid === currentUser.uid;
+            const authorUser = livoStore.getUserByUid(video.authorUid);
 
             return (
               <div
@@ -127,22 +135,35 @@ export const VideosView: React.FC<VideosViewProps> = ({ currentUser }) => {
                 className="bg-[#150a28] rounded-2xl border border-purple-800/40 overflow-hidden shadow-lg"
               >
                 <div className="p-3 flex items-center justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <div className="relative">
-                      <img
-                        src={video.authorAvatar}
-                        alt={video.authorName}
-                        className="w-9 h-9 rounded-full object-cover border border-purple-500"
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <AvatarWithFrame
+                      sizePx={40}
+                      avatarUrl={authorUser?.avatar || video.authorAvatar}
+                      displayName={authorUser?.displayName || video.authorName}
+                      frameUrl={authorUser?.equippedFrameUrl}
+                      frameGlowColor={authorUser?.frameGlowColor}
+                      frameAnimated={authorUser?.frameAnimated}
+                      customIconUrl={authorUser?.customIconUrl}
+                      customIconGlow={authorUser?.customIconGlow}
+                      customIconAnimated={authorUser?.customIconAnimated}
+                    />
+                    <div className="min-w-0">
+                      <UserNameWithBadges
+                        displayName={authorUser?.displayName || video.authorName}
+                        nameGlowColor={authorUser?.nameGlowColor}
+                        isVerified={authorUser?.isVerified ?? video.isVerified}
+                        verifiedBadgeColor={authorUser?.verifiedBadgeColor}
+                        verifiedBadgeShape={authorUser?.verifiedBadgeShape}
+                        verifiedBadgeGlow={authorUser?.verifiedBadgeGlow}
+                        customIconUrl={authorUser?.customIconUrl}
+                        customIconGlow={authorUser?.customIconGlow}
+                        customIconAnimated={authorUser?.customIconAnimated}
+                        customIconLabel={authorUser?.customIconLabel}
+                        badgeSize={14}
+                        iconSize={18}
+                        nameClassName="text-xs font-bold text-white"
                       />
-                      {video.isVerified && (
-                        <span className="absolute -bottom-1 -right-1 bg-blue-500 rounded-full w-3 h-3 flex items-center justify-center text-[7px] text-white">
-                          ✓
-                        </span>
-                      )}
-                    </div>
-                    <div>
-                      <span className="text-xs font-bold text-white block">{video.authorName}</span>
-                      <span className="text-[10px] text-purple-400 font-digits">
+                      <span className="text-[10px] text-purple-400 font-digits block">
                         UID: {video.authorUid} • {new Date(video.createdAt).toLocaleDateString()}
                       </span>
                     </div>
@@ -222,7 +243,7 @@ export const VideosView: React.FC<VideosViewProps> = ({ currentUser }) => {
               </button>
               <button
                 onClick={() => {
-                  livoStore.deleteVideo(deleteTargetId, currentUser?.uid);
+                  livoStore.deleteVideo(deleteTargetId, currentUser.uid);
                   setDeleteTargetId(null);
                   showToast('تم حذف الفيديو');
                 }}

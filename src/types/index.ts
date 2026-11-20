@@ -5,6 +5,22 @@
 
 export type UserRole = 'user' | 'charging_agent' | 'distributor_agent' | 'agent' | 'supervisor' | 'owner';
 
+export type VerifiedBadgeColor =
+  | 'blue'
+  | 'gold'
+  | 'crimson'
+  | 'emerald'
+  | 'purple'
+  | 'cyan'
+  | 'pink'
+  | 'orange'
+  | 'lime'
+  | 'indigo'
+  | 'silver'
+  | 'rainbow';
+
+export type VerifiedBadgeShape = 'rosette' | 'crown' | 'shield' | 'diamond';
+
 export interface UserProfile {
   uid: string; // Unique 5+ digit alphanumeric ID (Public ID)
   authUid?: string; // Firebase Auth UID
@@ -20,10 +36,10 @@ export interface UserProfile {
   unlockedLevelRewards: number[]; // Array of level numbers whose diamond rewards have been claimed
   isVerified: boolean; // Verified check badge (Admin/Verification only)
   verifiedUntil?: string;
-  verifiedBadgeColor?: 'blue' | 'gold' | 'crimson' | 'emerald' | 'purple' | 'cyan';
-  verifiedBadgeShape?: 'rosette' | 'crown' | 'shield' | 'diamond';
+  verifiedBadgeColor?: VerifiedBadgeColor;
+  verifiedBadgeShape?: VerifiedBadgeShape;
   verifiedBadgeGlow?: boolean;
-  nameGlowColor?: 'none' | 'gold' | 'cyan' | 'crimson' | 'purple' | 'emerald' | 'rainbow';
+  nameGlowColor?: 'none' | 'gold' | 'cyan' | 'crimson' | 'purple' | 'emerald' | 'pink' | 'orange' | 'lime' | 'indigo' | 'silver' | 'rainbow';
   equippedFrame?: string;
   equippedFrameUrl?: string;
   frameGlowColor?: string;
@@ -57,6 +73,12 @@ export interface UserProfile {
   followingUids?: string[];
   blockedUids?: string[];
   notificationsEnabled?: boolean;
+  locationEnabled?: boolean;
+  locationCoords?: {
+    lat: number;
+    lng: number;
+    updatedAt: string;
+  };
   createdAt: string;
 }
 
@@ -211,9 +233,13 @@ export interface RoomMessage {
   text: string;
   isVip?: boolean;
   isVerified?: boolean;
-  verifiedBadgeColor?: 'blue' | 'gold' | 'crimson' | 'emerald' | 'purple' | 'cyan';
-  verifiedBadgeShape?: 'rosette' | 'crown' | 'shield' | 'diamond';
-  nameGlowColor?: 'none' | 'gold' | 'cyan' | 'crimson' | 'purple' | 'emerald' | 'rainbow';
+  verifiedBadgeColor?: VerifiedBadgeColor;
+  verifiedBadgeShape?: VerifiedBadgeShape;
+  verifiedBadgeGlow?: boolean;
+  nameGlowColor?: UserProfile['nameGlowColor'];
+  customIconUrl?: string;
+  customIconGlow?: string;
+  customIconAnimated?: boolean;
   emojiSize?: 'small' | 'large';
   createdAt: string;
 }
@@ -263,14 +289,16 @@ export interface RoomSeat {
   occupiedByName?: string;
   occupiedByAvatar?: string;
   isVerified?: boolean;
-  verifiedBadgeColor?: 'blue' | 'gold' | 'crimson' | 'emerald' | 'purple' | 'cyan';
-  verifiedBadgeShape?: 'rosette' | 'crown' | 'shield' | 'diamond';
-  nameGlowColor?: 'none' | 'gold' | 'cyan' | 'crimson' | 'purple' | 'emerald' | 'rainbow';
+  verifiedBadgeColor?: VerifiedBadgeColor;
+  verifiedBadgeShape?: VerifiedBadgeShape;
+  verifiedBadgeGlow?: boolean;
+  nameGlowColor?: UserProfile['nameGlowColor'];
   equippedFrameUrl?: string;
   frameGlowColor?: string;
   frameAnimated?: boolean;
   customIconUrl?: string;
   customIconGlow?: string;
+  customIconAnimated?: boolean;
   isMuted: boolean;
   isLocked: boolean;
   isMicBlocked?: boolean;
@@ -446,6 +474,7 @@ export interface BanRecord {
 export interface VideoPost {
   id: string;
   authorUid: string;
+  authorAuthUid?: string;
   authorName: string;
   authorAvatar: string;
   isVerified: boolean;

@@ -258,8 +258,12 @@ export const GLOW_COLOR_PRESETS = [
   { id: 'none', label: 'بدون توهج', value: 'none', swatch: '#9ca3af' },
   { id: 'rgba(250, 204, 21, 0.95)', label: 'ذهبي مشع', value: 'rgba(250, 204, 21, 0.95)', swatch: '#facc15' },
   { id: 'rgba(56, 189, 248, 0.95)', label: 'سماوي نيون', value: 'rgba(56, 189, 248, 0.95)', swatch: '#38bdf8' },
+  { id: 'rgba(236, 72, 153, 0.95)', label: 'وردي نيون', value: 'rgba(236, 72, 153, 0.95)', swatch: '#ec4899' },
   { id: 'rgba(239, 68, 68, 0.95)', label: 'أحمر ملكي', value: 'rgba(239, 68, 68, 0.95)', swatch: '#ef4444' },
+  { id: 'rgba(249, 115, 22, 0.95)', label: 'برتقالي ناري', value: 'rgba(249, 115, 22, 0.95)', swatch: '#f97316' },
   { id: 'rgba(168, 85, 247, 0.95)', label: 'أرجواني فاخر', value: 'rgba(168, 85, 247, 0.95)', swatch: '#a855f7' },
-  { id: 'rgba(16, 185, 129, 0.95)', label: 'زمردي متلألئ', value: 'rgba(16, 185, 129, 0.95)', swatch: '#10b981' }
+  { id: 'rgba(16, 185, 129, 0.95)', label: 'زمردي متلألئ', value: 'rgba(16, 185, 129, 0.95)', swatch: '#10b981' },
+  { id: 'rgba(132, 204, 22, 0.95)', label: 'ليموني نيون', value: 'rgba(132, 204, 22, 0.95)', swatch: '#84cc16' },
+  { id: 'rgba(241, 245, 249, 0.95)', label: 'بلاتيني ساطع', value: 'rgba(241, 245, 249, 0.95)', swatch: '#e2e8f0' }
 ];
 
