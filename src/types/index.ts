@@ -263,6 +263,7 @@ export interface VoiceRoom {
   id: string;
   title: string;
   ownerUid: string;
+  ownerAuthUid?: string;
   ownerName: string;
   ownerAvatar: string;
   isOfficial: boolean; // "LIVO Admin" official room

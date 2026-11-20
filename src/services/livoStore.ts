@@ -106,6 +106,7 @@ class LivoStore {
   private rawFirestoreRooms: VoiceRoom[] = [];
   private lastAuthSessionKey: string | null = null;
   private currentAuthEmail: string | null = null;
+  private currentAuthEmailVerified = false;
   private authProtectedUnsubs: Unsubscribe[] = [];
   private recentRoomTouchMs: Map<string, number> = new Map();
   private recentUserTouchMs: Map<string, number> = new Map();
@@ -409,8 +410,20 @@ class LivoStore {
     firebaseService.subscribeToRooms((firestoreRooms) => {
       if (firestoreRooms.length > 0) {
         this.mergeRoomsSafe(firestoreRooms);
+        const canAutoPurge =
+          this.isOwnerEmail(this.currentAuthEmail) &&
+          (
+            this.currentAuthEmailVerified ||
+            this.users.some(
+              (u) => u.uid === '10000' && u.role === 'owner' && u.authUid === firebaseService.getCurrentAuthUid()
+            )
+          );
+        if (canAutoPurge && this.usersLoadedOnce && !this.autoPurgedFakeRooms) {
+          this.autoPurgedFakeRooms = true;
+          this.purgeFakeRoomsFromFirestore();
+        }
         this.notify();
-      } else if (firebaseService.getCurrentAuthUid()) {
+      } else if (this.isAuthorizedAdminEmail(this.currentAuthEmail)) {
         INITIAL_ROOMS.forEach((r) => firebaseService.saveRoom(r));
       }
     });
@@ -488,10 +501,21 @@ class LivoStore {
     this.teardownAuthProtectedListeners();
     this.lastAuthSessionKey = nextKey;
     this.currentAuthEmail = fbUser?.email || null;
+    this.currentAuthEmailVerified = Boolean(fbUser?.emailVerified);
 
     if (!fbUser) {
       this.attachMessageListeners(undefined, false);
       return;
+    }
+
+    if (isOwner && fbUser.emailVerified) {
+      firebaseService.saveStaffAuth(fbUser.uid, {
+        authUid: fbUser.uid,
+        role: 'owner',
+        email: fbUser.email?.trim().toLowerCase() || undefined,
+        isActive: true,
+        updatedAt: new Date().toISOString()
+      });
     }
 
     this.authProtectedUnsubs.push(
@@ -501,7 +525,13 @@ class LivoStore {
         if (this.rawFirestoreRooms.length > 0) {
           this.mergeRoomsSafe(this.rawFirestoreRooms);
         }
-        if (isOwner && !this.autoPurgedFakeRooms && this.rawFirestoreRooms.length > 0) {
+        const canAutoPurge =
+          isOwner &&
+          (
+            fbUser.emailVerified ||
+            this.users.some((u) => u.uid === '10000' && u.role === 'owner' && u.authUid === fbUser.uid)
+          );
+        if (canAutoPurge && !this.autoPurgedFakeRooms && this.rawFirestoreRooms.length > 0) {
           this.autoPurgedFakeRooms = true;
           this.purgeFakeRoomsFromFirestore();
         }
@@ -1874,16 +1904,21 @@ class LivoStore {
   public async purgeFakeRoomsFromFirestore(): Promise<number> {
     const fakeRooms = this.rawFirestoreRooms.filter((r) => this.isFakeRoomRecord(r));
     if (fakeRooms.length === 0) return 0;
+    if (!firebaseService.getCurrentAuthUid()) return 0;
+
     let deletedCount = 0;
+    const deletedIds = new Set<string>();
     for (const r of fakeRooms) {
       try {
         const ok = await firebaseService.deleteRoom(r.id);
-        if (ok) deletedCount += 1;
+        if (ok) {
+          deletedCount += 1;
+          deletedIds.add(r.id);
+        }
       } catch {}
     }
-    const fakeIds = new Set(fakeRooms.map((r) => r.id));
-    this.rawFirestoreRooms = this.rawFirestoreRooms.filter((r) => !fakeIds.has(r.id));
-    this.rooms = this.rooms.filter((r) => !fakeIds.has(r.id) && !this.isFakeRoomRecord(r));
+    this.rawFirestoreRooms = this.rawFirestoreRooms.filter((r) => !deletedIds.has(r.id));
+    this.rooms = this.rooms.filter((r) => !this.isFakeRoomRecord(r));
     this.notify();
     return deletedCount;
   }
@@ -2077,6 +2112,7 @@ class LivoStore {
       id: `room-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       title: data.title.trim() || `غرفة ${owner?.displayName || 'LIVO'}`,
       ownerUid: owner?.uid || data.ownerUid,
+      ownerAuthUid: firebaseService.getCurrentAuthUid() || owner?.authUid || '',
       ownerName: owner?.displayName || 'مضيف',
       ownerAvatar: owner?.avatar || '/assets/livo/customer_icon.jpg',
       isOfficial: false,
@@ -2110,7 +2146,17 @@ class LivoStore {
     }
     this.rooms = this.rooms.filter(r => r.id !== roomId);
     this.notify();
-    firebaseService.deleteRoom(roomId);
+    if (!firebaseService.getCurrentAuthUid()) return;
+    firebaseService.deleteRoom(roomId).then((deleted) => {
+      if (!deleted) {
+        const closedFallback: VoiceRoom = {
+          ...room,
+          status: 'closed',
+          seats: (room.seats || []).map(s => ({ seatIndex: s.seatIndex, isMuted: false, isLocked: s.isLocked }))
+        };
+        firebaseService.saveRoom(closedFallback);
+      }
+    });
   }
 
   public setOfficialRoomStatus(status: 'open' | 'closed' | 'locked_by_admin', announcement?: string): void {
@@ -3439,6 +3485,15 @@ class LivoStore {
     this.supervisors.unshift(sup);
     if (matchedUser && matchedUser.role !== 'owner') {
       this.updateUserProfile(matchedUser.uid, { role: 'supervisor' });
+      if (matchedUser.authUid) {
+        firebaseService.saveStaffAuth(matchedUser.authUid, {
+          authUid: matchedUser.authUid,
+          role: 'supervisor',
+          email: sup.email,
+          isActive: true,
+          updatedAt: new Date().toISOString()
+        });
+      }
     }
     this.notify();
     firebaseService.saveSupervisor(sup);
@@ -3461,6 +3516,19 @@ class LivoStore {
     const user = this.getUserByUid(this.supervisors[idx].uid);
     if (user && user.role !== 'owner') {
       this.updateUserProfile(user.uid, { role: nextActive ? 'supervisor' : 'user' });
+      if (user.authUid) {
+        if (nextActive) {
+          firebaseService.saveStaffAuth(user.authUid, {
+            authUid: user.authUid,
+            role: 'supervisor',
+            email: this.supervisors[idx].email,
+            isActive: true,
+            updatedAt: new Date().toISOString()
+          });
+        } else {
+          firebaseService.deleteStaffAuth(user.authUid);
+        }
+      }
     }
     this.notify();
     firebaseService.saveSupervisor(this.supervisors[idx]);
@@ -3473,6 +3541,9 @@ class LivoStore {
     const user = this.getUserByUid(sup.uid);
     if (user && user.role === 'supervisor') {
       this.updateUserProfile(user.uid, { role: 'user' });
+      if (user.authUid) {
+        firebaseService.deleteStaffAuth(user.authUid);
+      }
     }
     this.supervisors.splice(idx, 1);
     this.notify();

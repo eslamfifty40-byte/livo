@@ -182,7 +182,8 @@ export const COLLECTIONS = {
   STORE_ITEMS: 'store_items',
   RECHARGE_CODES: 'recharge_codes',
   COIN_PACKAGES: 'coin_packages',
-  SUPERVISORS: 'supervisors'
+  SUPERVISORS: 'supervisors',
+  STAFF_AUTH: 'staff_auth'
 };
 
 // 4. Firebase Service Implementation
@@ -718,10 +719,13 @@ export class FirebaseService {
   }
 
   public async deleteRoom(roomId: string): Promise<boolean> {
+    if (!auth.currentUser) {
+      return false;
+    }
     try {
       await deleteDoc(doc(db, COLLECTIONS.ROOMS, roomId));
       return true;
-    } catch (e) {
+    } catch (e: any) {
       console.error('Error deleting room from Firestore:', e);
       return false;
     }
@@ -1234,6 +1238,31 @@ export class FirebaseService {
       return true;
     } catch (e) {
       console.error('Error deleting supervisor from Firestore:', e);
+      return false;
+    }
+  }
+
+  public async saveStaffAuth(
+    authUid: string,
+    data: { authUid: string; role: 'owner' | 'supervisor'; email?: string; isActive: boolean; updatedAt: string }
+  ): Promise<boolean> {
+    if (!authUid || !auth.currentUser) return false;
+    try {
+      await setDoc(doc(db, COLLECTIONS.STAFF_AUTH, authUid), stripUndefined(data), { merge: true });
+      return true;
+    } catch (e) {
+      console.warn('Could not sync staff_auth doc:', e);
+      return false;
+    }
+  }
+
+  public async deleteStaffAuth(authUid: string): Promise<boolean> {
+    if (!authUid || !auth.currentUser) return false;
+    try {
+      await deleteDoc(doc(db, COLLECTIONS.STAFF_AUTH, authUid));
+      return true;
+    } catch (e) {
+      console.warn('Could not delete staff_auth doc:', e);
       return false;
     }
   }

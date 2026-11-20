@@ -16,17 +16,33 @@ service cloud.firestore {
       return isAuthenticated() && (
         (
           request.auth.token.email_verified == true &&
-          (
-            request.auth.token.email == 'livo.admin@gmail.com' ||
-            request.auth.token.email == 'eslamfifty11@gmail.com'
-          )
+          request.auth.token.email is string &&
+          request.auth.token.email.lower() in ['livo.admin@gmail.com', 'eslamfifty11@gmail.com']
         ) ||
-        request.auth.token.role == 'owner'
+        request.auth.token.get('role', '') == 'owner' ||
+        (
+          exists(/databases/$(database)/documents/users/10000) &&
+          get(/databases/$(database)/documents/users/10000).data.get('role', '') == 'owner' &&
+          get(/databases/$(database)/documents/users/10000).data.get('authUid', '') == request.auth.uid
+        ) ||
+        (
+          exists(/databases/$(database)/documents/staff_auth/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/staff_auth/$(request.auth.uid)).data.get('role', '') == 'owner' &&
+          get(/databases/$(database)/documents/staff_auth/$(request.auth.uid)).data.get('isActive', false) == true
+        )
       );
     }
 
     function isAdminOrSupervisor() {
-      return isOwner() || (isAuthenticated() && request.auth.token.role == 'supervisor');
+      return isOwner() || (
+        isAuthenticated() && (
+          request.auth.token.get('role', '') == 'supervisor' ||
+          (
+            exists(/databases/$(database)/documents/staff_auth/$(request.auth.uid)) &&
+            get(/databases/$(database)/documents/staff_auth/$(request.auth.uid)).data.get('isActive', false) == true
+          )
+        )
+      );
     }
 
     // --- VALIDATION PRIMITIVES ---
@@ -134,7 +150,7 @@ service cloud.firestore {
       return isNonEmptyStrMax(data.id, 64) &&
         isNonEmptyStrMax(data.title, 120) &&
         isNonEmptyStrMax(data.ownerUid, 32) &&
-        data.status in ['open', 'closed'] &&
+        data.status in ['open', 'closed', 'locked_by_admin'] &&
         data.get('isOfficial', false) is bool;
     }
 
@@ -167,6 +183,7 @@ service cloud.firestore {
             resource.data.get('authUid', '') == request.auth.uid ||
             (
               resource.data.get('authUid', '') == '' &&
+              resource.data.get('role', 'user') == 'user' &&
               request.resource.data.get('authUid', '') == request.auth.uid
             ) ||
             request.resource.data.diff(resource.data).affectedKeys().hasOnly([
@@ -288,7 +305,13 @@ service cloud.firestore {
           resource.data.get('isOfficial', false) == false &&
           (
             isAdminOrSupervisor() ||
-            get(/databases/$(database)/documents/users/$(resource.data.ownerUid)).data.get('authUid', '') == request.auth.uid
+            resource.data.get('ownerAuthUid', '') == request.auth.uid ||
+            (
+              resource.data.get('ownerUid', '') is string &&
+              resource.data.ownerUid.size() > 0 &&
+              exists(/databases/$(database)/documents/users/$(resource.data.ownerUid)) &&
+              get(/databases/$(database)/documents/users/$(resource.data.ownerUid)).data.get('authUid', '') == request.auth.uid
+            )
           )
         )
       );
@@ -499,7 +522,10 @@ service cloud.firestore {
         (
           isAdminOrSupervisor() ||
           request.resource.data.get('authorAuthUid', '') == request.auth.uid ||
-          get(/databases/$(database)/documents/users/$(request.resource.data.authorUid)).data.get('authUid', '') == request.auth.uid
+          (
+            exists(/databases/$(database)/documents/users/$(request.resource.data.authorUid)) &&
+            get(/databases/$(database)/documents/users/$(request.resource.data.authorUid)).data.get('authUid', '') == request.auth.uid
+          )
         );
 
       allow update: if isValidDocId(videoId) &&
@@ -520,7 +546,12 @@ service cloud.firestore {
           isAuthenticated() &&
           (
             resource.data.get('authorAuthUid', '') == request.auth.uid ||
-            get(/databases/$(database)/documents/users/$(resource.data.authorUid)).data.get('authUid', '') == request.auth.uid
+            (
+              resource.data.get('authorUid', '') is string &&
+              resource.data.authorUid.size() > 0 &&
+              exists(/databases/$(database)/documents/users/$(resource.data.authorUid)) &&
+              get(/databases/$(database)/documents/users/$(resource.data.authorUid)).data.get('authUid', '') == request.auth.uid
+            )
           )
         )
       );
@@ -550,13 +581,19 @@ service cloud.firestore {
         isNonEmptyStrMax(request.resource.data.distributorName, 120) &&
         (
           isAdminOrSupervisor() ||
-          get(/databases/$(database)/documents/users/$(request.resource.data.agentUid)).data.get('authUid', '') == request.auth.uid
+          (
+            exists(/databases/$(database)/documents/users/$(request.resource.data.agentUid)) &&
+            get(/databases/$(database)/documents/users/$(request.resource.data.agentUid)).data.get('authUid', '') == request.auth.uid
+          )
         );
 
       allow delete: if isValidDocId(distId) && (
         isAdminOrSupervisor() ||
         (
           isAuthenticated() &&
+          resource.data.get('agentUid', '') is string &&
+          resource.data.agentUid.size() > 0 &&
+          exists(/databases/$(database)/documents/users/$(resource.data.agentUid)) &&
           get(/databases/$(database)/documents/users/$(resource.data.agentUid)).data.get('authUid', '') == request.auth.uid
         )
       );
@@ -573,13 +610,22 @@ service cloud.firestore {
         request.resource.data.coinsAmount > 0 &&
         (
           isAdminOrSupervisor() ||
-          get(/databases/$(database)/documents/users/$(request.resource.data.agentUid)).data.get('authUid', '') == request.auth.uid
+          (
+            exists(/databases/$(database)/documents/users/$(request.resource.data.agentUid)) &&
+            get(/databases/$(database)/documents/users/$(request.resource.data.agentUid)).data.get('authUid', '') == request.auth.uid
+          )
         );
 
       allow update, delete: if false;
     }
 
-    // 19. Connection health check doc
+    // 19. Staff Auth Role Registry (Owner-managed for supervisors & verified staff)
+    match /staff_auth/{staffAuthUid} {
+      allow read: if isAuthenticated() && (request.auth.uid == staffAuthUid || isOwner());
+      allow create, update, delete: if isValidDocId(staffAuthUid) && isOwner();
+    }
+
+    // 20. Connection health check doc
     match /test/{docId} {
       allow read: if true;
     }
