@@ -1,2 +1,2 @@
-window.onerror=function(m,s,l){document.body.innerHTML+="<pre style=color:red;direction:ltr;white-space:pre-wrap;word-break:break-all;font-size:11px>"+m+" "+s+":"+l+"</pre>"}
-addEventListener("unhandledrejection",function(e){document.body.innerHTML+="<pre style=color:red;direction:ltr;white-space:pre-wrap;word-break:break-all;font-size:11px>"+e.reason+"</pre>"})
+window.onerror=function(m,s,l,c,e){document.body.innerHTML+="<pre style=color:red;direction:ltr;white-space:pre-wrap;word-break:break-all;font-size:11px>"+m+" "+s+":"+l+"\n"+(e&&e.stack?e.stack.split("\n").slice(0,12).join("\n"):"")+"</pre>"};
+addEventListener("unhandledrejection",function(e){document.body.innerHTML+="<pre style=color:red;direction:ltr;white-space:pre-wrap;word-break:break-all;font-size:11px>"+e.reason+"\n"+(e.reason&&e.reason.stack?e.reason.stack.split("\n").slice(0,12).join("\n"):"")+"</pre>"});
