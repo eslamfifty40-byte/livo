@@ -9,3 +9,4 @@ addEventListener("unhandledrejection",function(e){show("REJ "+e.reason)});
 var oe=console.error;
 console.error=function(){var a=[].slice.call(arguments);try{show("ERR "+a.map(function(x){return x&&x.message?x.message:(typeof x==="object"?JSON.stringify(x):String(x))}).join(" "))}catch(x){}oe.apply(console,a)};
 })();
+(function(){var ow=console.warn;console.warn=function(){try{var a=[].slice.call(arguments).map(function(x){return x&&x.message?x.message:String(x)}).join(" ");var d=document.createElement("div");d.style.cssText="position:fixed;top:0;left:0;right:0;z-index:99999;background:#630;color:#fff;font:11px monospace;direction:ltr;padding:4px;word-break:break-all";d.textContent="WARN "+a;d.onclick=function(){d.remove()};document.body.appendChild(d)}catch(x){}ow.apply(console,arguments)}})();
