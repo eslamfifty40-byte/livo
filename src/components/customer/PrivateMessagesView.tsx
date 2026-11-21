@@ -53,7 +53,7 @@ export const PrivateMessagesView: React.FC<PrivateMessagesViewProps> = ({ curren
 
   const blockedSet = new Set(currentUser?.blockedUids || []);
   const threads = livoStore.getChatThreads(currentUser?.uid);
-  const allUsers = livoStore.getGenuineUsers().filter(
+  const allUsers = livoStore.getCustomerUsers().filter(
     u => u.uid !== currentUser?.uid && !blockedSet.has(u.uid)
   );
 

@@ -54,6 +54,7 @@ const MESSAGES_CACHE_KEY = 'livo_messages_cache_v2';
 const MESSAGE_REQUESTS_CACHE_KEY = 'livo_message_requests_cache_v2';
 const USERS_CACHE_KEY = 'livo_users_cache_v1';
 const SAVED_ACCOUNTS_KEY = 'livo_saved_accounts_v1';
+const DEVICE_ID_KEY = 'livo_device_id_v1';
 
 export interface SavedAccountSummary {
   uid: string;
@@ -110,6 +111,8 @@ class LivoStore {
   private authProtectedUnsubs: Unsubscribe[] = [];
   private recentRoomTouchMs: Map<string, number> = new Map();
   private recentUserTouchMs: Map<string, number> = new Map();
+  private syncInFlightByAuthUid: Map<string, Promise<UserProfile>> = new Map();
+  private seededCollections: Set<string> = new Set();
   private messagesUnsub: (() => void) | null = null;
   private messageRequestsUnsub: (() => void) | null = null;
 
@@ -266,7 +269,7 @@ class LivoStore {
     if (Date.now() - touchedAt < 12000) {
       return false;
     }
-    if (this.usersLoadedOnce) {
+    if (!r.ownerAuthUid && this.usersLoadedOnce) {
       const ownerExists = this.users.some(
         (u) => u.uid === r.ownerUid && !this.isFakeUserRecord(u)
       );
@@ -303,7 +306,7 @@ class LivoStore {
     for (const localRoom of this.rooms) {
       if (this.isFakeRoomRecord(localRoom)) continue;
       const touchedAt = this.recentRoomTouchMs.get(localRoom.id) || 0;
-      if (now - touchedAt < 6000) {
+      if (now - touchedAt < 12000) {
         map.set(localRoom.id, {
           ...localRoom,
           seats: this.dedupeRoomSeats(localRoom.seats || [])
@@ -423,7 +426,8 @@ class LivoStore {
           this.purgeFakeRoomsFromFirestore();
         }
         this.notify();
-      } else if (this.isAuthorizedAdminEmail(this.currentAuthEmail)) {
+      } else if (this.isAuthorizedAdminEmail(this.currentAuthEmail) && !this.seededCollections.has('rooms')) {
+        this.seededCollections.add('rooms');
         INITIAL_ROOMS.forEach((r) => firebaseService.saveRoom(r));
       }
     });
@@ -439,7 +443,8 @@ class LivoStore {
       if (configs.length > 0) {
         this.levelConfigs = configs;
         this.notify();
-      } else if (this.isAuthorizedAdminEmail(this.currentAuthEmail)) {
+      } else if (this.isAuthorizedAdminEmail(this.currentAuthEmail) && !this.seededCollections.has('level_configs')) {
+        this.seededCollections.add('level_configs');
         firebaseService.saveLevelConfigs(INITIAL_LEVEL_CONFIGS);
       }
     });
@@ -449,7 +454,8 @@ class LivoStore {
       if (methods.length > 0) {
         this.paymentMethods = methods;
         this.notify();
-      } else if (this.isAuthorizedAdminEmail(this.currentAuthEmail)) {
+      } else if (this.isAuthorizedAdminEmail(this.currentAuthEmail) && !this.seededCollections.has('payment_methods')) {
+        this.seededCollections.add('payment_methods');
         INITIAL_PAYMENT_METHODS.forEach((pm) => firebaseService.savePaymentMethod(pm));
       }
     });
@@ -459,7 +465,8 @@ class LivoStore {
       if (giftsList.length > 0) {
         this.gifts = giftsList;
         this.notify();
-      } else if (this.isAuthorizedAdminEmail(this.currentAuthEmail)) {
+      } else if (this.isAuthorizedAdminEmail(this.currentAuthEmail) && !this.seededCollections.has('gifts')) {
+        this.seededCollections.add('gifts');
         INITIAL_GIFTS.forEach((g) => firebaseService.saveGift(g));
       }
     });
@@ -469,7 +476,8 @@ class LivoStore {
       if (itemsList.length > 0) {
         this.storeItems = itemsList;
         this.notify();
-      } else if (this.isAuthorizedAdminEmail(this.currentAuthEmail)) {
+      } else if (this.isAuthorizedAdminEmail(this.currentAuthEmail) && !this.seededCollections.has('store_items')) {
+        this.seededCollections.add('store_items');
         INITIAL_STORE_ITEMS.forEach((it) => firebaseService.saveStoreItem(it));
       }
     });
@@ -479,7 +487,8 @@ class LivoStore {
       if (pkgs.length > 0) {
         this.coinPackages = pkgs;
         this.notify();
-      } else if (this.isAuthorizedAdminEmail(this.currentAuthEmail)) {
+      } else if (this.isAuthorizedAdminEmail(this.currentAuthEmail) && !this.seededCollections.has('coin_packages')) {
+        this.seededCollections.add('coin_packages');
         INITIAL_COIN_PACKAGES.forEach((pkg) => firebaseService.saveCoinPackage({ ...pkg, isActive: true }));
       }
     });
@@ -577,7 +586,8 @@ class LivoStore {
         if (codesList.length > 0) {
           this.rechargeCodes = codesList;
           this.notify();
-        } else if (this.isAuthorizedAdminEmail(fbUser.email)) {
+        } else if (this.isAuthorizedAdminEmail(fbUser.email) && !this.seededCollections.has('recharge_codes')) {
+          this.seededCollections.add('recharge_codes');
           INITIAL_RECHARGE_CODES.forEach((rc) => firebaseService.saveRechargeCode(rc));
         }
       }),
@@ -611,13 +621,35 @@ class LivoStore {
     return this.users;
   }
 
+  public getOrCreateDeviceId(): string {
+    if (typeof window === 'undefined') return 'dev_ssr';
+    try {
+      const existing = localStorage.getItem(DEVICE_ID_KEY);
+      if (existing && existing.trim().length >= 6) return existing.trim();
+      const generated = `dev_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+      localStorage.setItem(DEVICE_ID_KEY, generated);
+      return generated;
+    } catch {
+      return `dev_${Date.now().toString(36)}`;
+    }
+  }
+
+  public isAdminAccount(user?: Pick<UserProfile, 'uid' | 'role' | 'email'> | null): boolean {
+    if (!user) return false;
+    return user.uid === '10000' || user.role === 'owner' || this.isOwnerEmail(user.email);
+  }
+
   public getGenuineUsers(): UserProfile[] {
     return this.users.filter((u) => !this.isFakeUserRecord(u));
   }
 
-  public searchUsersByQuery(queryText: string): UserProfile[] {
+  public getCustomerUsers(): UserProfile[] {
+    return this.getGenuineUsers().filter((u) => !this.isAdminAccount(u));
+  }
+
+  public searchUsersByQuery(queryText: string, options?: { excludeOwners?: boolean }): UserProfile[] {
     const clean = queryText.trim().toLowerCase();
-    const list = this.getGenuineUsers();
+    const list = options?.excludeOwners ? this.getCustomerUsers() : this.getGenuineUsers();
     if (!clean) return list;
     return list.filter(
       (u) =>
@@ -633,9 +665,12 @@ class LivoStore {
   /**
    * Universal UID lookup (supports 10000 - 100000+ even if not yet cached in memory)
    */
-  public async lookupUserInFirestore(queryText: string): Promise<UserProfile[]> {
+  public async lookupUserInFirestore(
+    queryText: string,
+    options?: { excludeOwners?: boolean }
+  ): Promise<UserProfile[]> {
     const clean = queryText.trim();
-    const localMatches = this.searchUsersByQuery(clean);
+    const localMatches = this.searchUsersByQuery(clean, options);
     if (localMatches.length > 0 || !clean) {
       return localMatches;
     }
@@ -644,14 +679,17 @@ class LivoStore {
       if (serverUser && !this.isFakeUserRecord(serverUser)) {
         this.mergeUsersSafe([serverUser]);
         this.notify();
-        return this.searchUsersByQuery(clean);
+        return this.searchUsersByQuery(clean, options);
       }
     }
     return localMatches;
   }
 
-  public async searchUsersAsync(queryText: string): Promise<UserProfile[]> {
-    return this.lookupUserInFirestore(queryText);
+  public async searchUsersAsync(
+    queryText: string,
+    options?: { excludeOwners?: boolean }
+  ): Promise<UserProfile[]> {
+    return this.lookupUserInFirestore(queryText, options);
   }
 
   public updateUserLocation(
@@ -742,8 +780,9 @@ class LivoStore {
     if (!matched) {
       return { success: false, message: 'بيانات هذا الحساب غير متوفرة حالياً، يرجى تسجيل الدخول به مجدداً.' };
     }
-    if (matched.isBanned) {
-      return { success: false, message: 'هذا الحساب محظور حالياً.' };
+    const activeBan = this.getActiveBanForUser(matched);
+    if (activeBan) {
+      return { success: false, message: `هذا الحساب محظور حالياً: ${activeBan.reason}` };
     }
     this.setCurrentUser(matched.uid);
     return { success: true, message: `تم التبديل إلى حساب ${matched.displayName}`, user: matched };
@@ -764,6 +803,15 @@ class LivoStore {
   }
 
   public setCurrentUser(uid: string): void {
+    const alreadyActive =
+      this.currentUid === uid &&
+      (typeof window === 'undefined' ||
+        (uid
+          ? localStorage.getItem('livo_active_uid') === uid && localStorage.getItem('livo_auth_logged_in') === 'true'
+          : !localStorage.getItem('livo_active_uid')));
+    if (alreadyActive) {
+      return;
+    }
     this.currentUid = uid;
     try {
       if (uid) {
@@ -804,23 +852,47 @@ class LivoStore {
     fbUser: FirebaseUser,
     options?: { accountType?: 'personal' | 'business'; displayName?: string }
   ): Promise<UserProfile> {
-    const fbEmail = fbUser.email?.trim().toLowerCase();
-    const localMatch =
-      this.users.find((u) => u.authUid === fbUser.uid) ||
-      (fbEmail
-        ? this.users.find(
-            (u) => u.email?.trim().toLowerCase() === fbEmail && (!u.authUid || u.authUid === fbUser.uid)
-          )
-        : undefined);
-
-    if (!localMatch) {
-      const serverMatch = await firebaseService.findUserByAuthUidOrEmail(fbUser.uid, fbEmail);
-      if (serverMatch && !this.isFakeUserRecord(serverMatch)) {
-        this.mergeUsersSafe([serverMatch]);
-      }
+    const existingPromise = this.syncInFlightByAuthUid.get(fbUser.uid);
+    if (existingPromise) {
+      return existingPromise;
     }
 
-    return this.syncFirebaseUser(fbUser, options);
+    const task = (async () => {
+      const fbEmail = fbUser.email?.trim().toLowerCase();
+      const deviceId = this.getOrCreateDeviceId();
+      const localMatch =
+        this.users.find((u) => u.authUid === fbUser.uid) ||
+        (fbEmail
+          ? this.users.find(
+              (u) => u.email?.trim().toLowerCase() === fbEmail && (!u.authUid || u.authUid === fbUser.uid)
+            )
+          : undefined);
+
+      let resolvedUid = localMatch?.uid;
+      if (!localMatch) {
+        const serverMatch = await firebaseService.findUserByAuthUidOrEmail(fbUser.uid, fbEmail);
+        if (serverMatch && !this.isFakeUserRecord(serverMatch)) {
+          resolvedUid = serverMatch.uid;
+          this.mergeUsersSafe([serverMatch]);
+        }
+      }
+
+      if (!this.isOwnerEmail(fbEmail)) {
+        const serverBan = await firebaseService.findActiveBanForUser(resolvedUid, deviceId);
+        if (serverBan && !this.bans.some((b) => b.id === serverBan.id)) {
+          this.bans = [serverBan, ...this.bans];
+        }
+      }
+
+      return this.syncFirebaseUser(fbUser, options);
+    })();
+
+    this.syncInFlightByAuthUid.set(fbUser.uid, task);
+    try {
+      return await task;
+    } finally {
+      this.syncInFlightByAuthUid.delete(fbUser.uid);
+    }
   }
 
   /**
@@ -833,6 +905,7 @@ class LivoStore {
   ): UserProfile {
     const fbEmail = fbUser.email?.trim().toLowerCase();
     const isOwner = this.isOwnerEmail(fbEmail);
+    const deviceId = this.getOrCreateDeviceId();
     const activeSupervisor = fbEmail
       ? this.supervisors.find(s => s.isActive && s.email.trim().toLowerCase() === fbEmail)
       : undefined;
@@ -850,6 +923,7 @@ class LivoStore {
     if (matched) {
       const updates: Partial<UserProfile> = {};
       if (!matched.authUid) updates.authUid = fbUser.uid;
+      if (!matched.deviceId && !isOwner) updates.deviceId = deviceId;
       if (fbEmail && !matched.email) updates.email = fbEmail;
       if (fbUser.photoURL && (!matched.avatar || matched.avatar === '/assets/livo/customer_icon.jpg')) {
         updates.avatar = fbUser.photoURL;
@@ -882,6 +956,7 @@ class LivoStore {
       avatar: fbUser.photoURL || '/assets/livo/customer_icon.jpg',
       role: resolvedRole,
       accountType: options?.accountType || 'personal',
+      deviceId: isOwner ? undefined : deviceId,
       coins: 0,
       diamonds: 0,
       level: isOwner ? 50 : 0,
@@ -997,6 +1072,7 @@ class LivoStore {
       avatar: '/assets/livo/customer_icon.jpg',
       role: isOwnerEmail ? 'owner' : 'user',
       accountType: accountType || 'personal',
+      deviceId: isOwnerEmail ? undefined : this.getOrCreateDeviceId(),
       phoneNumber: phoneNumber?.trim(),
       isPhoneVerified: phoneNumber ? true : false,
       coins: isOwnerEmail ? 500000 : 0, // STRICT: ZERO free coins upon registration for regular users
@@ -1445,14 +1521,21 @@ class LivoStore {
     return newReq;
   }
 
-  public reviewVerificationRequest(reqId: string, status: 'approved' | 'rejected', adminEmail: string = 'livo.admin@gmail.com'): void {
+  public reviewVerificationRequest(
+    reqId: string,
+    status: 'approved' | 'rejected',
+    adminEmail: string = 'livo.admin@gmail.com',
+    rejectReason?: string
+  ): void {
     const index = this.verifications.findIndex(v => v.id === reqId);
     if (index === -1) return;
 
     const req = this.verifications[index];
+    const cleanReason = rejectReason?.trim();
     const updated: BlueVerificationRequest = {
       ...req,
       status,
+      rejectReason: status === 'rejected' ? (cleanReason || 'الإيصال غير واضح أو غير مطابق') : undefined,
       reviewedBy: adminEmail,
       reviewedAt: new Date().toISOString()
     };
@@ -1474,7 +1557,9 @@ class LivoStore {
       this.sendDirectMessage({
         senderUid: '10000',
         receiverUid: req.uid,
-        content: 'نأسف، لم يتم قبول طلب التوثيق الأزرق بعد مراجعة الإيصال المرفق من قبل الإدارة.'
+        content: cleanReason
+          ? `نأسف، لم يتم قبول طلب التوثيق الأزرق. السبب: ${cleanReason}`
+          : 'نأسف، لم يتم قبول طلب التوثيق الأزرق بعد مراجعة الإيصال المرفق من قبل الإدارة.'
       });
     }
 
@@ -1525,14 +1610,22 @@ class LivoStore {
     return { success: true, message: `تم تقديم طلب سحب ${netPayoutEGP.toFixed(2)} ج.م بنجاح` };
   }
 
-  public reviewWithdrawalRequest(reqId: string, status: 'approved' | 'rejected', transferProofUrl?: string, adminEmail: string = 'livo.admin@gmail.com'): void {
+  public reviewWithdrawalRequest(
+    reqId: string,
+    status: 'approved' | 'rejected',
+    transferProofUrl?: string,
+    adminEmail: string = 'livo.admin@gmail.com',
+    rejectReason?: string
+  ): void {
     const index = this.withdrawals.findIndex(w => w.id === reqId);
     if (index === -1) return;
 
     const req = this.withdrawals[index];
+    const cleanReason = rejectReason?.trim();
     const updated: WithdrawalRequest = {
       ...req,
       status,
+      rejectReason: status === 'rejected' ? (cleanReason || 'بيانات التحويل غير مكتملة') : undefined,
       transferProofUrl,
       reviewedBy: adminEmail,
       reviewedAt: new Date().toISOString()
@@ -1544,6 +1637,19 @@ class LivoStore {
       if (user) {
         this.updateUserProfile(req.uid, { coins: user.coins + req.totalCoins });
       }
+      this.sendDirectMessage({
+        senderUid: '10000',
+        receiverUid: req.uid,
+        content: cleanReason
+          ? `تم رفض طلب سحب ${req.totalCoins.toLocaleString()} كوينز واسترجاع الرصيد إلى حسابك. السبب: ${cleanReason}`
+          : `تم رفض طلب سحب ${req.totalCoins.toLocaleString()} كوينز واسترجاع الرصيد إلى حسابك.`
+      });
+    } else if (status === 'approved') {
+      this.sendDirectMessage({
+        senderUid: '10000',
+        receiverUid: req.uid,
+        content: `✅ تمت الموافقة على طلب سحب مبلغ ${req.netPayoutEGP.toFixed(2)} ج.م وتحويله بنجاح.`
+      });
     }
 
     this.notify();
@@ -1553,6 +1659,77 @@ class LivoStore {
   // --- BAN & SANCTIONS MANAGEMENT ---
   public getBans(): BanRecord[] {
     return this.bans;
+  }
+
+  private getBanExpiresAt(b: BanRecord): string | undefined {
+    if (b.expiresAt) return b.expiresAt;
+    if (b.duration === 'temporary') {
+      const days = b.durationDays || 7;
+      const base = new Date(b.createdAt);
+      if (!isNaN(base.getTime())) {
+        base.setDate(base.getDate() + days);
+        return base.toISOString();
+      }
+    }
+    return undefined;
+  }
+
+  private isBanExpired(expiresAt?: string): boolean {
+    if (!expiresAt) return false;
+    const ms = new Date(expiresAt).getTime();
+    return !isNaN(ms) && ms <= Date.now();
+  }
+
+  public getActiveBanForUser(user?: UserProfile | null): {
+    isBanned: boolean;
+    banId?: string;
+    banType: 'account' | 'device' | 'both';
+    reason: string;
+    bannedAt?: string;
+    expiresAt?: string;
+  } | null {
+    if (!user || this.isAdminAccount(user)) return null;
+
+    const currentDeviceId = this.getOrCreateDeviceId();
+    const userDeviceIds = new Set([currentDeviceId, user.deviceId].filter(Boolean) as string[]);
+
+    const matchingBan = this.bans.find((b) => {
+      if (b.status !== 'active') return false;
+      const exp = this.getBanExpiresAt(b);
+      if (this.isBanExpired(exp)) return false;
+      if (b.uid === user.uid) return true;
+      if ((b.banType === 'device' || b.banType === 'both') && b.deviceId && userDeviceIds.has(b.deviceId)) {
+        return true;
+      }
+      return false;
+    });
+
+    if (matchingBan) {
+      return {
+        isBanned: true,
+        banId: matchingBan.id,
+        banType: matchingBan.banType,
+        reason: matchingBan.reason || 'مخالفة معايير المجتمع',
+        bannedAt: matchingBan.createdAt,
+        expiresAt: this.getBanExpiresAt(matchingBan)
+      };
+    }
+
+    if (user.isBanned) {
+      const exp = user.banDetails?.expiresAt;
+      if (this.isBanExpired(exp)) {
+        return null;
+      }
+      return {
+        isBanned: true,
+        banType: user.banDetails?.type || 'account',
+        reason: user.banDetails?.reason || 'مخالفة معايير المجتمع',
+        bannedAt: user.banDetails?.bannedAt,
+        expiresAt: exp
+      };
+    }
+
+    return null;
   }
 
   public banUser(data: {
@@ -1565,7 +1742,7 @@ class LivoStore {
   }): { success: boolean; message: string } {
     const user = this.getUserByUid(data.uid);
     if (!user) return { success: false, message: 'المستخدم غير موجود' };
-    if (user.role === 'owner') return { success: false, message: 'لا يمكن حظر حساب المالك' };
+    if (this.isAdminAccount(user)) return { success: false, message: 'لا يمكن حظر حساب المالك' };
 
     let expiresAt: string | undefined = undefined;
     if (data.duration === 'temporary' && data.durationDays) {
@@ -1582,7 +1759,8 @@ class LivoStore {
       deviceId: user.deviceId || `dev_${user.uid}`,
       banType: data.banType,
       duration: data.duration,
-      durationDays: data.durationDays,
+      durationDays: data.duration === 'temporary' ? (data.durationDays || 7) : undefined,
+      expiresAt,
       reason: data.reason.trim() || 'مخالفة معايير المجتمع',
       bannedBy: data.bannedBy || 'livo.admin@gmail.com',
       createdAt: new Date().toISOString(),
@@ -1612,14 +1790,31 @@ class LivoStore {
     if (index === -1) return { success: false, message: 'سجل الحظر غير موجود' };
 
     const ban = this.bans[index];
+    const cleanReason = unbanReason.trim() || 'رفع الحظر بقرار إداري';
+    const nowIso = new Date().toISOString();
     const updated: BanRecord = {
       ...ban,
       status: 'unbanned',
       unbannedBy,
-      unbannedAt: new Date().toISOString(),
-      unbanReason: unbanReason.trim() || 'رفع الحظر بقرار إداري'
+      unbannedAt: nowIso,
+      unbanReason: cleanReason
     };
     this.bans[index] = updated;
+
+    // Also resolve any other active bans tied to the same UID so unban always clears access completely
+    this.bans.forEach((b, i) => {
+      if (i !== index && b.uid === ban.uid && b.status === 'active') {
+        const extraUpdated: BanRecord = {
+          ...b,
+          status: 'unbanned',
+          unbannedBy,
+          unbannedAt: nowIso,
+          unbanReason: cleanReason
+        };
+        this.bans[i] = extraUpdated;
+        firebaseService.saveBan(extraUpdated);
+      }
+    });
 
     this.updateUserProfile(ban.uid, {
       isBanned: false,
@@ -3483,6 +3678,13 @@ class LivoStore {
     };
 
     this.supervisors.unshift(sup);
+    firebaseService.saveStaffAuth(sup.email, {
+      authUid: matchedUser?.authUid || sup.email,
+      role: 'supervisor',
+      email: sup.email,
+      isActive: true,
+      updatedAt: new Date().toISOString()
+    });
     if (matchedUser && matchedUser.role !== 'owner') {
       this.updateUserProfile(matchedUser.uid, { role: 'supervisor' });
       if (matchedUser.authUid) {
@@ -3513,6 +3715,18 @@ class LivoStore {
     if (idx === -1) return;
     const nextActive = !this.supervisors[idx].isActive;
     this.supervisors[idx] = { ...this.supervisors[idx], isActive: nextActive };
+    const supEmail = this.supervisors[idx].email.trim().toLowerCase();
+    if (nextActive) {
+      firebaseService.saveStaffAuth(supEmail, {
+        authUid: supEmail,
+        role: 'supervisor',
+        email: supEmail,
+        isActive: true,
+        updatedAt: new Date().toISOString()
+      });
+    } else {
+      firebaseService.deleteStaffAuth(supEmail);
+    }
     const user = this.getUserByUid(this.supervisors[idx].uid);
     if (user && user.role !== 'owner') {
       this.updateUserProfile(user.uid, { role: nextActive ? 'supervisor' : 'user' });
@@ -3521,7 +3735,7 @@ class LivoStore {
           firebaseService.saveStaffAuth(user.authUid, {
             authUid: user.authUid,
             role: 'supervisor',
-            email: this.supervisors[idx].email,
+            email: supEmail,
             isActive: true,
             updatedAt: new Date().toISOString()
           });
@@ -3538,6 +3752,8 @@ class LivoStore {
     const idx = this.supervisors.findIndex(s => s.id === id);
     if (idx === -1) return false;
     const sup = this.supervisors[idx];
+    const supEmail = sup.email.trim().toLowerCase();
+    firebaseService.deleteStaffAuth(supEmail);
     const user = this.getUserByUid(sup.uid);
     if (user && user.role === 'supervisor') {
       this.updateUserProfile(user.uid, { role: 'user' });

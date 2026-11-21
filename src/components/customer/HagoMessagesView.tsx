@@ -76,7 +76,7 @@ export const HagoMessagesView: React.FC<HagoMessagesViewProps> = ({
   const [chatReply, setChatReply] = useState('');
   const [requestIntroMsg, setRequestIntroMsg] = useState('');
   const [messages, setMessages] = useState<DirectMessage[]>(() => livoStore.getMessages());
-  const [genuineUsers, setGenuineUsers] = useState<UserProfile[]>(() => livoStore.getGenuineUsers());
+  const [genuineUsers, setGenuineUsers] = useState<UserProfile[]>(() => livoStore.getCustomerUsers());
   const [msgRequests, setMsgRequests] = useState<MessageRequest[]>(() => livoStore.getMessageRequests());
 
   // In-app modals & notifications (Zero window.alert / window.open)
@@ -100,7 +100,7 @@ export const HagoMessagesView: React.FC<HagoMessagesViewProps> = ({
   useEffect(() => {
     const sync = () => {
       setMessages([...livoStore.getMessages()]);
-      setGenuineUsers([...livoStore.getGenuineUsers()]);
+      setGenuineUsers([...livoStore.getCustomerUsers()]);
       setMsgRequests([...livoStore.getMessageRequests()]);
     };
     sync();
@@ -120,7 +120,7 @@ export const HagoMessagesView: React.FC<HagoMessagesViewProps> = ({
     setSearchingFriendUid(true);
     const t = setTimeout(async () => {
       try {
-        const found = await livoStore.lookupUserInFirestore(q);
+        const found = await livoStore.lookupUserInFirestore(q, { excludeOwners: true });
         if (!cancelled) setRemoteFriendResults(found);
       } finally {
         if (!cancelled) setSearchingFriendUid(false);

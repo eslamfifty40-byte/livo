@@ -34,8 +34,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setAuthMode(initialMode);
       setErrorMsg('');
       setInfoMsg('');
+      setLoading(false);
     }
   }, [initialMode, isOpen]);
+
+  const redirectTimerRef = React.useRef<number | null>(null);
+  useEffect(() => {
+    return () => {
+      if (redirectTimerRef.current !== null) {
+        window.clearTimeout(redirectTimerRef.current);
+      }
+    };
+  }, []);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -74,6 +84,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       const res = await firebaseService.loginCustomerWithGoogle(preferRedirect);
       if (res.redirectStarted) {
         setInfoMsg('جاري تحويلك إلى صفحة Google الآمنة لتأكيد الدخول...');
+        if (redirectTimerRef.current !== null) window.clearTimeout(redirectTimerRef.current);
+        redirectTimerRef.current = window.setTimeout(() => {
+          setLoading(false);
+        }, 6000);
         return;
       }
       if (!res.success || !res.user) {
@@ -83,6 +97,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       }
 
       const syncedUser = await livoStore.syncFirebaseUserAsync(res.user);
+      const activeBan = livoStore.getActiveBanForUser(syncedUser);
+      if (activeBan) {
+        await firebaseService.logout();
+        livoStore.logoutSession();
+        setLoading(false);
+        setErrorMsg(`تم حظر هذا الحساب (${activeBan.reason}). يمكنك التواصل مع الدعم الفني.`);
+        return;
+      }
       setLoading(false);
       onSuccess(syncedUser);
       onClose();
@@ -120,6 +142,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           return;
         }
         const synced = await livoStore.syncFirebaseUserAsync(res.user);
+        const activeBan = livoStore.getActiveBanForUser(synced);
+        if (activeBan) {
+          await firebaseService.logout();
+          livoStore.logoutSession();
+          setLoading(false);
+          setErrorMsg(`تم حظر هذا الحساب (${activeBan.reason}).`);
+          return;
+        }
         setLoading(false);
         onSuccess(synced);
         onClose();
@@ -193,6 +223,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       const users = livoStore.getUsers();
       const existingByPhone = users.find((u) => u.phoneNumber === cleanPhone);
       if (existingByPhone) {
+        const activeBan = livoStore.getActiveBanForUser(existingByPhone);
+        if (activeBan) {
+          await firebaseService.logout();
+          livoStore.logoutSession();
+          setLoading(false);
+          setErrorMsg(`تم حظر هذا الحساب (${activeBan.reason}).`);
+          return;
+        }
         if (existingByPhone.authUid !== authRes.user.uid) {
           livoStore.updateUserProfile(existingByPhone.uid, { authUid: authRes.user.uid, isPhoneVerified: true });
         }
@@ -206,6 +244,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       const existingByAuth = await firebaseService.findUserByAuthUidOrEmail(authRes.user.uid, authRes.user.email);
       if (existingByAuth) {
         const synced = await livoStore.syncFirebaseUserAsync(authRes.user);
+        const activeBan = livoStore.getActiveBanForUser(synced);
+        if (activeBan) {
+          await firebaseService.logout();
+          livoStore.logoutSession();
+          setLoading(false);
+          setErrorMsg(`تم حظر هذا الحساب (${activeBan.reason}).`);
+          return;
+        }
         setLoading(false);
         onSuccess(synced);
         onClose();

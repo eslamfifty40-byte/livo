@@ -432,6 +432,7 @@ export interface BlueVerificationRequest {
   paymentPhone: string;
   receiptUrl: string;
   status: 'pending' | 'approved' | 'rejected';
+  rejectReason?: string;
   createdAt: string;
   reviewedBy?: string;
   reviewedAt?: string;
@@ -448,6 +449,7 @@ export interface WithdrawalRequest {
   paymentMethod: 'vodafone_cash' | 'instapay' | 'bank_transfer';
   paymentDetails: string;
   status: 'pending' | 'approved' | 'rejected';
+  rejectReason?: string;
   transferProofUrl?: string;
   createdAt: string;
   reviewedBy?: string;
@@ -463,6 +465,7 @@ export interface BanRecord {
   banType: 'account' | 'device' | 'both';
   duration: 'temporary' | 'permanent';
   durationDays?: number;
+  expiresAt?: string;
   reason: string;
   bannedBy: string;
   createdAt: string;

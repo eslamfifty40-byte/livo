@@ -49,7 +49,7 @@ export const AgencyModal: React.FC<AgencyModalProps> = ({ user, isOpen, onClose 
     status: string;
     isVerified?: boolean;
   }> = livoStore
-    .getGenuineUsers()
+    .getCustomerUsers()
     .filter(u => u.uid !== user.uid && Boolean(user.agencyName && u.agencyName === user.agencyName))
     .map(u => ({
       uid: u.uid,

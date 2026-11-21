@@ -61,7 +61,7 @@ export const SupportTicketsModal: React.FC<SupportTicketsModalProps> = ({ isOpen
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 animate-in fade-in select-none">
+    <div className="fixed inset-0 z-[95] bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 animate-in fade-in select-none">
       <div className="bg-white text-gray-900 rounded-3xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden shadow-2xl border border-gray-100">
         
         {/* Header */}

@@ -23,7 +23,7 @@ const ORBIT_SLOTS = [
 
 export const DiscoverView: React.FC<DiscoverViewProps> = ({ currentUser, onStartChat, onRequireAuth }) => {
   const [activeCategory, setActiveCategory] = useState<'party' | 'sing' | 'popular' | 'nearby'>('party');
-  const [genuineUsers, setGenuineUsers] = useState<UserProfile[]>(() => livoStore.getGenuineUsers());
+  const [genuineUsers, setGenuineUsers] = useState<UserProfile[]>(() => livoStore.getCustomerUsers());
   const [rooms, setRooms] = useState(() => livoStore.getRooms());
   const [shuffleOffset, setShuffleOffset] = useState(0);
   const [showAll, setShowAll] = useState(false);
@@ -39,7 +39,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({ currentUser, onStart
 
   useEffect(() => {
     const sync = () => {
-      setGenuineUsers([...livoStore.getGenuineUsers()]);
+      setGenuineUsers([...livoStore.getCustomerUsers()]);
       setRooms([...livoStore.getRooms()]);
     };
     const unsub = livoStore.subscribe(sync);
@@ -58,7 +58,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({ currentUser, onStart
     setSearchingUid(true);
     const timer = setTimeout(async () => {
       try {
-        const found = await livoStore.lookupUserInFirestore(q);
+        const found = await livoStore.lookupUserInFirestore(q, { excludeOwners: true });
         if (!cancelled) {
           setRemoteMatchedUsers(found);
         }

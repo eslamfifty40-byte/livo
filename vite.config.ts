@@ -8,14 +8,15 @@ export default defineConfig(() => {
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, '.'),
+        '@': path.resolve(import.meta.dirname, '.'),
       },
     },
     build: {
+      chunkSizeWarningLimit: 2000,
       rollupOptions: {
         input: {
-          main: path.resolve(__dirname, 'index.html'),
-          admin: path.resolve(__dirname, 'admin.html'),
+          main: path.resolve(import.meta.dirname, 'index.html'),
+          admin: path.resolve(import.meta.dirname, 'admin.html'),
         },
       },
     },

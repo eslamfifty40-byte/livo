@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Shield,
   Users,
@@ -116,6 +116,9 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
 
   // Local state synced directly with livoStore & Firebase
   const [users, setUsers] = useState<UserProfile[]>(livoStore.getGenuineUsers());
+  const usersRef = useRef<UserProfile[]>(users);
+  usersRef.current = users;
+  const lookedUpUidsRef = useRef<Set<string>>(new Set());
   const [rooms, setRooms] = useState<VoiceRoom[]>(livoStore.getAllRoomsForAdmin());
   const [roomsSearchQuery, setRoomsSearchQuery] = useState('');
   const [isPurgingFakeRooms, setIsPurgingFakeRooms] = useState(false);
@@ -351,7 +354,13 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
       setSupervisors([...livoStore.getSupervisors()]);
       setAllMessages([...livoStore.getMessages()]);
       if (latestFbUser) {
-        evaluateAdminAuth(latestFbUser);
+        const em = latestFbUser.email?.trim().toLowerCase() || '';
+        const authorized = livoStore.isAuthorizedAdminEmail(em);
+        setIsAdminLoggedIn((prev) => (prev === authorized ? prev : authorized));
+        setActiveAdminEmail((prev) => {
+          const next = authorized ? em : '';
+          return prev === next ? prev : next;
+        });
       }
     });
 
@@ -382,6 +391,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
 
   useEffect(() => {
     if (!isAdminLoggedIn) return;
+    const currentUsers = usersRef.current;
     const candidates = [
       usersDirectoryQuery,
       supportSearchQuery,
@@ -398,11 +408,18 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
       supervisorsSearchQuery
     ]
       .map((q) => q.trim())
-      .filter((q) => /^\d{5,8}$/.test(q) && !users.some((u) => u.uid === q));
+      .filter(
+        (q) =>
+          /^\d{5,8}$/.test(q) &&
+          !currentUsers.some((u) => u.uid === q) &&
+          !lookedUpUidsRef.current.has(q)
+      );
 
     if (candidates.length === 0) return;
+    const uniqueCandidates = Array.from(new Set(candidates));
     const timer = setTimeout(() => {
-      candidates.forEach((uidQuery) => {
+      uniqueCandidates.forEach((uidQuery) => {
+        lookedUpUidsRef.current.add(uidQuery);
         livoStore.lookupUserInFirestore(uidQuery).then((res) => {
           if (res.length > 0) {
             setUsers([...livoStore.getGenuineUsers()]);
@@ -426,8 +443,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
     withdrawalsSearchQuery,
     inboxSearchQuery,
     logsSearchQuery,
-    supervisorsSearchQuery,
-    users
+    supervisorsSearchQuery
   ]);
 
   // Admin Login with Firebase Auth and real server-side validation (Owner + Active Supervisors)
@@ -464,14 +480,31 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
   };
 
   // Google Login for Admin (Supports Popup + Redirect fallback for Mobile/Brave)
+  const adminRedirectTimerRef = useRef<number | null>(null);
+  useEffect(() => {
+    return () => {
+      if (adminRedirectTimerRef.current !== null) {
+        window.clearTimeout(adminRedirectTimerRef.current);
+      }
+    };
+  }, []);
+
   const handleGoogleLogin = async (preferRedirect: boolean = false) => {
     setAuthError('');
     setAuthInfo('');
     setIsLoggingIn(true);
+    let redirectInitiated = false;
     try {
       const res = await firebaseService.loginAdminWithGoogle(preferRedirect);
       if (res.redirectStarted) {
+        redirectInitiated = true;
         setAuthInfo('جاري التوجيه إلى صفحة Google الآمنة لتأكيد دخول الإدارة...');
+        if (adminRedirectTimerRef.current !== null) {
+          window.clearTimeout(adminRedirectTimerRef.current);
+        }
+        adminRedirectTimerRef.current = window.setTimeout(() => {
+          setIsLoggingIn(false);
+        }, 6000);
         return;
       }
       if (res.success && res.user) {
@@ -494,7 +527,9 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
     } catch (e: any) {
       setAuthError(e?.message || 'حدث خطأ أثناء الاتصال بـ Google');
     } finally {
-      setIsLoggingIn(false);
+      if (!redirectInitiated) {
+        setIsLoggingIn(false);
+      }
     }
   };
 
@@ -541,8 +576,46 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
     setCosCustomIconAnimated(target.customIconAnimated !== false);
   };
 
-  // Recharges Handlers
-  const actorEmail = activeAdminEmail || 'livo.admin@gmail.com';
+  // Recharges & Actor Authority Helpers
+  const actorEmail = firebaseService.getCurrentAuthEmail() || activeAdminEmail || 'livo.admin@gmail.com';
+  const isOwnerSession = livoStore.isOwnerEmail(actorEmail);
+  const currentSupervisorRecord = !isOwnerSession && actorEmail
+    ? supervisors.find((s) => s.isActive && s.email.trim().toLowerCase() === actorEmail.trim().toLowerCase())
+    : undefined;
+
+  const canAccessSection = (sectionId: string): boolean => {
+    if (isOwnerSession) return true;
+    if (sectionId === 'dashboard') return true;
+    if (sectionId === 'supervisors') return false;
+    const permMap: Record<string, string> = {
+      direct_support_hub: 'support',
+      inbox: 'support',
+      ads: 'support',
+      recharges: 'recharges',
+      payment_settings: 'recharges',
+      recharge_codes: 'recharges',
+      manual_coins: 'recharges',
+      pricing: 'recharges',
+      financial_logs: 'recharges',
+      users: 'users',
+      cosmetics_studio: 'users',
+      agencies: 'agencies',
+      verifications: 'verifications',
+      withdrawals: 'withdrawals',
+      store_items: 'rooms',
+      rooms: 'rooms',
+      official_room: 'rooms',
+      bans: 'bans'
+    };
+    const reqPerm = permMap[sectionId];
+    return reqPerm ? Boolean(currentSupervisorRecord?.permissions?.includes(reqPerm)) : false;
+  };
+
+  useEffect(() => {
+    if (isAdminLoggedIn && !canAccessSection(activeSection)) {
+      setActiveSection('dashboard');
+    }
+  }, [isAdminLoggedIn, activeSection, actorEmail, supervisors.length]);
 
   const handleApproveRecharge = (reqId: string) => {
     const res = livoStore.approveRechargeRequest(reqId, actorEmail);
@@ -931,7 +1004,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
   // Verifications Handlers
   const handleConfirmRejectVerification = () => {
     if (!rejectVerificationId) return;
-    livoStore.reviewVerificationRequest(rejectVerificationId, 'rejected', actorEmail);
+    livoStore.reviewVerificationRequest(rejectVerificationId, 'rejected', actorEmail, rejectVerificationReason);
     showToast('تم رفض طلب التوثيق وإشعار المستخدم');
     setRejectVerificationId(null);
     setRejectVerificationReason('');
@@ -940,7 +1013,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
   // Withdrawals Handlers
   const handleConfirmRejectWithdrawal = () => {
     if (!rejectWithdrawalId) return;
-    livoStore.reviewWithdrawalRequest(rejectWithdrawalId, 'rejected', undefined, actorEmail);
+    livoStore.reviewWithdrawalRequest(rejectWithdrawalId, 'rejected', undefined, actorEmail, rejectWithdrawalReason);
     showToast('تم رفض طلب السحب واسترجاع الكوينز لحساب المستخدم تلقائياً');
     setRejectWithdrawalId(null);
     setRejectWithdrawalReason('');
@@ -1059,15 +1132,20 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
       )}
 
       {/* Admin Top Header */}
-      <div className="bg-white border-b border-gray-200 px-4 sm:px-6 py-3 flex items-center justify-between">
+      <div className="bg-white border-b border-gray-200 px-4 sm:px-6 py-3 flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-3">
           <LivoAdminAppIcon size={36} />
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <h1 className="font-black text-sm sm:text-base text-gray-900">منظومة LIVO — لوحة الإدارة الرسمية</h1>
               <span className="text-[10px] bg-[#FFE600] text-black px-2 py-0.5 rounded-md font-black">
-                Owner Authority Active
+                {isOwnerSession ? 'Owner Authority Active' : 'Supervisor Access Active'}
               </span>
+              {actorEmail && (
+                <span className="text-[10px] bg-gray-100 border border-gray-200 text-gray-800 px-2 py-0.5 rounded-md font-bold font-digits" dir="ltr">
+                  {actorEmail}
+                </span>
+              )}
             </div>
             <p className="text-[11px] text-gray-500">
               متصلة بقاعدة بيانات LIVO الموحدة والمزامنة اللحظية
@@ -1102,249 +1180,287 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
             <span>الإحصائيات والمؤشرات</span>
           </button>
 
-          <button
-            onClick={() => setActiveSection('direct_support_hub')}
-            className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'direct_support_hub' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <MessageSquare className="w-4 h-4 text-emerald-600" />
-              <span>مركز الإدارة والدعم المباشر</span>
-            </div>
-            {unreadSupportCount > 0 && (
-              <span className="w-5 h-5 rounded-full bg-emerald-500 text-white font-digits text-[10px] flex items-center justify-center font-black animate-pulse">
-                {unreadSupportCount}
+          {canAccessSection('direct_support_hub') && (
+            <button
+              onClick={() => setActiveSection('direct_support_hub')}
+              className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeSection === 'direct_support_hub' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <MessageSquare className="w-4 h-4 text-emerald-600" />
+                <span>مركز الإدارة والدعم المباشر</span>
+              </div>
+              {unreadSupportCount > 0 && (
+                <span className="w-5 h-5 rounded-full bg-emerald-500 text-white font-digits text-[10px] flex items-center justify-center font-black animate-pulse">
+                  {unreadSupportCount}
+                </span>
+              )}
+            </button>
+          )}
+
+          {canAccessSection('inbox') && (
+            <button
+              onClick={() => setActiveSection('inbox')}
+              className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeSection === 'inbox' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <Inbox className="w-4 h-4 text-amber-600" />
+                <span>صندوق الوارد والشكاوى</span>
+              </div>
+              {pendingTicketsCount > 0 && (
+                <span className="w-5 h-5 rounded-full bg-red-500 text-white font-digits text-[10px] flex items-center justify-center font-black animate-pulse">
+                  {pendingTicketsCount}
+                </span>
+              )}
+            </button>
+          )}
+
+          {canAccessSection('ads') && (
+            <button
+              onClick={() => setActiveSection('ads')}
+              className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeSection === 'ads' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <Megaphone className="w-4 h-4 text-amber-600" />
+                <span>مركز إدارة الإعلانات</span>
+              </div>
+              {activeAdsCount > 0 && (
+                <span className="w-5 h-5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 font-digits text-[10px] flex items-center justify-center font-black">
+                  {activeAdsCount}
+                </span>
+              )}
+            </button>
+          )}
+
+          {canAccessSection('recharges') && (
+            <button
+              onClick={() => setActiveSection('recharges')}
+              className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeSection === 'recharges' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <CreditCard className="w-4 h-4" />
+                <span>طلبات الشحن</span>
+              </div>
+              {pendingRechargesCount > 0 && (
+                <span className="w-5 h-5 rounded-full bg-red-500 text-white font-digits text-[10px] flex items-center justify-center">
+                  {pendingRechargesCount}
+                </span>
+              )}
+            </button>
+          )}
+
+          {canAccessSection('payment_settings') && (
+            <button
+              onClick={() => setActiveSection('payment_settings')}
+              className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeSection === 'payment_settings' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <Wallet className="w-4 h-4 text-amber-600" />
+              <span>إعدادات الشحن ووسائل الدفع</span>
+            </button>
+          )}
+
+          {canAccessSection('recharge_codes') && (
+            <button
+              onClick={() => setActiveSection('recharge_codes')}
+              className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeSection === 'recharge_codes' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <QrCode className="w-4 h-4 text-pink-600" />
+              <span>أكواد الشحن والقسائم ({rechargeCodes.length})</span>
+            </button>
+          )}
+
+          {canAccessSection('manual_coins') && (
+            <button
+              onClick={() => setActiveSection('manual_coins')}
+              className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeSection === 'manual_coins' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <Coins className="w-4 h-4 text-amber-600" />
+              <span>شحن وتعديل رصيد UID</span>
+            </button>
+          )}
+
+          {canAccessSection('pricing') && (
+            <button
+              onClick={() => setActiveSection('pricing')}
+              className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeSection === 'pricing' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <BadgePercent className="w-4 h-4 text-emerald-600" />
+              <span>أسعار وباقات الكوينز</span>
+            </button>
+          )}
+
+          {canAccessSection('users') && (
+            <button
+              onClick={() => setActiveSection('users')}
+              className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeSection === 'users' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <Users className="w-4 h-4 text-blue-600" />
+              <span>الحسابات والمستخدمين ({users.length})</span>
+            </button>
+          )}
+
+          {canAccessSection('cosmetics_studio') && (
+            <button
+              onClick={() => setActiveSection('cosmetics_studio')}
+              className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeSection === 'cosmetics_studio' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <Crown className="w-4 h-4 text-amber-600" />
+              <span>استوديو الإطارات والتوثيق VIP</span>
+            </button>
+          )}
+
+          {canAccessSection('agencies') && (
+            <button
+              onClick={() => setActiveSection('agencies')}
+              className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeSection === 'agencies' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <Briefcase className="w-4 h-4 text-purple-600" />
+                <span>الوكالات والوكلاء</span>
+              </div>
+              {approvedAgenciesCount > 0 && (
+                <span className="w-5 h-5 rounded-full bg-purple-600 text-white font-digits text-[10px] flex items-center justify-center">
+                  {approvedAgenciesCount}
+                </span>
+              )}
+            </button>
+          )}
+
+          {canAccessSection('verifications') && (
+            <button
+              onClick={() => setActiveSection('verifications')}
+              className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeSection === 'verifications' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-blue-500" />
+                <span>التوثيق والشارات</span>
+              </div>
+              {verifications.filter(v => v.status === 'pending').length > 0 && (
+                <span className="w-5 h-5 rounded-full bg-blue-500 text-white font-digits text-[10px] flex items-center justify-center">
+                  {verifications.filter(v => v.status === 'pending').length}
+                </span>
+              )}
+            </button>
+          )}
+
+          {canAccessSection('withdrawals') && (
+            <button
+              onClick={() => setActiveSection('withdrawals')}
+              className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeSection === 'withdrawals' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <ArrowDownCircle className="w-4 h-4 text-emerald-600" />
+                <span>طلبات السحب</span>
+              </div>
+              {pendingWithdrawalsCount > 0 && (
+                <span className="w-5 h-5 rounded-full bg-emerald-500 text-white font-digits text-[10px] flex items-center justify-center">
+                  {pendingWithdrawalsCount}
+                </span>
+              )}
+            </button>
+          )}
+
+          {canAccessSection('store_items') && (
+            <button
+              onClick={() => setActiveSection('store_items')}
+              className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeSection === 'store_items' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <ShoppingBag className="w-4 h-4 text-pink-600" />
+              <span>المتجر والهدايا وضرب الغرف</span>
+            </button>
+          )}
+
+          {canAccessSection('rooms') && (
+            <button
+              onClick={() => setActiveSection('rooms')}
+              className={`flex items-center justify-between gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeSection === 'rooms' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <Mic className="w-4 h-4 text-purple-600" />
+                <span>إدارة الغرف والبثوث</span>
+              </div>
+              <span className="px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-800 font-digits text-[10px]">
+                {rooms.filter(r => !r.isOfficial && r.status === 'open').length}
               </span>
-            )}
-          </button>
+            </button>
+          )}
 
-          <button
-            onClick={() => setActiveSection('inbox')}
-            className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'inbox' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <Inbox className="w-4 h-4 text-amber-600" />
-              <span>صندوق الوارد والشكاوى</span>
-            </div>
-            {pendingTicketsCount > 0 && (
-              <span className="w-5 h-5 rounded-full bg-red-500 text-white font-digits text-[10px] flex items-center justify-center font-black animate-pulse">
-                {pendingTicketsCount}
-              </span>
-            )}
-          </button>
+          {canAccessSection('official_room') && (
+            <button
+              onClick={() => setActiveSection('official_room')}
+              className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeSection === 'official_room' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <Radio className="w-4 h-4 text-rose-600" />
+              <span>الغرفة الرسمية والإعلانات</span>
+            </button>
+          )}
 
-          <button
-            onClick={() => setActiveSection('ads')}
-            className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'ads' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <Megaphone className="w-4 h-4 text-amber-600" />
-              <span>مركز إدارة الإعلانات</span>
-            </div>
-            {activeAdsCount > 0 && (
-              <span className="w-5 h-5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 font-digits text-[10px] flex items-center justify-center font-black">
-                {activeAdsCount}
-              </span>
-            )}
-          </button>
+          {canAccessSection('bans') && (
+            <button
+              onClick={() => setActiveSection('bans')}
+              className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeSection === 'bans' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <Slash className="w-4 h-4 text-red-600" />
+              <span>إدارة الحظر والعقوبات</span>
+            </button>
+          )}
 
-          <button
-            onClick={() => setActiveSection('recharges')}
-            className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'recharges' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <CreditCard className="w-4 h-4" />
-              <span>طلبات الشحن</span>
-            </div>
-            {pendingRechargesCount > 0 && (
-              <span className="w-5 h-5 rounded-full bg-red-500 text-white font-digits text-[10px] flex items-center justify-center">
-                {pendingRechargesCount}
-              </span>
-            )}
-          </button>
+          {canAccessSection('supervisors') && (
+            <button
+              onClick={() => setActiveSection('supervisors')}
+              className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeSection === 'supervisors' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <ShieldCheck className="w-4 h-4 text-indigo-600" />
+              <span>صلاحيات المشرفين</span>
+            </button>
+          )}
 
-          <button
-            onClick={() => setActiveSection('payment_settings')}
-            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'payment_settings' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-            }`}
-          >
-            <Wallet className="w-4 h-4 text-amber-600" />
-            <span>إعدادات الشحن ووسائل الدفع</span>
-          </button>
-
-          <button
-            onClick={() => setActiveSection('recharge_codes')}
-            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'recharge_codes' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-            }`}
-          >
-            <QrCode className="w-4 h-4 text-pink-600" />
-            <span>أكواد الشحن والقسائم ({rechargeCodes.length})</span>
-          </button>
-
-          <button
-            onClick={() => setActiveSection('manual_coins')}
-            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'manual_coins' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-            }`}
-          >
-            <Coins className="w-4 h-4 text-amber-600" />
-            <span>شحن وتعديل رصيد UID</span>
-          </button>
-
-          <button
-            onClick={() => setActiveSection('pricing')}
-            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'pricing' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-            }`}
-          >
-            <BadgePercent className="w-4 h-4 text-emerald-600" />
-            <span>أسعار وباقات الكوينز</span>
-          </button>
-
-          <button
-            onClick={() => setActiveSection('users')}
-            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'users' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-            }`}
-          >
-            <Users className="w-4 h-4 text-blue-600" />
-            <span>الحسابات والمستخدمين ({users.length})</span>
-          </button>
-
-          <button
-            onClick={() => setActiveSection('cosmetics_studio')}
-            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'cosmetics_studio' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-            }`}
-          >
-            <Crown className="w-4 h-4 text-amber-600" />
-            <span>استوديو الإطارات والتوثيق VIP</span>
-          </button>
-
-          <button
-            onClick={() => setActiveSection('agencies')}
-            className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'agencies' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <Briefcase className="w-4 h-4 text-purple-600" />
-              <span>الوكالات والوكلاء</span>
-            </div>
-            {approvedAgenciesCount > 0 && (
-              <span className="w-5 h-5 rounded-full bg-purple-600 text-white font-digits text-[10px] flex items-center justify-center">
-                {approvedAgenciesCount}
-              </span>
-            )}
-          </button>
-
-          <button
-            onClick={() => setActiveSection('verifications')}
-            className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'verifications' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-blue-500" />
-              <span>التوثيق والشارات</span>
-            </div>
-            {verifications.filter(v => v.status === 'pending').length > 0 && (
-              <span className="w-5 h-5 rounded-full bg-blue-500 text-white font-digits text-[10px] flex items-center justify-center">
-                {verifications.filter(v => v.status === 'pending').length}
-              </span>
-            )}
-          </button>
-
-          <button
-            onClick={() => setActiveSection('withdrawals')}
-            className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'withdrawals' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <ArrowDownCircle className="w-4 h-4 text-emerald-600" />
-              <span>طلبات السحب</span>
-            </div>
-            {pendingWithdrawalsCount > 0 && (
-              <span className="w-5 h-5 rounded-full bg-emerald-500 text-white font-digits text-[10px] flex items-center justify-center">
-                {pendingWithdrawalsCount}
-              </span>
-            )}
-          </button>
-
-          <button
-            onClick={() => setActiveSection('store_items')}
-            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'store_items' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-            }`}
-          >
-            <ShoppingBag className="w-4 h-4 text-pink-600" />
-            <span>المتجر والهدايا وضرب الغرف</span>
-          </button>
-
-          <button
-            onClick={() => setActiveSection('rooms')}
-            className={`flex items-center justify-between gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'rooms' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <Mic className="w-4 h-4 text-purple-600" />
-              <span>إدارة الغرف والبثوث</span>
-            </div>
-            <span className="px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-800 font-digits text-[10px]">
-              {rooms.filter(r => !r.isOfficial && r.status === 'open').length}
-            </span>
-          </button>
-
-          <button
-            onClick={() => setActiveSection('official_room')}
-            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'official_room' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-            }`}
-          >
-            <Radio className="w-4 h-4 text-rose-600" />
-            <span>الغرفة الرسمية والإعلانات</span>
-          </button>
-
-          <button
-            onClick={() => setActiveSection('bans')}
-            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'bans' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-            }`}
-          >
-            <Slash className="w-4 h-4 text-red-600" />
-            <span>إدارة الحظر والعقوبات</span>
-          </button>
-
-          <button
-            onClick={() => setActiveSection('supervisors')}
-            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'supervisors' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-            }`}
-          >
-            <ShieldCheck className="w-4 h-4 text-indigo-600" />
-            <span>صلاحيات المشرفين</span>
-          </button>
-
-          <button
-            onClick={() => setActiveSection('financial_logs')}
-            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'financial_logs' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-            }`}
-          >
-            <History className="w-4 h-4 text-gray-600" />
-            <span>السجل المالي الدائم</span>
-          </button>
+          {canAccessSection('financial_logs') && (
+            <button
+              onClick={() => setActiveSection('financial_logs')}
+              className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeSection === 'financial_logs' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <History className="w-4 h-4 text-gray-600" />
+              <span>السجل المالي الدائم</span>
+            </button>
+          )}
         </div>
 
         {/* Content Area */}
@@ -4353,16 +4469,31 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                     </select>
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">المدة:</label>
-                    <select
-                      value={banDuration}
-                      onChange={(e) => setBanDuration(e.target.value as any)}
-                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-2.5 py-1.5 text-xs text-gray-900"
-                    >
-                      <option value="temporary">مؤقت (7 أيام)</option>
-                      <option value="permanent">دائم نهائي</option>
-                    </select>
+                  <div className="flex gap-2">
+                    <div className="flex-1">
+                      <label className="block text-xs font-semibold text-gray-700 mb-1">المدة:</label>
+                      <select
+                        value={banDuration}
+                        onChange={(e) => setBanDuration(e.target.value as any)}
+                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-2.5 py-1.5 text-xs text-gray-900"
+                      >
+                        <option value="temporary">مؤقت (أيام محددة)</option>
+                        <option value="permanent">دائم نهائي</option>
+                      </select>
+                    </div>
+                    {banDuration === 'temporary' && (
+                      <div className="w-24">
+                        <label className="block text-xs font-semibold text-gray-700 mb-1">عدد الأيام:</label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={365}
+                          value={banDays}
+                          onChange={(e) => setBanDays(e.target.value)}
+                          className="w-full bg-gray-50 border border-gray-200 rounded-xl px-2.5 py-1.5 text-xs font-digits text-gray-900"
+                        />
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -4394,38 +4525,51 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                     لا يوجد مستخدمون محظورون حالياً
                   </div>
                 ) : (
-                  bans.map(b => (
-                    <div
-                      key={b.id}
-                      className={`p-3.5 rounded-2xl border shadow-sm flex items-center justify-between ${
-                        b.status === 'active' ? 'bg-red-50/70 border-red-200' : 'bg-white border-gray-200 opacity-80'
-                      }`}
-                    >
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-xs text-gray-900">{b.username}</span>
-                          <span className="font-digits text-xs text-amber-700 font-bold">UID: {b.uid}</span>
-                          <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${
-                            b.status === 'active' ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'
-                          }`}>
-                            {b.status === 'active' ? 'حظر نشط' : 'تم رفع الحظر'}
-                          </span>
+                  bans.map(b => {
+                    const banTypeLabel =
+                      b.banType === 'device' ? 'حظر الجهاز' : b.banType === 'both' ? 'الحساب والجهاز' : 'حظر الحساب';
+                    const durationLabel =
+                      b.duration === 'permanent'
+                        ? 'دائم نهائي'
+                        : `مؤقت (${b.durationDays || 7} يوم)`;
+                    return (
+                      <div
+                        key={b.id}
+                        className={`p-3.5 rounded-2xl border shadow-sm flex items-center justify-between gap-2 ${
+                          b.status === 'active' ? 'bg-red-50/70 border-red-200' : 'bg-white border-gray-200 opacity-80'
+                        }`}
+                      >
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-bold text-xs text-gray-900">{b.username}</span>
+                            <span className="font-digits text-xs text-amber-700 font-bold">UID: {b.uid}</span>
+                            <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${
+                              b.status === 'active' ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'
+                            }`}>
+                              {b.status === 'active' ? 'حظر نشط' : 'تم رفع الحظر'}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-gray-600 mt-1">
+                            النوع: {banTypeLabel} • المدة: {durationLabel} • السبب: {b.reason}
+                          </p>
+                          {b.status === 'unbanned' && b.unbanReason && (
+                            <p className="text-[10px] text-emerald-700 mt-0.5">
+                              سبب فك الحظر: {b.unbanReason}
+                            </p>
+                          )}
                         </div>
-                        <p className="text-[11px] text-gray-600 mt-1">
-                          نوع: {b.banType} • المدة: {b.duration} • السبب: {b.reason}
-                        </p>
-                      </div>
 
-                      {b.status === 'active' && (
-                        <button
-                          onClick={() => setUnbanModalRecord(b)}
-                          className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3 py-1.5 rounded-xl"
-                        >
-                          فك الحظر
-                        </button>
-                      )}
-                    </div>
-                  ))
+                        {b.status === 'active' && (
+                          <button
+                            onClick={() => setUnbanModalRecord(b)}
+                            className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3 py-1.5 rounded-xl shrink-0"
+                          >
+                            فك الحظر
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })
                 )}
               </div>
             </div>

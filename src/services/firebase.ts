@@ -18,6 +18,8 @@ import {
   limit,
   onSnapshot,
   getDocFromServer,
+  deleteField,
+  FieldValue,
   Unsubscribe
 } from 'firebase/firestore';
 import {
@@ -67,22 +69,40 @@ import {
 } from '../types';
 
 /**
- * Recursively strips undefined keys so Firestore setDoc never fails on optional fields.
+ * Recursively strips undefined keys safely (cycle & depth guarded, preserves FieldValue/Date)
+ * so Firestore setDoc never throws "Maximum call stack size exceeded" or fails on optional fields.
  */
-function stripUndefined<T>(value: T): T {
+function stripUndefined<T>(value: T, depth = 0, seen = new WeakSet<object>()): T {
+  if (value === null || value === undefined || typeof value !== 'object') {
+    return value;
+  }
+  if (value instanceof Date || value instanceof FieldValue) {
+    return value;
+  }
+  if (depth > 25) {
+    return value;
+  }
+  if (seen.has(value as object)) {
+    return value;
+  }
+  seen.add(value as object);
+
   if (Array.isArray(value)) {
-    return value.map((item) => stripUndefined(item)) as unknown as T;
+    return value.map((item) => stripUndefined(item, depth + 1, seen)) as unknown as T;
   }
-  if (value !== null && typeof value === 'object') {
-    const clean: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      if (v !== undefined) {
-        clean[k] = stripUndefined(v);
-      }
+
+  const proto = Object.getPrototypeOf(value);
+  if (proto !== Object.prototype && proto !== null) {
+    return value;
+  }
+
+  const clean: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (v !== undefined) {
+      clean[k] = stripUndefined(v, depth + 1, seen);
     }
-    return clean as T;
   }
-  return value;
+  return clean as T;
 }
 
 // 1. Initialize Firebase App
@@ -631,11 +651,54 @@ export class FirebaseService {
   }
 
   /**
+   * Lookup active ban records directly from Firestore by UID or deviceId
+   */
+  public async findActiveBanForUser(uid?: string, deviceId?: string): Promise<BanRecord | null> {
+    try {
+      const checks: Promise<BanRecord | null>[] = [];
+      if (uid?.trim()) {
+        const qUid = query(collection(db, COLLECTIONS.BANS), where('uid', '==', uid.trim()), limit(10));
+        checks.push(
+          getDocs(qUid).then((snap) => {
+            const matches = snap.docs
+              .map((d) => d.data() as BanRecord)
+              .filter((b) => b.status === 'active');
+            return matches[0] || null;
+          })
+        );
+      }
+      if (deviceId?.trim()) {
+        const qDev = query(collection(db, COLLECTIONS.BANS), where('deviceId', '==', deviceId.trim()), limit(10));
+        checks.push(
+          getDocs(qDev).then((snap) => {
+            const matches = snap.docs
+              .map((d) => d.data() as BanRecord)
+              .filter((b) => b.status === 'active' && (b.banType === 'device' || b.banType === 'both'));
+            return matches[0] || null;
+          })
+        );
+      }
+      if (checks.length === 0) return null;
+      const results = await Promise.all(checks);
+      return results.find(Boolean) || null;
+    } catch (e) {
+      console.warn('findActiveBanForUser error:', e);
+      return null;
+    }
+  }
+
+  /**
    * Write or update user profile in Firestore
    */
   public async saveUserProfile(user: UserProfile): Promise<boolean> {
     try {
-      await setDoc(doc(db, COLLECTIONS.USERS, user.uid), stripUndefined(user), { merge: true });
+      const payload: Record<string, unknown> = {
+        ...(stripUndefined(user) as unknown as Record<string, unknown>),
+      };
+      if (user.isBanned === false && !user.banDetails) {
+        payload.banDetails = deleteField();
+      }
+      await setDoc(doc(db, COLLECTIONS.USERS, user.uid), payload, { merge: true });
       return true;
     } catch (e) {
       console.error('Error saving user profile to Firestore:', e);
@@ -1357,12 +1420,26 @@ export class FirebaseService {
     }
   }
 
+  private isBraveOrRestrictedBrowser(): boolean {
+    if (typeof navigator === 'undefined') return false;
+    const ua = navigator.userAgent || '';
+    const hasBraveApi = Boolean((navigator as unknown as { brave?: unknown }).brave);
+    return hasBraveApi || /Brave|wv\)|WebView/i.test(ua);
+  }
+
   private redirectResultPromise: Promise<{ user?: FirebaseUser; error?: string }> | null = null;
 
   /**
-   * Checks and consumes any completed Google signInWithRedirect result (runs safely once per page load)
+   * Checks and consumes any completed Google signInWithRedirect result
    */
   public async consumeGoogleRedirectResult(): Promise<{ user?: FirebaseUser; error?: string }> {
+    if (typeof window !== 'undefined') {
+      try {
+        window.sessionStorage.removeItem('livo_google_redirect_pending');
+      } catch {
+        // ignore storage restrictions
+      }
+    }
     if (!this.redirectResultPromise) {
       this.redirectResultPromise = (async () => {
         try {
@@ -1375,19 +1452,45 @@ export class FirebaseService {
           console.warn('Google Redirect Result error:', err);
           return { error: this.formatFirebaseAuthError(err, 'تعذر إكمال تسجيل الدخول عبر Google') };
         }
-      })();
+      })().finally(() => {
+        // Allow future redirect attempts in the same SPA session if needed
+        this.redirectResultPromise = null;
+      });
     }
     return this.redirectResultPromise;
   }
 
   private formatFirebaseAuthError(err: any, fallback: string): string {
     const code = err?.code || '';
+    const msg = String(err?.message || '');
     const host = typeof window !== 'undefined' ? window.location.hostname : '';
-    if (code === 'auth/unauthorized-domain') {
-      return `النطاق الحالي (${host || 'هذا الرابط'}) غير مضاف في Authorized Domains في Firebase Authentication. يمكنك الدخول بالبريد وكلمة المرور أو رقم الهاتف الآن.`;
+    if (code === 'auth/unauthorized-domain' || msg.includes('unauthorized-domain')) {
+      return `النطاق الحالي (${host || 'هذا الرابط'}) غير مضاف في Authorized Domains داخل Firebase Authentication. أضف "${host}" من Firebase Console > Authentication > Settings > Authorized domains، أو سجّل الدخول الآن بالبريد الإلكتروني / رقم الهاتف.`;
+    }
+    if (
+      code === 'auth/invalid-action-code' ||
+      msg.toLowerCase().includes('requested action is invalid') ||
+      code === 'auth/missing-continue-uri' ||
+      code === 'auth/invalid-continue-uri'
+    ) {
+      return `تعذر إكمال جلسة التحويل في المتصفح (بسبب حجب ملفات الارتباط/Brave Shields أو انتهاء صلاحية التحويل). استخدم زر "تسجيل الدخول عبر Google" المباشر (النافذة المنبثقة)، أو أوقف Brave Shields للنطاق (${host || 'الحالي'})، أو سجّل بالبريد/الهاتف.`;
+    }
+    if (code === 'auth/web-storage-unsupported') {
+      return 'المتصفح يمنع تخزين الجلسة (Cookies / IndexedDB). فعّل الكوكيز أو أوقف حظر التخزين في المتصفح، أو استخدم البريد الإلكتروني / رقم الهاتف.';
     }
     if (code === 'auth/popup-blocked' || code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
-      return 'تم إغلاق أو حجب نافذة Google (أو ظهرت صفحة فارغة بسبب إعدادات Brave / حظر النوافذ). يمكنك إيقاف Brave Shields لهذا الموقع أو الضغط على "تسجيل الدخول بصفحة كاملة" أو الدخول برقم الهاتف / البريد.';
+      return this.isBraveOrRestrictedBrowser()
+        ? 'تم حجب أو إغلاق نافذة Google في متصفح Brave/الجوال. فعّل النوافذ المنبثقة (Popups) أو أوقف Brave Shields لهذا الموقع ثم أعد المحاولة، أو استخدم البريد الإلكتروني / رقم الهاتف.'
+        : 'تم إغلاق أو حجب نافذة Google. اسمح بالنوافذ المنبثقة أو استخدم زر "تسجيل الدخول بصفحة Google كاملة" أو سجّل بالبريد / رقم الهاتف.';
+    }
+    if (code === 'auth/account-exists-with-different-credential') {
+      return 'هذا البريد مسجل بالفعل بطريقة دخول أخرى. سجّل الدخول بالبريد الإلكتروني وكلمة المرور.';
+    }
+    if (code === 'auth/network-request-failed') {
+      return 'تعذر الاتصال بخوادم Google. تحقق من اتصال الإنترنت وأعد المحاولة.';
+    }
+    if (code === 'auth/internal-error') {
+      return 'حدث خطأ مؤقت أثناء المصادقة مع Google. يرجى المحاولة بالنافذة المنبثقة أو البريد الإلكتروني.';
     }
     if (code === 'auth/operation-not-allowed') {
       return 'طريقة الدخول هذه غير مفعّلة في إعدادات مشروع Firebase Authentication.';
@@ -1416,11 +1519,21 @@ export class FirebaseService {
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
 
-    if (preferRedirect && !this.isInsideIframe()) {
+    // In Brave / WebViews, /__/auth/handler redirect often hangs on a dark blank screen due to cross-site cookie blocking.
+    // Always prefer safe user-gesture Popup in Brave/WebViews or inside iframes.
+    const canUseRedirect = !this.isInsideIframe() && !this.isBraveOrRestrictedBrowser();
+
+    if (preferRedirect && canUseRedirect) {
       try {
+        if (typeof window !== 'undefined') {
+          window.sessionStorage.setItem('livo_google_redirect_pending', String(Date.now()));
+        }
         await signInWithRedirect(auth, provider);
         return { success: false, redirectStarted: true };
       } catch (err: any) {
+        if (typeof window !== 'undefined') {
+          window.sessionStorage.removeItem('livo_google_redirect_pending');
+        }
         return { success: false, error: this.formatFirebaseAuthError(err, 'تعذر بدء تسجيل الدخول عبر Google') };
       }
     }
@@ -1432,12 +1545,18 @@ export class FirebaseService {
       const code = err?.code || '';
       if (
         (code === 'auth/popup-blocked' || code === 'auth/operation-not-supported-in-this-environment') &&
-        !this.isInsideIframe()
+        canUseRedirect
       ) {
         try {
+          if (typeof window !== 'undefined') {
+            window.sessionStorage.setItem('livo_google_redirect_pending', String(Date.now()));
+          }
           await signInWithRedirect(auth, provider);
           return { success: false, redirectStarted: true };
         } catch (redirectErr: any) {
+          if (typeof window !== 'undefined') {
+            window.sessionStorage.removeItem('livo_google_redirect_pending');
+          }
           return { success: false, error: this.formatFirebaseAuthError(redirectErr, 'تعذر فتح تسجيل الدخول عبر Google') };
         }
       }
@@ -1559,6 +1678,10 @@ export class FirebaseService {
 
   public getCurrentAuthUid(): string | undefined {
     return auth.currentUser?.uid;
+  }
+
+  public getCurrentAuthEmail(): string | undefined {
+    return auth.currentUser?.email?.trim().toLowerCase() || undefined;
   }
 
   public onAuthStateChanged(callback: (user: FirebaseUser | null) => void): Unsubscribe {

@@ -10,11 +10,11 @@ interface StoriesSectionProps {
 export const StoriesSection: React.FC<StoriesSectionProps> = ({ currentUser }) => {
   const [activeStory, setActiveStory] = useState<{ name: string; avatar: string; image: string; text: string } | null>(null);
   const [showAddStoryInfo, setShowAddStoryInfo] = useState(false);
-  const [genuineUsers, setGenuineUsers] = useState<UserProfile[]>(() => livoStore.getGenuineUsers());
+  const [genuineUsers, setGenuineUsers] = useState<UserProfile[]>(() => livoStore.getCustomerUsers());
 
   useEffect(() => {
     const unsub = livoStore.subscribe(() => {
-      setGenuineUsers([...livoStore.getGenuineUsers()]);
+      setGenuineUsers([...livoStore.getCustomerUsers()]);
     });
     return () => unsub();
   }, []);

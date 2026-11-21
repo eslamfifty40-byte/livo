@@ -62,9 +62,12 @@ export const CustomerApp: React.FC<CustomerAppProps> = ({ currentUser }) => {
   const [privacyVeilActive, setPrivacyVeilActive] = useState(false);
   const [privacyToast, setPrivacyToast] = useState<string | null>(null);
 
+  const [banRefreshTick, setBanRefreshTick] = useState(0);
+
   useEffect(() => {
     const unsub = livoStore.subscribe(() => {
       setRooms([...livoStore.getRooms()]);
+      setBanRefreshTick((t) => t + 1);
     });
     return () => unsub();
   }, []);
@@ -273,12 +276,58 @@ export const CustomerApp: React.FC<CustomerAppProps> = ({ currentUser }) => {
     ? livoStore.getChatThreads(currentUser?.uid).reduce((acc, t) => acc + (t.unreadCount || 0), 0)
     : 0;
 
+  const activeBan = React.useMemo(
+    () => (currentUser ? livoStore.getActiveBanForUser(currentUser) : null),
+    [currentUser, banRefreshTick]
+  );
+
   return (
     <div
       className={`light-surface flex flex-col w-full h-[100dvh] md:h-[852px] md:max-h-[95vh] md:max-w-[430px] mx-auto bg-white text-gray-900 md:rounded-[44px] md:border-[8px] md:border-[#1c1c1e] md:shadow-[0_25px_70px_rgba(0,0,0,0.45)] overflow-hidden relative select-none ${
         isPrivacyProtected ? 'livo-privacy-protected' : ''
       }`}
     >
+      {/* Active Ban Enforcement Lock Screen */}
+      {activeBan && (
+        <div className="absolute inset-0 z-[85] bg-[#170b2c]/95 backdrop-blur-xl flex flex-col items-center justify-center p-6 text-center text-white">
+          <div className="w-16 h-16 rounded-full bg-red-500/20 border-2 border-red-400 flex items-center justify-center mb-4">
+            <ShieldAlert className="w-8 h-8 text-red-400" />
+          </div>
+          <h3 className="text-lg font-black text-white">تم تقييد الوصول لهذا الحساب</h3>
+          <p className="text-xs text-purple-200 mt-1.5 max-w-xs leading-relaxed">
+            نوع العقوبة:{' '}
+            <span className="font-bold text-[#FFE600]">
+              {activeBan.banType === 'device' ? 'حظر الجهاز' : activeBan.banType === 'both' ? 'حظر الحساب والجهاز' : 'حظر الحساب'}
+            </span>
+          </p>
+          <div className="mt-3 w-full max-w-xs bg-white/10 border border-white/15 rounded-2xl p-3.5 text-right space-y-1.5">
+            <p className="text-xs text-gray-100 leading-relaxed">
+              <span className="font-bold text-[#FFE600]">السبب: </span>
+              {activeBan.reason}
+            </p>
+            <p className="text-[11px] text-purple-200 font-digits">
+              {activeBan.expiresAt
+                ? `ينتهي الحظر في: ${new Date(activeBan.expiresAt).toLocaleDateString('ar-EG')}`
+                : 'المدة: حظر دائم'}
+            </p>
+          </div>
+          <div className="mt-5 flex flex-col w-full max-w-xs gap-2">
+            <button
+              onClick={() => setIsSupportOpen(true)}
+              className="w-full py-2.5 bg-[#FFE600] hover:bg-yellow-400 text-black font-black text-xs rounded-xl transition-all"
+            >
+              تواصل مع الدعم الفني للالتماس
+            </button>
+            <button
+              onClick={handleLogout}
+              className="w-full py-2.5 bg-white/10 hover:bg-white/20 text-white border border-white/20 font-bold text-xs rounded-xl transition-all"
+            >
+              تسجيل الخروج
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Privacy Capture Curtain when PrintScreen / blur triggers inside protected pages */}
       {isPrivacyProtected && privacyVeilActive && (
         <div className="absolute inset-0 z-[90] bg-black/95 backdrop-blur-2xl flex flex-col items-center justify-center p-6 text-center text-white">

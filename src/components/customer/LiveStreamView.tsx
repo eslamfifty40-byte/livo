@@ -201,13 +201,31 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
       return;
     }
 
-    livoStore.adjustUserCoins(
-      currentUser.uid,
-      'deduct',
-      gift.coins,
-      `إرسال هدية ${gift.name} في البث المباشر`,
-      currentUser.displayName
-    );
+    if (room?.id && livoStore.getRoomById(room.id)) {
+      const res = livoStore.sendGiftInRoom({
+        roomId: room.id,
+        senderUid: currentUser.uid,
+        giftId: gift.id,
+        recipientUid: room.ownerUid,
+        count: 1
+      });
+      if (!res.success) {
+        showToast(res.message);
+        return;
+      }
+    } else {
+      livoStore.adjustUserCoins(
+        currentUser.uid,
+        'deduct',
+        gift.coins,
+        `إرسال هدية ${gift.name} في البث المباشر`,
+        currentUser.displayName
+      );
+      setComments(prev => [
+        ...prev,
+        { id: String(Date.now()), user: currentUser.displayName, text: `أرسل ${gift.name} (${gift.icon})!`, isGift: true }
+      ]);
+    }
 
     if (pk.isActive) {
       setPk(prev => ({
@@ -236,20 +254,6 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
         .slice(0, 3)
         .map((s, idx) => ({ ...s, rank: (idx + 1) as 1 | 2 | 3 }));
     });
-
-    if (room?.id) {
-      livoStore.appendRoomMessage(room.id, {
-        uid: currentUser.uid,
-        user: currentUser.displayName,
-        text: `أرسل هدية ${gift.name} ${gift.icon}!`,
-        isVip: true
-      });
-    } else {
-      setComments(prev => [
-        ...prev,
-        { id: String(Date.now()), user: currentUser.displayName, text: `أرسل ${gift.name} (${gift.icon})!`, isGift: true }
-      ]);
-    }
 
     setLastSenderName(currentUser.displayName);
     setActiveGiftAnimation(gift);

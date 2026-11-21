@@ -44,7 +44,7 @@ export const PartyView: React.FC<PartyViewProps> = ({
   const [remoteMatchedUsers, setRemoteMatchedUsers] = useState<UserProfile[]>([]);
 
   const [rooms, setRooms] = useState<VoiceRoom[]>(livoStore.getRooms());
-  const [genuineUsers, setGenuineUsers] = useState<UserProfile[]>(() => livoStore.getGenuineUsers());
+  const [genuineUsers, setGenuineUsers] = useState<UserProfile[]>(() => livoStore.getCustomerUsers());
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
   // Local modal fallback only when parent does not lift Voice/Live room state
@@ -62,7 +62,7 @@ export const PartyView: React.FC<PartyViewProps> = ({
   useEffect(() => {
     const unsub = livoStore.subscribe(() => {
       setRooms([...livoStore.getRooms()]);
-      setGenuineUsers([...livoStore.getGenuineUsers()]);
+      setGenuineUsers([...livoStore.getCustomerUsers()]);
     });
     return () => unsub();
   }, []);
@@ -79,7 +79,7 @@ export const PartyView: React.FC<PartyViewProps> = ({
     setSearchingUid(true);
     const t = setTimeout(async () => {
       try {
-        const found = await livoStore.lookupUserInFirestore(q);
+        const found = await livoStore.lookupUserInFirestore(q, { excludeOwners: true });
         if (!cancelled) setRemoteMatchedUsers(found);
       } finally {
         if (!cancelled) setSearchingUid(false);
