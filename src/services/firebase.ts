@@ -32,6 +32,7 @@ import {
   onAuthStateChanged,
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithRedirect,
   User as FirebaseUser
 } from 'firebase/auth';
 import { getStorage, ref, uploadBytes, getDownloadURL, uploadString } from 'firebase/storage';
@@ -1238,8 +1239,8 @@ export class FirebaseService {
     try {
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: 'select_account' });
-      const cred = await signInWithPopup(auth, provider);
-      return { success: true, user: cred.user };
+      await signInWithRedirect(auth, provider);
+      return { success: true };
     } catch (err: any) {
       console.warn('Google Auth popup error:', err);
       return { success: false, error: this.formatFirebaseAuthError(err, 'تم إلغاء تسجيل الدخول عبر Google') };
@@ -1253,8 +1254,8 @@ export class FirebaseService {
     try {
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: 'select_account' });
-      const cred = await signInWithPopup(auth, provider);
-      return { success: true, user: cred.user };
+      await signInWithRedirect(auth, provider);
+      return { success: true };
     } catch (err: any) {
       console.warn('Customer Google Sign-In error:', err);
       return { success: false, error: this.formatFirebaseAuthError(err, 'تم إلغاء نافذة اختيار حساب Google') };
