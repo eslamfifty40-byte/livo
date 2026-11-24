@@ -119,8 +119,12 @@ export const PartyView: React.FC<PartyViewProps> = ({
     currentUser && (currentUser.role === 'owner' || livoStore.isOwnerEmail(currentUser.email))
   );
 
-  // Official Room unified with 'room-official-livo'
-  const officialRoom = rooms.find(r => r.isOfficial || r.id === 'room-official-livo');
+  // Official Room unified with 'room-official-livo' (hidden from regular users if closed)
+  const rawOfficialRoom = livoStore.getOfficialRoom();
+  const officialRoom =
+    rawOfficialRoom && (rawOfficialRoom.status === 'open' || isOwnerUser)
+      ? rawOfficialRoom
+      : undefined;
   const isOfficialOpen = officialRoom?.status === 'open';
 
   const handleOpenOfficialRoom = () => {

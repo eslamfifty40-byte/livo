@@ -34,7 +34,14 @@ import {
   Gamepad2,
   Dices,
   Heart,
-  Search
+  Search,
+  LayoutGrid,
+  AtSign,
+  AlertTriangle,
+  UserPlus,
+  Crown,
+  Sparkles,
+  Star
 } from 'lucide-react';
 import { UserProfile, GiftItem, VoiceRoom, RoomSeat, RoomGameEvent } from '../../types';
 import { livoStore } from '../../services/livoStore';
@@ -195,8 +202,10 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
   const [bgPreviewValue, setBgPreviewValue] = useState<string>(ROOM_BG_PRESETS[0].value);
   const [bgScope, setBgScope] = useState<'personal' | 'room'>('personal');
 
-  // Selected Seat for Moderation (ONLY for moderating OTHER users or locked/empty seats)
+  // Selected Seat for Moderation & HAGO Seat Profile Card
   const [moderationSeat, setModerationSeat] = useState<RoomSeat | null>(null);
+  const [selectedProfileSeat, setSelectedProfileSeat] = useState<RoomSeat | null>(null);
+  const [selectedGiftItem, setSelectedGiftItem] = useState<GiftItem | null>(null);
 
   useEffect(() => {
     const sync = () => {
@@ -490,11 +499,12 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
     }
 
     if (targetSeat.occupiedByUid) {
-      if (isOwnerOrMod) {
-        setModerationSeat(targetSeat);
-      } else {
-        showToast(`المستخدم ${targetSeat.occupiedByName} على المايك`);
-      }
+      setSelectedProfileSeat(targetSeat);
+      return;
+    }
+
+    if (index === 0 && !isOwnerOrMod) {
+      showToast('مقعد التحكم (#1) مخصص لصاحب الغرفة والمشرفين فقط 🔒');
       return;
     }
 
@@ -826,138 +836,172 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
           </div>
         )}
 
-        {/* Top Room Bar */}
-        <div className="p-2.5 pt-3.5 flex items-center justify-between border-b border-purple-900/40 bg-black/55 backdrop-blur-md z-20 gap-1">
-          <div className="flex items-center gap-1.5 min-w-0">
-            <button
-              onClick={handleExitButtonTap}
-              className="w-7 h-7 rounded-full bg-black/50 hover:bg-black/70 flex items-center justify-center text-white transition-colors shrink-0"
-              title="رجوع"
-            >
-              <ArrowRight className="w-4 h-4" />
-            </button>
-            <div className="min-w-0">
-              <div className="flex items-center gap-1">
-                <span className="text-[9px] bg-[#FFE600] text-black font-black px-1.5 py-0.5 rounded shrink-0">
-                  {targetSeatCount} مايك
-                </span>
-                <h3 className="font-bold text-xs text-white truncate max-w-[85px]">{liveRoom.title}</h3>
+        {/* HAGO Top Room Bar */}
+        <div className="px-3 pt-3 pb-2 bg-gradient-to-b from-black/75 via-black/45 to-transparent z-20 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            {/* Right Side (RTL): Back Arrow + Room Title & Viewers Pill */}
+            <div className="flex items-center gap-2 min-w-0">
+              <button
+                onClick={handleExitButtonTap}
+                className="w-8 h-8 rounded-full bg-black/45 hover:bg-black/70 border border-white/10 flex items-center justify-center text-white transition-colors shrink-0"
+                title="رجوع"
+              >
+                <ArrowRight className="w-4 h-4" />
+              </button>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <h3 className="font-black text-xs text-white truncate max-w-[118px]">
+                    {liveRoom.title}
+                  </h3>
+                  <span className="text-[9px] bg-[#FFE600] text-black font-black px-1.5 py-0.5 rounded-full shrink-0 font-digits">
+                    {targetSeatCount}
+                  </span>
+                </div>
+                {(() => {
+                  const roomOwner = livoStore.getUserByUid(liveRoom.ownerUid);
+                  return (
+                    <div className="text-[10px] text-purple-200 flex items-center gap-1 mt-0.5 max-w-[135px]">
+                      <UserNameWithBadges
+                        displayName={roomOwner?.displayName || liveRoom.ownerName}
+                        nameGlowColor={roomOwner?.nameGlowColor}
+                        isVerified={roomOwner?.isVerified ?? liveRoom.isOfficial}
+                        verifiedBadgeColor={roomOwner?.verifiedBadgeColor || 'gold'}
+                        verifiedBadgeShape={roomOwner?.verifiedBadgeShape || 'rosette'}
+                        verifiedBadgeGlow={roomOwner?.verifiedBadgeGlow}
+                        customIconUrl={roomOwner?.customIconUrl}
+                        customIconGlow={roomOwner?.customIconGlow}
+                        customIconAnimated={roomOwner?.customIconAnimated}
+                        badgeSize={11}
+                        iconSize={14}
+                        nameClassName="text-amber-300 font-bold text-[10px]"
+                      />
+                    </div>
+                  );
+                })()}
               </div>
-              {(() => {
-                const roomOwner = livoStore.getUserByUid(liveRoom.ownerUid);
-                return (
-                  <div className="text-[10px] text-purple-300 flex items-center gap-1 mt-0.5 max-w-[115px]">
-                    <UserNameWithBadges
-                      displayName={roomOwner?.displayName || liveRoom.ownerName}
-                      nameGlowColor={roomOwner?.nameGlowColor}
-                      isVerified={roomOwner?.isVerified ?? liveRoom.isOfficial}
-                      verifiedBadgeColor={roomOwner?.verifiedBadgeColor || 'gold'}
-                      verifiedBadgeShape={roomOwner?.verifiedBadgeShape || 'rosette'}
-                      verifiedBadgeGlow={roomOwner?.verifiedBadgeGlow}
-                      customIconUrl={roomOwner?.customIconUrl}
-                      customIconGlow={roomOwner?.customIconGlow}
-                      customIconAnimated={roomOwner?.customIconAnimated}
-                      badgeSize={11}
-                      iconSize={14}
-                      nameClassName="text-amber-400 font-semibold text-[10px]"
-                    />
-                  </div>
-                );
-              })()}
+            </div>
+
+            {/* Left Side (RTL): HAGO Action Cluster + Viewers Count */}
+            <div className="flex items-center gap-1 shrink-0">
+              {canUseStealth && (
+                <button
+                  onClick={handleToggleStealth}
+                  className={`px-2 h-7 rounded-full text-[9px] font-black flex items-center gap-1 border transition-colors ${
+                    isStealth
+                      ? 'bg-emerald-500 text-black border-emerald-300 shadow'
+                      : 'bg-black/45 text-purple-200 border-white/15'
+                  }`}
+                  title={isStealth ? 'أنت متخفي الآن — اضغط لتفعيل الظهور' : 'تفعيل الدخول المتخفي'}
+                >
+                  {isStealth ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+                  <span className="hidden sm:inline">{isStealth ? 'ظهور' : 'تخفي'}</span>
+                </button>
+              )}
+
+              {isOwnerOrMod && (
+                <button
+                  onClick={() => setShowSettingsDrawer(true)}
+                  className="w-7 h-7 rounded-full bg-[#FFE600] hover:bg-yellow-400 text-black flex items-center justify-center shadow transition-colors"
+                  title="إعدادات الغرفة والمشرفين"
+                >
+                  <Settings className="w-3.5 h-3.5" />
+                </button>
+              )}
+
+              <button
+                onClick={() => setShowMusicPanel(v => !v)}
+                className={`w-7 h-7 rounded-full border flex items-center justify-center transition-colors ${
+                  musicPlaying
+                    ? 'bg-emerald-600/80 border-emerald-400 text-white animate-pulse'
+                    : 'bg-black/45 hover:bg-black/70 border-white/15 text-purple-200'
+                }`}
+                title="تشغيل موسيقى داخل الغرفة"
+              >
+                <Music className="w-3.5 h-3.5" />
+              </button>
+
+              <button
+                onClick={openBackgroundPicker}
+                className="w-7 h-7 rounded-full bg-black/45 hover:bg-black/70 border border-white/15 flex items-center justify-center text-amber-300 transition-colors"
+                title="تغيير الخلفية من ملفاتي"
+              >
+                <ImageIcon className="w-3.5 h-3.5" />
+              </button>
+
+              <button
+                onClick={() => {
+                  navigator.clipboard?.writeText(`https://livo.live/room/${liveRoom.id}`);
+                  showToast('تم نسخ رابط الغرفة 📋');
+                }}
+                className="w-7 h-7 rounded-full bg-black/45 border border-white/15 flex items-center justify-center text-purple-200 hover:text-white"
+                title="مشاركة الغرفة"
+              >
+                <Share2 className="w-3.5 h-3.5" />
+              </button>
+
+              {onMinimize && (
+                <button
+                  onClick={onMinimize}
+                  className="w-7 h-7 rounded-full bg-amber-500/90 hover:bg-amber-400 text-black flex items-center justify-center"
+                  title="لايف مصغر (تصغير الغرفة)"
+                >
+                  <Minimize2 className="w-3.5 h-3.5" />
+                </button>
+              )}
+
+              <button
+                onClick={handleExitButtonTap}
+                className="w-7 h-7 rounded-full bg-red-600/85 hover:bg-red-600 flex items-center justify-center text-white"
+                title="إغلاق / خروج"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
             </div>
           </div>
 
-          <div className="flex items-center gap-1 shrink-0">
-            {canUseStealth && (
-              <button
-                onClick={handleToggleStealth}
-                className={`px-2 h-7 rounded-full text-[9px] font-black flex items-center gap-1 border transition-colors ${
-                  isStealth
-                    ? 'bg-emerald-500 text-black border-emerald-300 shadow'
-                    : 'bg-purple-950/80 text-purple-200 border-purple-600/50'
-                }`}
-                title={isStealth ? 'أنت متخفي الآن — اضغط لتفعيل الظهور' : 'تفعيل الدخول المتخفي'}
-              >
-                {isStealth ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
-                <span>{isStealth ? 'تفعيل الظهور' : 'تخفي'}</span>
-              </button>
-            )}
+          {/* HAGO Second Row: Room Cup (No.99+) + Star/Viewers Pill */}
+          <div className="flex items-center justify-between gap-2 text-[10px]">
+            <div className="flex items-center gap-1.5">
+              {(() => {
+                const roomOwner = livoStore.getUserByUid(liveRoom.ownerUid);
+                const totalSeatPoints = seats.reduce((sum, s) => sum + (s.points || 0), 0);
+                return (
+                  <>
+                    <span className="px-2 py-0.5 rounded-full bg-black/45 border border-white/10 text-amber-300 font-digits font-black flex items-center gap-1">
+                      <Star className="w-3 h-3 text-amber-400 fill-amber-400" />
+                      <span>Lv.{roomOwner?.level || (liveRoom.isOfficial ? 50 : 0)}</span>
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full bg-black/45 border border-white/10 text-white font-digits font-bold flex items-center gap-1">
+                      <span>🪙</span>
+                      <span>{totalSeatPoints.toLocaleString('en-US')}</span>
+                    </span>
+                  </>
+                );
+              })()}
+            </div>
 
-            {/* Room Supporters Cup 🏆 Button (next to Settings) */}
-            {(() => {
-              const topSup = livoStore.getRoomSupporters(liveRoom.id)[0];
-              return (
-                <button
-                  onClick={() => setShowSupportersModal(true)}
-                  className="h-7 px-2 rounded-full bg-gradient-to-r from-amber-500/90 to-yellow-400/90 text-black flex items-center gap-1 text-[10px] font-black shadow border border-amber-200/70 hover:scale-105 transition-transform"
-                  title="كأس الداعمين في الغرفة"
-                >
-                  <Trophy className="w-3.5 h-3.5 shrink-0" />
-                  <span className="max-w-[52px] truncate hidden sm:inline">
-                    {topSup ? topSup.displayName : 'الكأس'}
-                  </span>
-                </button>
-              );
-            })()}
+            <div className="flex items-center gap-1.5">
+              <span className="px-2 py-0.5 rounded-full bg-black/45 border border-white/10 text-purple-100 font-digits font-bold flex items-center gap-1">
+                <Users className="w-3 h-3 text-[#FFE600]" />
+                <span>{Math.max(1, liveRoom.viewersCount || occupiedUsersForGifts.length || 1)}</span>
+              </span>
 
-            {isOwnerOrMod && (
-              <button
-                onClick={() => setShowSettingsDrawer(true)}
-                className="w-7 h-7 rounded-full bg-[#FFE600] hover:bg-yellow-400 text-black flex items-center justify-center shadow transition-colors"
-                title="إعدادات الغرفة والمشرفين"
-              >
-                <Settings className="w-3.5 h-3.5" />
-              </button>
-            )}
-
-            <button
-              onClick={() => setShowMusicPanel(v => !v)}
-              className={`w-7 h-7 rounded-full border flex items-center justify-center transition-colors ${
-                musicPlaying
-                  ? 'bg-emerald-600/80 border-emerald-400 text-white animate-pulse'
-                  : 'bg-purple-900/70 hover:bg-purple-800 border-purple-500/40 text-purple-200'
-              }`}
-              title="تشغيل موسيقى داخل الغرفة"
-            >
-              <Music className="w-3.5 h-3.5" />
-            </button>
-
-            <button
-              onClick={openBackgroundPicker}
-              className="w-7 h-7 rounded-full bg-purple-900/70 hover:bg-purple-800 border border-purple-500/40 flex items-center justify-center text-amber-300 transition-colors"
-              title="تغيير الخلفية من ملفاتي"
-            >
-              <ImageIcon className="w-3.5 h-3.5" />
-            </button>
-
-            <button
-              onClick={() => {
-                navigator.clipboard?.writeText(`https://livo.live/room/${liveRoom.id}`);
-                showToast('تم نسخ رابط الغرفة 📋');
-              }}
-              className="w-7 h-7 rounded-full bg-black/40 flex items-center justify-center text-purple-300 hover:text-white"
-              title="مشاركة الغرفة"
-            >
-              <Share2 className="w-3.5 h-3.5" />
-            </button>
-
-            {onMinimize && (
-              <button
-                onClick={onMinimize}
-                className="w-7 h-7 rounded-full bg-amber-500/90 hover:bg-amber-400 text-black flex items-center justify-center"
-                title="لايف مصغر (تصغير الغرفة)"
-              >
-                <Minimize2 className="w-3.5 h-3.5" />
-              </button>
-            )}
-
-            <button
-              onClick={handleExitButtonTap}
-              className="w-7 h-7 rounded-full bg-red-600/80 hover:bg-red-600 flex items-center justify-center text-white"
-              title="إغلاق / خروج"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
+              {(() => {
+                const topSup = livoStore.getRoomSupporters(liveRoom.id)[0];
+                return (
+                  <button
+                    onClick={() => setShowSupportersModal(true)}
+                    className="px-2.5 py-0.5 rounded-full bg-gradient-to-r from-purple-700/90 to-fuchsia-600/90 text-white flex items-center gap-1 font-digits font-black shadow border border-purple-300/40 hover:scale-105 transition-transform"
+                    title="كأس الداعمين في الغرفة"
+                  >
+                    <Trophy className="w-3 h-3 text-[#FFE600] shrink-0" />
+                    <span className="max-w-[70px] truncate">
+                      {topSup ? topSup.displayName : 'No.99+'}
+                    </span>
+                  </button>
+                );
+              })()}
+            </div>
           </div>
         </div>
 
@@ -1099,7 +1143,7 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
 
                         {index === 0 && (
                           <span className="absolute -top-2 left-1/2 -translate-x-1/2 bg-[#FFE600] text-black text-[8px] font-black px-1.5 rounded-full shadow z-20 whitespace-nowrap">
-                            المالك 1
+                            مقعد التحكم
                           </span>
                         )}
 
@@ -1131,13 +1175,22 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
                         )}
                       </div>
                     ) : seat.isLocked ? (
-                      <div className="w-12 h-12 rounded-full border border-dashed border-red-500/60 bg-black/40 flex items-center justify-center text-red-400">
+                      <div className="w-12 h-12 rounded-full border border-dashed border-red-400/60 bg-black/45 flex items-center justify-center text-red-400">
                         <Lock className="w-4 h-4" />
                       </div>
+                    ) : index === 0 ? (
+                      <div className="w-12 h-12 rounded-full bg-black/50 border border-dashed border-[#FFE600]/75 flex flex-col items-center justify-center text-[#FFE600] group-hover:scale-105 transition-all">
+                        {isOwnerOrMod ? (
+                          <Crown className="w-4 h-4 text-[#FFE600]" />
+                        ) : (
+                          <Lock className="w-4 h-4 text-[#FFE600]/85" />
+                        )}
+                        <span className="text-[8px] font-digits font-black">1</span>
+                      </div>
                     ) : (
-                      <div className="w-12 h-12 rounded-full bg-black/40 border border-purple-800/40 flex flex-col items-center justify-center text-purple-300 group-hover:border-amber-400 group-hover:scale-105 transition-all">
-                        <Mic className="w-4 h-4 text-amber-300/80" />
-                        <span className="text-[8px] font-digits font-bold text-purple-300">{seatNumber}</span>
+                      <div className="w-12 h-12 rounded-full bg-black/40 border border-dashed border-white/25 flex flex-col items-center justify-center text-purple-200 group-hover:border-[#FFE600] group-hover:scale-105 transition-all">
+                        <Mic className="w-4 h-4 text-purple-200/80" />
+                        <span className="text-[8px] font-digits font-bold text-purple-200">{seatNumber}</span>
                       </div>
                     )}
                   </div>
@@ -1169,8 +1222,8 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
                         </span>
                       </>
                     ) : (
-                      <span className="text-[10px] truncate font-bold text-purple-100">
-                        {seatNumber === 1 ? 'مقعد المالك' : `مايك ${seatNumber}`}
+                      <span className={`text-[10px] truncate font-bold ${index === 0 ? 'text-[#FFE600]' : 'text-purple-100/85'}`}>
+                        {seatNumber === 1 ? 'مقعد التحكم' : `العدد ${seatNumber}`}
                       </span>
                     )}
                   </div>
@@ -1277,8 +1330,8 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
           </div>
         )}
 
-        {/* Sticky Bottom Toolbar (Visible Chat Input + Games + Emoji + Gift + Mic) */}
-        <div className="p-2.5 px-3 bg-black/85 backdrop-blur-lg border-t border-purple-900/50 flex items-center justify-between gap-1.5 z-20 shrink-0">
+        {/* HAGO Sticky Bottom Toolbar (Gift + 4-Square Games/Tools + Chat Input + Mic) */}
+        <div className="p-2.5 px-3 bg-black/85 backdrop-blur-lg border-t border-white/10 flex items-center justify-between gap-1.5 z-20 shrink-0">
           <button
             onClick={() => setShowGiftsTray(true)}
             className="w-10 h-10 rounded-full bg-gradient-to-tr from-amber-500 via-orange-500 to-yellow-400 text-black flex items-center justify-center shadow-lg shadow-amber-500/30 hover:scale-105 transition-all shrink-0"
@@ -1289,18 +1342,18 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
 
           <button
             onClick={() => setShowGamesModal(true)}
-            className="w-9 h-9 rounded-full bg-purple-900/80 hover:bg-purple-800 border border-purple-500/50 text-[#FFE600] flex items-center justify-center shrink-0 transition-transform active:scale-95"
-            title="ألعاب الغرفة (نرد / قلب الثنائي)"
+            className="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 border border-white/15 text-[#FFE600] flex items-center justify-center shrink-0 transition-transform active:scale-95"
+            title="مركز الألعاب والأدوات"
           >
-            <Gamepad2 className="w-4 h-4" />
+            <LayoutGrid className="w-4 h-4" />
           </button>
 
-          <form onSubmit={handleSendMessage} className="flex-1 flex items-center bg-[#1b0825] border border-purple-700/60 rounded-full px-2.5 py-1.5 gap-1">
+          <form onSubmit={handleSendMessage} className="flex-1 flex items-center bg-white/10 border border-white/15 rounded-full px-2.5 py-1.5 gap-1">
             <button
               type="button"
               onClick={() => setShowEmojiPicker(v => !v)}
               className={`p-1 rounded-full transition-colors shrink-0 ${
-                showEmojiPicker ? 'text-[#FFE600]' : 'text-purple-300 hover:text-white'
+                showEmojiPicker ? 'text-[#FFE600]' : 'text-purple-200 hover:text-white'
               }`}
               title="إيموشن صغير / كبير"
             >
@@ -1315,10 +1368,10 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
                   ? 'سجّل الدخول للكتابة...'
                   : liveRoom.allChatDisabled && !isOwnerOrMod
                   ? 'الكتابة مقفلة حالياً'
-                  : 'اكتب رسالة في الروم...'
+                  : 'جاري إرسال رسالة...'
               }
               disabled={Boolean(currentUser && (liveRoom.allChatDisabled || isUserMutedInRoom) && !isOwnerOrMod)}
-              className="w-full bg-transparent text-xs text-white placeholder-purple-300/60 outline-none"
+              className="w-full bg-transparent text-xs text-white placeholder-purple-200/70 outline-none"
             />
             <button type="submit" className="text-[#FFE600] hover:text-amber-300 p-1 shrink-0">
               <Send className="w-3.5 h-3.5 rotate-180" />
@@ -1825,52 +1878,287 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
           </div>
         )}
 
-        {/* HAGO In-Room Mini Games Modal (🎲 Dice & 💖 Couple Heart) */}
+        {/* HAGO Occupied Seat Profile Popup Sheet */}
+        {selectedProfileSeat && selectedProfileSeat.occupiedByUid && (() => {
+          const targetUid = selectedProfileSeat.occupiedByUid!;
+          const targetUser = livoStore.getUserByUid(targetUid);
+          const displayName = targetUser?.displayName || selectedProfileSeat.occupiedByName || 'عضو';
+          const isTargetFollowed = Boolean(currentUser?.followingUids?.includes(targetUid));
+          const targetLevel = targetUser?.level ?? 0;
+          const charismaPts = (selectedProfileSeat.points || 0) + (targetUser?.diamonds || 0);
+          const likesPts = (targetUser?.followersCount || 0) * 12 + (selectedProfileSeat.giftsCount || 0) * 3;
+          const contribPts = targetUser?.eligibleRechargedCoins || 0;
+
+          return (
+            <div
+              onClick={() => setSelectedProfileSeat(null)}
+              className="absolute inset-0 z-50 bg-black/70 backdrop-blur-xs flex flex-col justify-end animate-in fade-in"
+            >
+              <div
+                onClick={(e) => e.stopPropagation()}
+                className="bg-white text-gray-900 rounded-t-[28px] px-4 pt-12 pb-5 relative shadow-2xl space-y-3"
+              >
+                {/* Protruding Avatar + Frame */}
+                <div className="absolute -top-10 left-1/2 -translate-x-1/2">
+                  <AvatarWithFrame
+                    sizePx={78}
+                    avatarUrl={targetUser?.avatar || selectedProfileSeat.occupiedByAvatar}
+                    displayName={displayName}
+                    frameUrl={targetUser?.equippedFrameUrl || selectedProfileSeat.equippedFrameUrl}
+                    frameGlowColor={targetUser?.frameGlowColor || selectedProfileSeat.frameGlowColor}
+                    frameAnimated={targetUser?.frameAnimated ?? selectedProfileSeat.frameAnimated}
+                    customIconUrl={targetUser?.customIconUrl || selectedProfileSeat.customIconUrl}
+                    customIconGlow={targetUser?.customIconGlow || selectedProfileSeat.customIconGlow}
+                    customIconAnimated={targetUser?.customIconAnimated ?? selectedProfileSeat.customIconAnimated}
+                  />
+                </div>
+
+                {/* Top Left/Right Quick Controls (@ Mention + Report/Mod) */}
+                <div className="flex items-center justify-between -mt-7 mb-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isOwnerOrMod) {
+                        const seatToMod = selectedProfileSeat;
+                        setSelectedProfileSeat(null);
+                        setModerationSeat(seatToMod);
+                      } else {
+                        setSelectedProfileSeat(null);
+                        showToast('تم إرسال البلاغ للإدارة للمراجعة ✓');
+                      }
+                    }}
+                    className="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600 flex items-center justify-center"
+                    title={isOwnerOrMod ? 'إدارة المقعد والصلاحيات' : 'إبلاغ'}
+                  >
+                    {isOwnerOrMod ? <ShieldAlert className="w-4 h-4 text-amber-600" /> : <AlertTriangle className="w-4 h-4" />}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setChatInput((prev) => `@${displayName} ${prev}`.trim() + ' ');
+                      setSelectedProfileSeat(null);
+                    }}
+                    className="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700 flex items-center justify-center"
+                    title="منشن في الدردشة @"
+                  >
+                    <AtSign className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* User Name + Badges */}
+                <div className="text-center space-y-1">
+                  <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                    <UserNameWithBadges
+                      displayName={displayName}
+                      nameGlowColor={targetUser?.nameGlowColor ?? selectedProfileSeat.nameGlowColor}
+                      isVerified={targetUser?.isVerified ?? selectedProfileSeat.isVerified}
+                      verifiedBadgeColor={targetUser?.verifiedBadgeColor ?? selectedProfileSeat.verifiedBadgeColor}
+                      verifiedBadgeShape={targetUser?.verifiedBadgeShape ?? selectedProfileSeat.verifiedBadgeShape}
+                      verifiedBadgeGlow={targetUser?.verifiedBadgeGlow ?? selectedProfileSeat.verifiedBadgeGlow}
+                      customIconUrl={targetUser?.customIconUrl ?? selectedProfileSeat.customIconUrl}
+                      customIconGlow={targetUser?.customIconGlow ?? selectedProfileSeat.customIconGlow}
+                      customIconAnimated={targetUser?.customIconAnimated ?? selectedProfileSeat.customIconAnimated}
+                      badgeSize={15}
+                      iconSize={18}
+                      nameClassName="font-black text-base text-gray-900"
+                      truncate={false}
+                    />
+                  </div>
+                  <div className="flex items-center justify-center gap-1.5 flex-wrap text-[10px]">
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-500 text-white font-digits font-black">
+                      Lv.{targetLevel}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 font-bold">
+                      {targetUid === liveRoom.ownerUid ? 'مضيف القناة' : `المقعد #${selectedProfileSeat.seatIndex + 1}`}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-digits font-bold">
+                      ID: {targetUid}
+                    </span>
+                  </div>
+                </div>
+
+                {/* 4 Pastel Stat Cards */}
+                <div className="grid grid-cols-4 gap-1.5 text-center">
+                  <div className="bg-blue-50/90 rounded-2xl p-2 border border-blue-100">
+                    <span className="text-[9px] text-blue-700 font-bold block">نقاط الإعجاب</span>
+                    <span className="text-xs font-digits font-black text-blue-950">{likesPts.toLocaleString('en-US')}</span>
+                  </div>
+                  <div className="bg-amber-50/90 rounded-2xl p-2 border border-amber-100">
+                    <span className="text-[9px] text-amber-700 font-bold block">الكاريزما</span>
+                    <span className="text-xs font-digits font-black text-amber-950">{charismaPts.toLocaleString('en-US')}</span>
+                  </div>
+                  <div className="bg-emerald-50/90 rounded-2xl p-2 border border-emerald-100">
+                    <span className="text-[9px] text-emerald-700 font-bold block">المساهمة</span>
+                    <span className="text-xs font-digits font-black text-emerald-950">{contribPts.toLocaleString('en-US')}</span>
+                  </div>
+                  <div className="bg-rose-50/90 rounded-2xl p-2 border border-rose-100">
+                    <span className="text-[9px] text-rose-700 font-bold block">المستوى</span>
+                    <span className="text-xs font-digits font-black text-rose-950">Lv.{targetLevel}</span>
+                  </div>
+                </div>
+
+                {/* Agency / Gift Wall Preview Strip */}
+                {(targetUser?.agencyName || selectedProfileSeat.agencyBadgeLabel) && (
+                  <div className="bg-gradient-to-r from-amber-50 via-yellow-50 to-amber-50 border border-amber-200 rounded-2xl px-3 py-2 flex items-center justify-between text-xs">
+                    <span className="font-black text-amber-900">
+                      👑 {targetUser?.agencyName || selectedProfileSeat.agencyBadgeLabel}
+                    </span>
+                    <span className="text-[10px] font-bold text-amber-700">وكالة معتمدة</span>
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setGiftTargetAll(false);
+                    setGiftRecipientUids([targetUid]);
+                    setSelectedProfileSeat(null);
+                    setShowGiftsTray(true);
+                  }}
+                  className="w-full bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-2xl px-3 py-2 flex items-center justify-between text-xs"
+                >
+                  <span className="font-black text-gray-800">لوحة الهدايا 🎁</span>
+                  <span className="text-[11px] font-digits font-bold text-amber-600">
+                    {(selectedProfileSeat.giftsCount || 0).toLocaleString()} هدية مستلمة
+                  </span>
+                </button>
+
+                {/* Bottom Action Buttons (إرسال هدية + تابع) */}
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setGiftTargetAll(false);
+                      setGiftRecipientUids([targetUid]);
+                      setSelectedProfileSeat(null);
+                      setShowGiftsTray(true);
+                    }}
+                    className="py-2.5 rounded-full bg-gradient-to-r from-orange-500 to-amber-500 text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-md active:scale-95 transition-transform"
+                  >
+                    <Gift className="w-4 h-4" />
+                    <span>إرسال هدية</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!currentUser) {
+                        onRequireAuth?.();
+                        return;
+                      }
+                      const followed = livoStore.toggleFollowUser(currentUser.uid, targetUid);
+                      showToast(followed ? `تمت متابعة ${displayName} ✓` : 'تم إلغاء المتابعة');
+                    }}
+                    className={`py-2.5 rounded-full font-black text-xs flex items-center justify-center gap-1.5 shadow-md active:scale-95 transition-transform ${
+                      isTargetFollowed ? 'bg-gray-200 text-gray-800' : 'bg-[#FFE600] text-black'
+                    }`}
+                  >
+                    <UserPlus className="w-4 h-4" />
+                    <span>{isTargetFollowed ? 'متابَع ✓' : 'تابع'}</span>
+                  </button>
+                </div>
+
+                {isOwnerOrMod && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const seatToMod = selectedProfileSeat;
+                      setSelectedProfileSeat(null);
+                      setModerationSeat(seatToMod);
+                    }}
+                    className="w-full py-2 rounded-xl bg-purple-950 text-[#FFE600] font-black text-xs flex items-center justify-center gap-1.5"
+                  >
+                    <ShieldAlert className="w-4 h-4" />
+                    <span>إدارة المقعد (كتم / قفل / طرد / إشراف)</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* HAGO Dark Game Center & Room Tools Sheet */}
         {showGamesModal && currentUser && (
           <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex flex-col justify-end animate-in fade-in">
-            <div className="bg-[#180a28] rounded-t-3xl border-t border-purple-500/70 p-4 space-y-4 max-h-[82dvh] overflow-y-auto text-right">
-              <div className="flex items-center justify-between border-b border-purple-800/50 pb-2.5">
+            <div className="bg-[#181820] rounded-t-3xl border-t border-white/10 p-4 space-y-4 max-h-[84dvh] overflow-y-auto text-right">
+              <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
                 <div className="flex items-center gap-2">
-                  <Gamepad2 className="w-5 h-5 text-[#FFE600]" />
+                  <LayoutGrid className="w-5 h-5 text-[#FFE600]" />
                   <div>
-                    <h4 className="text-sm font-black text-white">ألعاب التفاعل (HAGO Games)</h4>
-                    <p className="text-[10px] text-purple-300">تحديات جماعية تظهر مباشرة لجميع أعضاء الغرفة</p>
+                    <h4 className="text-sm font-black text-white">مركز المستخدم والألعاب</h4>
+                    <p className="text-[10px] text-gray-400">ألعاب تفاعلية وأدوات الغرفة المباشرة</p>
                   </div>
                 </div>
                 <button
                   onClick={() => setShowGamesModal(false)}
-                  className="w-7 h-7 rounded-full bg-purple-900/50 text-purple-200 flex items-center justify-center"
+                  className="w-7 h-7 rounded-full bg-white/10 text-gray-200 flex items-center justify-center"
                 >
                   <X className="w-4 h-4" />
                 </button>
               </div>
 
-              {/* Game 1: Roll Dice */}
-              <button
-                type="button"
-                onClick={() => {
-                  const res = livoStore.rollRoomDice(liveRoom.id, currentUser.uid);
-                  setShowGamesModal(false);
-                  if (!res.success) showToast(res.message);
-                }}
-                className="w-full p-3.5 rounded-2xl bg-gradient-to-r from-indigo-900/70 to-purple-900/70 border border-indigo-400/50 hover:border-[#FFE600] flex items-center justify-between transition-all"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-11 h-11 rounded-2xl bg-[#FFE600] text-black flex items-center justify-center shadow">
+              {/* HAGO 4-Column Circular Quick Tools Grid */}
+              <div className="grid grid-cols-4 gap-3 text-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const res = livoStore.rollRoomDice(liveRoom.id, currentUser.uid);
+                    setShowGamesModal(false);
+                    if (!res.success) showToast(res.message);
+                  }}
+                  className="flex flex-col items-center gap-1.5 group"
+                >
+                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 text-black flex items-center justify-center shadow-lg group-hover:scale-105 transition-transform">
                     <Dices className="w-6 h-6" />
                   </div>
-                  <div className="text-right">
-                    <h5 className="text-xs font-black text-white">🎲 لف النرد العشوائي</h5>
-                    <p className="text-[10px] text-purple-200">ارمِ النرد وأظهر الرقم للجميع في الشات والغرفة</p>
+                  <span className="text-[10px] font-bold text-gray-200">رمي النرد</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowGamesModal(false);
+                    setShowMusicPanel(true);
+                  }}
+                  className="flex flex-col items-center gap-1.5 group"
+                >
+                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-emerald-400 to-teal-600 text-white flex items-center justify-center shadow-lg group-hover:scale-105 transition-transform">
+                    <Music className="w-6 h-6" />
                   </div>
-                </div>
-                <span className="px-3 py-1 rounded-xl bg-[#FFE600] text-black text-[11px] font-black">
-                  ارمِ الآن
-                </span>
-              </button>
+                  <span className="text-[10px] font-bold text-gray-200">الموسيقى</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowGamesModal(false);
+                    openBackgroundPicker();
+                  }}
+                  className="flex flex-col items-center gap-1.5 group"
+                >
+                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-fuchsia-500 to-purple-600 text-white flex items-center justify-center shadow-lg group-hover:scale-105 transition-transform">
+                    <ImageIcon className="w-6 h-6" />
+                  </div>
+                  <span className="text-[10px] font-bold text-gray-200">الخلفيات</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowGamesModal(false);
+                    setShowSupportersModal(true);
+                  }}
+                  className="flex flex-col items-center gap-1.5 group"
+                >
+                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-yellow-400 to-amber-600 text-black flex items-center justify-center shadow-lg group-hover:scale-105 transition-transform">
+                    <Trophy className="w-6 h-6" />
+                  </div>
+                  <span className="text-[10px] font-bold text-gray-200">كأس الغرفة</span>
+                </button>
+              </div>
 
               {/* Game 2: Couple Big Heart (Select 2 members -> 3s Centerpiece) */}
-              <div className="p-3.5 rounded-2xl bg-gradient-to-br from-pink-950/70 to-purple-950/70 border border-pink-500/50 space-y-3">
+              <div className="p-3.5 rounded-2xl bg-gradient-to-br from-pink-950/70 to-[#22192d] border border-pink-500/40 space-y-3">
                 <div className="flex items-center gap-2.5">
                   <div className="w-10 h-10 rounded-2xl bg-pink-500 text-white flex items-center justify-center shadow">
                     <Heart className="w-5 h-5" />
@@ -1933,25 +2221,29 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
           </div>
         )}
 
-        {/* Dynamic Gifts Tray (208+ Gifts, Search, Category Filter, Multi-Seat & All-Seats, Writable Gift Cards) */}
+        {/* HAGO Dark Gifts Tray (#191922) */}
         {showGiftsTray && (
           <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex flex-col justify-end animate-in fade-in">
-            <div className="bg-[#1a0a2a] rounded-t-3xl border-t border-purple-800/80 p-4 space-y-2.5 max-h-[85dvh] flex flex-col">
-              <div className="flex items-center justify-between border-b border-purple-900/50 pb-2 shrink-0">
+            <div className="bg-[#191922] rounded-t-3xl border-t border-white/10 p-4 space-y-2.5 max-h-[86dvh] flex flex-col">
+              <div className="flex items-center justify-between border-b border-white/10 pb-2 shrink-0">
                 <div className="flex items-center gap-2">
-                  <Gift className="w-5 h-5 text-amber-400" />
-                  <span className="text-xs font-bold text-white">متجر الهدايا ({gifts.length})</span>
+                  <Gift className="w-5 h-5 text-[#FFE600]" />
+                  <span className="text-xs font-black text-white">متجر الهدايا ({gifts.length})</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-[11px] font-digits text-amber-300 font-bold">
-                    {currentUser ? `${currentUser?.coins.toLocaleString()} 🪙` : 'سجّل الدخول للإرسال'}
-                  </span>
+                  <button
+                    type="button"
+                    onClick={onOpenRecharge}
+                    className="text-[11px] font-digits bg-white/10 hover:bg-white/20 px-2.5 py-1 rounded-full text-[#FFE600] font-black"
+                  >
+                    {currentUser ? `${currentUser?.coins.toLocaleString()} 🪙 +` : 'شحن'}
+                  </button>
                   <button
                     onClick={() => {
                       setPendingCardGift(null);
                       setShowGiftsTray(false);
                     }}
-                    className="w-7 h-7 rounded-full bg-purple-900/40 flex items-center justify-center text-purple-300 hover:text-white"
+                    className="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center text-gray-300 hover:text-white"
                   >
                     <X className="w-4 h-4" />
                   </button>
@@ -2101,37 +2393,63 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
                     }
                     return true;
                   })
-                  .map((g) => {
+                  .map((g, gIdx) => {
                     const recipientMultiplier = giftTargetAll
                       ? Math.max(1, occupiedUsersForGifts.length)
                       : Math.max(1, giftRecipientUids.length);
+                    const isSelected = selectedGiftItem?.id === g.id || pendingCardGift?.id === g.id;
                     return (
                       <button
                         key={g.id}
-                        onClick={() => handleGiftCardOrTap(g)}
+                        onClick={() => {
+                          setSelectedGiftItem(g);
+                          handleGiftCardOrTap(g);
+                        }}
                         className={`p-2 rounded-2xl border flex flex-col items-center gap-1 transition-all group relative ${
-                          pendingCardGift?.id === g.id
-                            ? 'bg-pink-900/60 border-[#FFE600]'
-                            : 'bg-purple-950/40 hover:bg-purple-900/60 border-purple-800/40 hover:border-amber-400'
+                          isSelected
+                            ? 'bg-amber-500/20 border-[#FFE600]'
+                            : 'bg-white/5 hover:bg-white/10 border-white/10 hover:border-[#FFE600]/60'
                         }`}
                       >
-                        {g.isCard && (
+                        {g.isCard ? (
                           <span className="absolute top-1 left-1 text-[8px] px-1 rounded bg-pink-500 text-white font-black">
                             كارت
                           </span>
-                        )}
+                        ) : gIdx < 8 ? (
+                          <span className="absolute top-1 left-1 text-[7px] px-1 rounded bg-emerald-500 text-white font-black">
+                            NEW
+                          </span>
+                        ) : null}
                         {g.imageUrl ? (
                           <img src={g.imageUrl} alt={g.name} className="w-9 h-9 object-contain group-hover:scale-125 transition-transform" />
                         ) : (
                           <span className="text-3xl group-hover:scale-125 transition-transform">{g.icon}</span>
                         )}
                         <span className="text-[10px] font-bold text-white truncate max-w-full">{g.name}</span>
-                        <span className="text-[9px] font-digits text-amber-300 font-bold">
+                        <span className="text-[9px] font-digits text-[#FFE600] font-bold">
                           {(g.coins * giftCount * recipientMultiplier).toLocaleString()} 🪙
                         </span>
                       </button>
                     );
                   })}
+              </div>
+
+              {/* HAGO Bottom Send Bar */}
+              <div className="pt-2 border-t border-white/10 flex items-center justify-between gap-2 shrink-0">
+                <div className="text-[10px] text-gray-300 truncate">
+                  {selectedGiftItem
+                    ? `المحددة: ${selectedGiftItem.icon} ${selectedGiftItem.name}`
+                    : 'اضغط على أي هدية للإرسال الفوري أو اختر كارت للكتابة'}
+                </div>
+                {selectedGiftItem && (
+                  <button
+                    type="button"
+                    onClick={() => handleGiftCardOrTap(selectedGiftItem)}
+                    className="px-4 py-1.5 rounded-full bg-[#FFE600] hover:bg-yellow-400 text-black font-black text-xs shrink-0 shadow"
+                  >
+                    إرسال ×{giftCount}
+                  </button>
+                )}
               </div>
             </div>
           </div>

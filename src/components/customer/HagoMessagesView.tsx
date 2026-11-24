@@ -488,34 +488,57 @@ export const HagoMessagesView: React.FC<HagoMessagesViewProps> = ({
         {activeTab === 'chats' && (
           <>
             {showSyncBanner && (
-              <div className="m-3 p-3 rounded-2xl bg-[#FFFDE7] border border-[#FFE600]/80 flex items-center justify-between gap-3 shadow-2xs relative">
+              <div className="m-3 p-3.5 rounded-2xl bg-[#FFFDF0] border border-[#FFE600]/80 flex items-center justify-between gap-3 shadow-2xs relative">
                 <button
                   onClick={() => setShowSyncBanner(false)}
                   className="absolute top-2 left-2 text-gray-400 hover:text-black text-xs"
+                  aria-label="إغلاق"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
-
-                <div className="flex-1 min-w-0 pr-1">
-                  <h4 className="font-extrabold text-xs text-gray-900 mb-0.5">
-                    البحث السريع عن الأصدقاء بالمعرف UID
-                  </h4>
-                  <p className="text-[10px] text-gray-600 line-clamp-1">
-                    أرسل طلب مراسلة أو تواصل مع جهات اتصالك المعتمدة بخصوصية تامة
-                  </p>
-                </div>
 
                 <button
                   onClick={() => {
                     setShowAddFriendModal(true);
                     setShowSyncBanner(false);
                   }}
-                  className="bg-[#FFE600] hover:bg-yellow-400 text-black font-extrabold text-xs px-3.5 py-1.5 rounded-full shadow-2xs shrink-0 active:scale-95 transition-all"
+                  className="bg-[#FFE600] hover:bg-yellow-400 text-black font-black text-xs px-4 py-2 rounded-full shadow-2xs shrink-0 active:scale-95 transition-all"
                 >
-                  بحث الآن
+                  توصيل
                 </button>
+
+                <div className="flex-1 min-w-0 text-right pr-1">
+                  <h4 className="font-black text-xs text-gray-900 mb-0.5">
+                    الاتصال بـ جهات الاتصال
+                  </h4>
+                  <p className="text-[10px] text-gray-600 line-clamp-2">
+                    ابحث بالمعرف UID (10000 - 100000+) أو تواصل مع أصدقائك في LIVO بخصوصية تامة
+                  </p>
+                </div>
               </div>
             )}
+
+            {/* HAGO-style Activity & Quick Contacts Strip */}
+            <div
+              onClick={() => setShowQuickRoomModal(true)}
+              className="px-4 py-2.5 flex items-center justify-between gap-3 hover:bg-gray-50/80 cursor-pointer border-b border-gray-50"
+            >
+              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-orange-400 to-amber-500 flex items-center justify-center text-white text-xl shadow-xs shrink-0">
+                ⭐
+              </div>
+              <div className="flex-1 min-w-0 text-right">
+                <div className="flex items-center justify-between mb-0.5">
+                  <div className="flex items-center gap-1">
+                    <span className="font-extrabold text-sm text-gray-900">النشاط</span>
+                    <CheckCircle2 className="w-3.5 h-3.5 text-amber-500 fill-amber-100" />
+                  </div>
+                  <span className="text-[10px] text-gray-400">الآن</span>
+                </div>
+                <p className="text-xs text-gray-500 truncate">
+                  مرحباً بك في LIVO! أنشئ غرفتك الصوتية أو ادعُ أصدقاءك الآن ✨
+                </p>
+              </div>
+            </div>
 
             {/* Quick Real Contacts Strip */}
             {quickStripUsers.length > 0 && (
@@ -1078,6 +1101,21 @@ export const HagoMessagesView: React.FC<HagoMessagesViewProps> = ({
             </div>
 
             <div className="flex items-center gap-1.5 text-gray-600">
+              {!activeChatTarget.isBot && (
+                <button
+                  onClick={() => {
+                    const followed = livoStore.toggleFollowUser(currentUser?.uid, activeChatTarget.id);
+                    showToast(followed ? `تمت متابعة ${activeChatTarget.name} ✓` : 'تم إلغاء المتابعة');
+                  }}
+                  className={`px-3 py-1 rounded-full text-[11px] font-black transition-all ${
+                    followingSet.has(activeChatTarget.id)
+                      ? 'bg-gray-100 text-gray-700'
+                      : 'bg-[#FFE600] hover:bg-yellow-400 text-black'
+                  }`}
+                >
+                  {followingSet.has(activeChatTarget.id) ? 'متابَع ✓' : 'تابع +'}
+                </button>
+              )}
               {canDirectChat && (
                 <>
                   <button
@@ -1211,7 +1249,32 @@ export const HagoMessagesView: React.FC<HagoMessagesViewProps> = ({
           ) : (
             <>
               {/* Messages Stream */}
-              <div className="flex-1 overflow-y-auto p-3 space-y-3 bg-[#F8F9FA]">
+              <div className="flex-1 overflow-y-auto p-3 space-y-3 bg-[#F6F7F9]">
+                {/* Partner HAGO Intro Card */}
+                {(() => {
+                  const partner = !activeChatTarget.isBot ? livoStore.getUserByUid(activeChatTarget.id) : undefined;
+                  return (
+                    <div className="bg-white rounded-2xl border border-gray-100 p-3 flex items-center justify-between gap-3 shadow-2xs">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <img
+                          src={activeChatTarget.avatar}
+                          alt={activeChatTarget.name}
+                          className="w-12 h-12 rounded-2xl object-cover shrink-0 border border-gray-100"
+                        />
+                        <div className="min-w-0">
+                          <h4 className="font-black text-xs text-gray-900 truncate">{activeChatTarget.name}</h4>
+                          <p className="text-[10px] text-gray-500 truncate">
+                            {partner?.bio || (activeChatTarget.isBot ? 'قناة الدعم الرسمية في LIVO' : `UID: ${activeChatTarget.id} • Lv.${partner?.level || 0}`)}
+                          </p>
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-black px-2 py-1 rounded-full bg-amber-50 text-amber-700 shrink-0">
+                        {activeChatTarget.isBot ? 'رسمي' : `Lv.${partner?.level || 0}`}
+                      </span>
+                    </div>
+                  );
+                })()}
+
                 {activeConversationMessages.length > 0 ? (
                   activeConversationMessages.map((msg) => (
                     <div
@@ -1245,11 +1308,38 @@ export const HagoMessagesView: React.FC<HagoMessagesViewProps> = ({
                     </div>
                   ))
                 ) : (
-                  <div className="text-center py-12 text-gray-400">
+                  <div className="text-center py-8 text-gray-400">
                     <p className="text-xs font-bold text-gray-500">لا توجد رسائل سابقة في هذه المحادثة</p>
-                    <p className="text-[10px] text-gray-400 mt-1">اكتب رسالتك الآن وستصل مباشرة إلى الطرف الآخر 💬</p>
+                    <p className="text-[10px] text-gray-400 mt-1">اختر تحية سريعة بالأسفل أو اكتب رسالتك الآن 💬</p>
                   </div>
                 )}
+              </div>
+
+              {/* HAGO Quick Greeting Stickers Bar ("رحّب بأصدقائك!") */}
+              <div className="px-3 py-1.5 bg-white border-t border-gray-100 flex items-center gap-2 overflow-x-auto no-scrollbar">
+                <span className="text-[10px] font-black text-gray-500 shrink-0">رحّب بأصدقائك!</span>
+                {[
+                  { emoji: '👋', label: 'Hi مرحباً!' },
+                  { emoji: '🌹', label: 'منور يا غالي' },
+                  { emoji: '🎙️', label: 'تعال الغرفة الصوتية' },
+                  { emoji: '💎', label: 'أهلاً بك في LIVO' }
+                ].map((sticker, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => {
+                      livoStore.sendDirectMessage({
+                        senderUid: currentUser?.uid,
+                        receiverUid: activeChatTarget.id,
+                        content: `${sticker.emoji} ${sticker.label}`
+                      });
+                    }}
+                    className="px-2.5 py-1 rounded-xl bg-amber-50 hover:bg-[#FFE600] border border-amber-200 text-gray-900 text-[10px] font-bold flex items-center gap-1 shrink-0 transition-colors"
+                  >
+                    <span>{sticker.emoji}</span>
+                    <span>{sticker.label}</span>
+                  </button>
+                ))}
               </div>
 
               {/* Chat Reply Input Bar */}

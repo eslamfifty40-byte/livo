@@ -14,10 +14,13 @@ export default defineConfig(() => {
     build: {
       chunkSizeWarningLimit: 2000,
       rollupOptions: {
-        input: {
-          main: path.resolve(import.meta.dirname, 'index.html'),
-          admin: path.resolve(import.meta.dirname, 'admin.html'),
-        },
+        input:
+          process.env.VITE_APP_MODE === 'customer' || process.env.VITE_APP_MODE === 'admin'
+            ? path.resolve(import.meta.dirname, 'index.html')
+            : {
+                main: path.resolve(import.meta.dirname, 'index.html'),
+                admin: path.resolve(import.meta.dirname, 'admin.html'),
+              },
       },
     },
     server: {

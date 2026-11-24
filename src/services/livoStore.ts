@@ -238,13 +238,31 @@ class LivoStore {
     } catch {}
   }
 
+  private enforceOwnerAccountDefaults(u: UserProfile): UserProfile {
+    const isOwner = u.uid === '10000' || u.role === 'owner' || this.isOwnerEmail(u.email);
+    if (!isOwner) return u;
+    if ((u.level || 0) >= 50 && u.isVerified && u.role === 'owner') {
+      return u;
+    }
+    return {
+      ...u,
+      role: 'owner',
+      isVerified: true,
+      level: 50,
+      unlockedLevelRewards:
+        u.unlockedLevelRewards && u.unlockedLevelRewards.length >= 51
+          ? u.unlockedLevelRewards
+          : Array.from({ length: 51 }, (_, i) => i)
+    };
+  }
+
   private mergeUsersSafe(firestoreUsers: UserProfile[]) {
     const now = Date.now();
     const map = new Map<string, UserProfile>();
 
     for (const u of firestoreUsers) {
       if (!this.isFakeUserRecord(u)) {
-        map.set(u.uid, u);
+        map.set(u.uid, this.enforceOwnerAccountDefaults(u));
       }
     }
 
@@ -253,10 +271,11 @@ class LivoStore {
       if (this.isFakeUserRecord(localU)) continue;
       const touchedAt = this.recentUserTouchMs.get(localU.uid) || 0;
       const isActiveLocal = localU.uid === this.currentUid;
+      const normalizedLocal = this.enforceOwnerAccountDefaults(localU);
       if (!map.has(localU.uid) && (isActiveLocal || now - touchedAt < 10000)) {
-        map.set(localU.uid, localU);
+        map.set(localU.uid, normalizedLocal);
       } else if (map.has(localU.uid) && now - touchedAt < 3500) {
-        map.set(localU.uid, localU);
+        map.set(localU.uid, normalizedLocal);
       }
     }
 
@@ -275,6 +294,7 @@ class LivoStore {
     if (r.isOfficial || r.id === 'room-official-livo') return false;
     const lowerId = r.id.toLowerCase();
     const lowerOwnerUid = r.ownerUid.toLowerCase();
+    const lowerTitle = (r.title || '').toLowerCase();
     if (
       LEGACY_DEMO_UIDS.has(r.ownerUid) ||
       lowerId.startsWith('room-demo') ||
@@ -282,7 +302,11 @@ class LivoStore {
       lowerId.startsWith('demo_') ||
       lowerId.startsWith('fake_') ||
       lowerOwnerUid.startsWith('demo_') ||
-      lowerOwnerUid.startsWith('fake_')
+      lowerOwnerUid.startsWith('fake_') ||
+      lowerTitle.includes('وهمي') ||
+      lowerTitle.includes('تجريبي') ||
+      lowerTitle.includes('demo room') ||
+      lowerTitle.includes('fake room')
     ) {
       return true;
     }
@@ -290,7 +314,10 @@ class LivoStore {
     if (Date.now() - touchedAt < 12000) {
       return false;
     }
-    if (!r.ownerAuthUid && this.usersLoadedOnce) {
+    if (!r.ownerAuthUid) {
+      return true;
+    }
+    if (this.usersLoadedOnce) {
       const ownerExists = this.users.some(
         (u) => u.uid === r.ownerUid && !this.isFakeUserRecord(u)
       );
@@ -1001,9 +1028,13 @@ class LivoStore {
       if (fbUser.photoURL && (!matched.avatar || matched.avatar === '/assets/livo/customer_icon.jpg')) {
         updates.avatar = fbUser.photoURL;
       }
-      if (isOwner && matched.role !== 'owner') {
-        updates.role = 'owner';
-        updates.isVerified = true;
+      if (isOwner) {
+        if (matched.role !== 'owner') updates.role = 'owner';
+        if (!matched.isVerified) updates.isVerified = true;
+        if ((matched.level || 0) < 50) updates.level = 50;
+        if (!matched.unlockedLevelRewards || matched.unlockedLevelRewards.length < 51) {
+          updates.unlockedLevelRewards = Array.from({ length: 51 }, (_, i) => i);
+        }
       } else if (!isOwner && activeSupervisor && matched.role === 'user') {
         updates.role = 'supervisor';
       }
@@ -1189,7 +1220,8 @@ class LivoStore {
     const index = this.users.findIndex(u => u.uid === uid);
     if (index !== -1) {
       this.recentUserTouchMs.set(uid, Date.now());
-      this.users[index] = { ...this.users[index], ...updates };
+      const merged = this.enforceOwnerAccountDefaults({ ...this.users[index], ...updates });
+      this.users[index] = merged;
       this.persistUsersCache();
       if (this.currentUid === uid) {
         this.saveAccountToDevice(this.users[index]);
@@ -2194,8 +2226,12 @@ class LivoStore {
   // --- ROOMS & OFFICIAL ADMIN ROOM CONTROL (STRICT SINGLE-MIC & OWNER SEAT #1 RULES) ---
   public getRooms(): VoiceRoom[] {
     return this.rooms.filter(
-      (r) => !this.isFakeRoomRecord(r) && (r.isOfficial || r.status === 'open')
+      (r) => !this.isFakeRoomRecord(r) && r.status === 'open'
     );
+  }
+
+  public getOfficialRoom(): VoiceRoom | undefined {
+    return this.rooms.find((r) => r.isOfficial || r.id === 'room-official-livo');
   }
 
   public getAllRoomsForAdmin(): VoiceRoom[] {
@@ -2784,7 +2820,13 @@ class LivoStore {
 
     const balanceBefore = sender.coins;
     const balanceAfter = balanceBefore - totalCost;
-    this.updateUserProfile(sender.uid, { coins: balanceAfter });
+    const eligibleBefore = sender.eligibleRechargedCoins || 0;
+    const eligibleAfter = eligibleBefore + totalCost;
+    this.updateUserProfile(sender.uid, {
+      coins: balanceAfter,
+      eligibleRechargedCoins: eligibleAfter
+    });
+    const promoResult = this.checkAndPromoteUserLevel(sender.uid);
 
     const nowIso = new Date().toISOString();
     const targetSet = new Set(recipients.map((r) => r.uid));
@@ -2854,11 +2896,14 @@ class LivoStore {
     });
 
     const cardSuffix = cleanCardMsg ? ` 💌 "${cleanCardMsg}"` : '';
+    const promoSuffix = promoResult.promoted
+      ? ` — 🎉 ارتقى ${sender.displayName} إلى المستوى ${promoResult.newLevel}!`
+      : '';
     const giftMsg: RoomMessage = {
       id: `rmsg-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       uid: sender.uid,
       user: sender.displayName,
-      text: `أرسل ${count > 1 ? `${count}× ` : ''}${gift.icon} ${gift.name} إلى ${displayRecipientLabel}${cardSuffix}`,
+      text: `أرسل ${count > 1 ? `${count}× ` : ''}${gift.icon} ${gift.name} إلى ${displayRecipientLabel}${cardSuffix}${promoSuffix}`,
       isVip: true,
       isVerified: sender.isVerified,
       verifiedBadgeColor: sender.verifiedBadgeColor,
