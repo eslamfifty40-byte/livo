@@ -268,22 +268,13 @@ export const HagoProfileView: React.FC<HagoProfileViewProps> = ({
                   customIconGlow={user.customIconGlow}
                   customIconAnimated={user.customIconAnimated}
                   customIconLabel={user.customIconLabel}
+                  agencyLabel={livoStore.getAgencyDisplayLabel(user)}
+                  agencyLabelBelow={true}
                   badgeSize={18}
                   iconSize={22}
                   nameClassName="font-black text-base text-gray-900"
                   truncate={false}
                 />
-                {/* Charging Agent Badge (Requirement 3: Appears next to name after Admin approval) */}
-                {(user.role === 'charging_agent' || (user.agencyType === 'charging_agent' && user.canChargeUsers)) && (
-                  <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-400 to-yellow-300 text-black text-[10px] font-black border border-amber-500/60 shadow-xs">
-                    <span>⚡ وكيل شحن معتمد</span>
-                  </span>
-                )}
-                {user.role === 'distributor_agent' && (
-                  <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-gradient-to-r from-purple-700 to-indigo-700 text-white text-[10px] font-black border border-purple-500 shadow-xs">
-                    <span>📦 وكيل موزعين معتمد</span>
-                  </span>
-                )}
               </div>
 
               {/* UID with Copy Button */}

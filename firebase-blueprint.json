@@ -39,6 +39,8 @@
         "customIconAnimated": { "type": "boolean" },
         "locationEnabled": { "type": "boolean" },
         "locationCoords": { "type": "object" },
+        "canStealthRooms": { "type": "boolean" },
+        "agencyBadgeLabel": { "type": "string", "maxLength": 32 },
         "createdAt": { "type": "string" }
       },
       "required": ["uid", "username", "displayName", "role", "coins"]
@@ -103,8 +105,11 @@
         "viewersCount": { "type": "number" },
         "seatCount": { "type": "number" },
         "moderatorUids": { "type": "array" },
+        "micBlockedUids": { "type": "array" },
+        "stealthUids": { "type": "array" },
         "roomType": { "type": "string", "enum": ["voice", "live"] },
-        "latestGiftBlast": { "type": "object" }
+        "latestGiftBlast": { "type": "object" },
+        "latestGameEvent": { "type": "object" }
       },
       "required": ["title", "ownerUid", "status"]
     },
@@ -291,6 +296,8 @@
         "coins": { "type": "number" },
         "icon": { "type": "string", "maxLength": 100 },
         "animationType": { "type": "string" },
+        "category": { "type": "string", "maxLength": 48 },
+        "isCard": { "type": "boolean" },
         "durationMs": { "type": "number" },
         "imageUrl": { "type": "string", "maxLength": 500000 },
         "isActive": { "type": "boolean" },
@@ -389,6 +396,81 @@
         "updatedAt": { "type": "string" }
       },
       "required": ["authUid", "role", "isActive"]
+    },
+    "GiftSupportLog": {
+      "title": "GiftSupportLog",
+      "description": "Immutable gift transaction log powering Room Cup and Daily/Weekly/Monthly Supporters Leaderboard",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "roomId": { "type": "string", "maxLength": 64 },
+        "roomTitle": { "type": "string", "maxLength": 120 },
+        "senderUid": { "type": "string", "maxLength": 32 },
+        "senderName": { "type": "string", "maxLength": 64 },
+        "senderAvatar": { "type": "string", "maxLength": 200000 },
+        "recipientUid": { "type": "string", "maxLength": 32 },
+        "recipientName": { "type": "string", "maxLength": 64 },
+        "giftId": { "type": "string", "maxLength": 64 },
+        "giftName": { "type": "string", "maxLength": 100 },
+        "giftIcon": { "type": "string", "maxLength": 64 },
+        "coinsTotal": { "type": "number" },
+        "count": { "type": "number" },
+        "cardMessage": { "type": "string", "maxLength": 200 },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "roomId", "senderUid", "recipientUid", "coinsTotal", "createdAt"]
+    },
+    "SplashBannerConfig": {
+      "title": "SplashBannerConfig",
+      "description": "Admin 3-second fullscreen splash greeting or gift banner shown on app open",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "title": { "type": "string", "maxLength": 160 },
+        "dedicationMessage": { "type": "string", "maxLength": 300 },
+        "senderName": { "type": "string", "maxLength": 64 },
+        "recipientName": { "type": "string", "maxLength": 64 },
+        "imageUrl": { "type": "string", "maxLength": 600000 },
+        "isActive": { "type": "boolean" },
+        "durationMs": { "type": "number" },
+        "createdAt": { "type": "string" },
+        "createdBy": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["id", "title", "imageUrl", "isActive", "createdAt"]
+    },
+    "InAppNotification": {
+      "title": "InAppNotification",
+      "description": "Real-time in-app toast/banner notification for user events such as recharge approvals",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "uid": { "type": "string", "maxLength": 32 },
+        "type": { "type": "string", "enum": ["recharge_approved", "gift_received", "system", "agency_approved"] },
+        "title": { "type": "string", "maxLength": 160 },
+        "body": { "type": "string", "maxLength": 500 },
+        "coinsAmount": { "type": "number" },
+        "isRead": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "uid", "type", "title", "body", "isRead", "createdAt"]
+    },
+    "RoomRtcSignal": {
+      "title": "RoomRtcSignal",
+      "description": "Ephemeral WebRTC peer-to-peer audio signaling message for voice rooms",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "roomId": { "type": "string", "maxLength": 64 },
+        "fromUid": { "type": "string", "maxLength": 32 },
+        "fromAuthUid": { "type": "string", "maxLength": 128 },
+        "toUid": { "type": "string", "maxLength": 32 },
+        "type": { "type": "string", "enum": ["offer", "answer", "candidate", "presence"] },
+        "sdp": { "type": "string", "maxLength": 30000 },
+        "sdpType": { "type": "string", "enum": ["offer", "answer"] },
+        "candidate": { "type": "object" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "roomId", "fromUid", "toUid", "type", "createdAt"]
     }
   },
   "firestore": {
@@ -471,6 +553,22 @@
     "/staff_auth/{authUid}": {
       "schema": "StaffAuthRecord",
       "description": "Authorized staff auth UID roles for Firestore rule verification"
+    },
+    "/gift_logs/{logId}": {
+      "schema": "GiftSupportLog",
+      "description": "Gift support logs for Room Cup and Supporters Leaderboard"
+    },
+    "/splash_banners/{bannerId}": {
+      "schema": "SplashBannerConfig",
+      "description": "Admin fullscreen 3s splash banners displayed on customer app open"
+    },
+    "/notifications/{notifId}": {
+      "schema": "InAppNotification",
+      "description": "Real-time user notifications for recharge approvals and system alerts"
+    },
+    "/room_rtc_signals/{signalId}": {
+      "schema": "RoomRtcSignal",
+      "description": "WebRTC signaling records for live voice room audio"
     }
   }
 }

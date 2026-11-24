@@ -95,7 +95,7 @@ service cloud.firestore {
         data.get('diamonds', 0) == 0 &&
         data.isVerified == false &&
         !data.keys().hasAny(adminCosmeticKeys()) &&
-        !data.keys().hasAny(['canChargeUsers', 'isBanned', 'banDetails', 'verifiedUntil', 'agencyType', 'agencyName', 'agentBalance']);
+        !data.keys().hasAny(['canChargeUsers', 'canStealthRooms', 'agencyBadgeLabel', 'isBanned', 'banDetails', 'verifiedUntil', 'agencyType', 'agencyName', 'agentBalance']);
     }
 
     function isValidRechargeReq(data) {
@@ -166,6 +166,7 @@ service cloud.firestore {
 
       allow create: if isValidDocId(userId) && (
         isOwner() ||
+        (isAdminOrSupervisor() && request.resource.data.get('role', 'user') != 'owner') ||
         (isAuthenticated() && isValidUserCreate(request.resource.data, userId))
       );
 
@@ -179,6 +180,8 @@ service cloud.firestore {
           request.resource.data.get('isVerified', false) == resource.data.get('isVerified', false) &&
           request.resource.data.get('verifiedUntil', '') == resource.data.get('verifiedUntil', '') &&
           request.resource.data.get('canChargeUsers', false) == resource.data.get('canChargeUsers', false) &&
+          request.resource.data.get('canStealthRooms', false) == resource.data.get('canStealthRooms', false) &&
+          request.resource.data.get('agencyBadgeLabel', '') == resource.data.get('agencyBadgeLabel', '') &&
           request.resource.data.get('isBanned', false) == resource.data.get('isBanned', false) &&
           request.resource.data.coins is number &&
           request.resource.data.coins >= 0 &&
@@ -203,7 +206,10 @@ service cloud.firestore {
         )
       );
 
-      allow delete: if isValidDocId(userId) && isOwner();
+      allow delete: if isValidDocId(userId) && (
+        isOwner() ||
+        (isAdminOrSupervisor() && resource.data.get('role', 'user') != 'owner')
+      );
     }
 
     // 2. Direct Private Messages (bound via senderAuthUid / receiverAuthUid)
@@ -647,7 +653,74 @@ service cloud.firestore {
       allow create, update, delete: if isValidDocId(staffAuthUid) && isOwner();
     }
 
-    // 20. Connection health check doc
+    // 20. Gift Support Logs (Room Cup & Daily/Weekly/Monthly Supporters Leaderboard)
+    match /gift_logs/{logId} {
+      allow read: if true;
+
+      allow create: if isValidDocId(logId) &&
+        isAuthenticated() &&
+        isNonEmptyStrMax(request.resource.data.roomId, 64) &&
+        isNonEmptyStrMax(request.resource.data.senderUid, 32) &&
+        isNonEmptyStrMax(request.resource.data.recipientUid, 32) &&
+        request.resource.data.coinsTotal is number &&
+        request.resource.data.coinsTotal > 0;
+
+      allow update, delete: if isValidDocId(logId) && isAdminOrSupervisor();
+    }
+
+    // 21. Admin 3-Second Fullscreen Splash Greeting / Gift Banners
+    match /splash_banners/{bannerId} {
+      allow read: if true;
+
+      allow create, update: if isValidDocId(bannerId) &&
+        isAdminOrSupervisor() &&
+        isNonEmptyStrMax(request.resource.data.title, 160) &&
+        isNonEmptyStrMax(request.resource.data.imageUrl, 600000);
+
+      allow delete: if isValidDocId(bannerId) && isAdminOrSupervisor();
+    }
+
+    // 22. Real-Time In-App Notifications
+    match /notifications/{notifId} {
+      allow read: if isAuthenticated();
+
+      allow create: if isValidDocId(notifId) &&
+        isAuthenticated() &&
+        isNonEmptyStrMax(request.resource.data.uid, 32) &&
+        isNonEmptyStrMax(request.resource.data.title, 160) &&
+        isStrMax(request.resource.data.body, 500) &&
+        (
+          isAdminOrSupervisor() ||
+          request.resource.data.get('type', 'system') != 'recharge_approved'
+        );
+
+      allow update: if isValidDocId(notifId) && (
+        isAdminOrSupervisor() ||
+        (
+          isAuthenticated() &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead'])
+        )
+      );
+
+      allow delete: if isValidDocId(notifId) && isAdminOrSupervisor();
+    }
+
+    // 23. WebRTC Live Voice Room Signaling
+    match /room_rtc_signals/{signalId} {
+      allow read: if isAuthenticated();
+
+      allow create: if isValidDocId(signalId) &&
+        isAuthenticated() &&
+        isNonEmptyStrMax(request.resource.data.roomId, 64) &&
+        isNonEmptyStrMax(request.resource.data.fromUid, 32) &&
+        isNonEmptyStrMax(request.resource.data.toUid, 32) &&
+        request.resource.data.type in ['offer', 'answer', 'candidate', 'presence'];
+
+      allow update: if false;
+      allow delete: if isValidDocId(signalId) && isAuthenticated();
+    }
+
+    // 24. Connection health check doc
     match /test/{docId} {
       allow read: if true;
     }

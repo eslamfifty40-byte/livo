@@ -13,6 +13,8 @@ interface UserNameWithBadgesProps {
   customIconGlow?: string;
   customIconAnimated?: boolean;
   customIconLabel?: string;
+  agencyLabel?: string;
+  agencyLabelBelow?: boolean;
   badgeSize?: number;
   iconSize?: number;
   nameClassName?: string;
@@ -38,6 +40,8 @@ export const UserNameWithBadges: React.FC<UserNameWithBadgesProps> = ({
   customIconGlow,
   customIconAnimated = true,
   customIconLabel,
+  agencyLabel,
+  agencyLabelBelow = false,
   badgeSize = 15,
   iconSize = 19,
   nameClassName = '',
@@ -47,7 +51,7 @@ export const UserNameWithBadges: React.FC<UserNameWithBadgesProps> = ({
   const glowClass =
     nameGlowColor && nameGlowColor !== 'none' ? `name-glow-${nameGlowColor}` : '';
 
-  return (
+  const row = (
     <span className={`inline-flex items-center gap-1 min-w-0 max-w-full align-middle ${className}`}>
       <span className={`${truncate ? 'truncate' : ''} ${glowClass} ${nameClassName}`}>
         {displayName}
@@ -82,6 +86,38 @@ export const UserNameWithBadges: React.FC<UserNameWithBadgesProps> = ({
           glow={verifiedBadgeGlow !== false}
         />
       )}
+
+      {agencyLabel && !agencyLabelBelow && (
+        <span
+          className={`inline-flex items-center px-1.5 py-0.2 rounded-md text-[9px] font-black shrink-0 border ${
+            agencyLabel.includes('شحن')
+              ? 'bg-amber-400/90 text-black border-amber-500'
+              : 'bg-purple-700/90 text-white border-purple-400'
+          }`}
+        >
+          {agencyLabel}
+        </span>
+      )}
     </span>
   );
+
+  if (agencyLabel && agencyLabelBelow) {
+    return (
+      <span className="inline-flex flex-col items-start min-w-0 max-w-full">
+        {row}
+        <span
+          className={`mt-0.5 inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded-md text-[9px] font-black leading-tight border ${
+            agencyLabel.includes('شحن')
+              ? 'bg-gradient-to-r from-amber-400 to-yellow-300 text-black border-amber-500/80 shadow-2xs'
+              : 'bg-gradient-to-r from-purple-700 to-indigo-700 text-white border-purple-400/70 shadow-2xs'
+          }`}
+        >
+          {agencyLabel.includes('شحن') ? '⚡ ' : '🎙️ '}
+          {agencyLabel}
+        </span>
+      </span>
+    );
+  }
+
+  return row;
 };

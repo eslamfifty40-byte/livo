@@ -71,7 +71,8 @@ import {
   DirectMessage,
   CoinPackage,
   SupervisorRecord,
-  VoiceRoom
+  VoiceRoom,
+  SplashBannerConfig
 } from '../../types';
 import { livoStore } from '../../services/livoStore';
 import { firebaseService } from '../../services/firebase';
@@ -189,6 +190,11 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
   const [newGiftImageUrl, setNewGiftImageUrl] = useState('');
   const [isProcessingGiftImage, setIsProcessingGiftImage] = useState(false);
   const [newGiftAnimation, setNewGiftAnimation] = useState<GiftItem['animationType']>('heart');
+  const [newGiftIsCard, setNewGiftIsCard] = useState(false);
+  const [newGiftCategory, setNewGiftCategory] = useState('ملكي');
+  const [giftAdminSearch, setGiftAdminSearch] = useState('');
+  const [giftAdminCategory, setGiftAdminCategory] = useState('الكل');
+  const [isSyncing200Gifts, setIsSyncing200Gifts] = useState(false);
 
   // Live Gift Blaster (ضرب وإرسال الهدايا للغرف)
   const [blastRoomId, setBlastRoomId] = useState('');
@@ -196,6 +202,8 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
   const [blastCount, setBlastCount] = useState<number>(5);
   const [blastRecipientUid, setBlastRecipientUid] = useState('');
   const [blastSenderName, setBlastSenderName] = useState('إدارة LIVO الملكية');
+  const [blastTargetAll, setBlastTargetAll] = useState(false);
+  const [blastCardMessage, setBlastCardMessage] = useState('');
 
   // VIP Cosmetics Studio (حصري للإدارة فقط)
   const [cosmeticSearchQuery, setCosmeticSearchQuery] = useState('');
@@ -239,6 +247,19 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
   const [newAdEndDate, setNewAdEndDate] = useState(new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString().split('T')[0]);
   const [adDeleteConfirmId, setAdDeleteConfirmId] = useState<string | null>(null);
   const [isUploadingAdImage, setIsUploadingAdImage] = useState(false);
+
+  // Admin 3s Fullscreen Splash Banners + UID Change + Fake User Cleanup
+  const [splashBanners, setSplashBanners] = useState<SplashBannerConfig[]>(livoStore.getSplashBanners());
+  const [splashTitle, setSplashTitle] = useState('');
+  const [splashDedication, setSplashDedication] = useState('');
+  const [splashSender, setSplashSender] = useState('إدارة LIVO الملكية');
+  const [splashRecipient, setSplashRecipient] = useState('');
+  const [splashImageUrl, setSplashImageUrl] = useState('');
+  const [isUploadingSplashImg, setIsUploadingSplashImg] = useState(false);
+  const [uidChangeTarget, setUidChangeTarget] = useState<UserProfile | null>(null);
+  const [uidChangeInput, setUidChangeInput] = useState('');
+  const [isChangingUid, setIsChangingUid] = useState(false);
+  const [isPurgingFakeUsers, setIsPurgingFakeUsers] = useState(false);
 
   // Toast notification
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -353,6 +374,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
       setCoinPackagesList([...livoStore.getCoinPackages()]);
       setSupervisors([...livoStore.getSupervisors()]);
       setAllMessages([...livoStore.getMessages()]);
+      setSplashBanners([...livoStore.getSplashBanners()]);
       if (latestFbUser) {
         const em = latestFbUser.email?.trim().toLowerCase() || '';
         const authorized = livoStore.isAuthorizedAdminEmail(em);
@@ -970,8 +992,9 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
       coins: parsedPrice,
       icon: newGiftIcon.trim() || '🎁',
       imageUrl: newGiftImageUrl.trim() || undefined,
-      category: existingGift?.category || 'popular',
+      category: newGiftCategory.trim() || existingGift?.category || 'ملكي',
       animationType: newGiftAnimation,
+      isCard: newGiftIsCard || newGiftAnimation === 'card',
       durationMs: existingGift?.durationMs || 3500,
       isActive: existingGift?.isActive ?? true,
       updatedAt: new Date().toISOString()
@@ -985,6 +1008,8 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
     setNewGiftIcon('🎁');
     setNewGiftImageUrl('');
     setNewGiftAnimation('heart');
+    setNewGiftIsCard(false);
+    setNewGiftCategory('ملكي');
   };
 
   const handleToggleGiftStatus = (gift: GiftItem) => {
@@ -2010,6 +2035,184 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                   ))
                 )}
               </div>
+
+              {/* Admin Fullscreen 3-Second Splash Greeting / Gift Banner */}
+              <div className="bg-white rounded-2xl border border-amber-300 shadow-sm p-4 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-gray-100">
+                  <div>
+                    <h3 className="text-sm font-black text-gray-900 flex items-center gap-1.5">
+                      <Sparkles className="w-4 h-4 text-amber-500" />
+                      <span>بانر الترحيب والإهداء بملء الشاشة (3 ثوانٍ عند فتح التطبيق)</span>
+                    </h3>
+                    <p className="text-[11px] text-gray-500 mt-0.5">
+                      صورة احتفالية تظهر 3 ثوانٍ عند دخول المستخدم للتطبيق كإهداء أو ترحيب رسمي من الإدارة
+                    </p>
+                  </div>
+                  <span className="text-[10px] font-bold bg-amber-100 text-amber-800 px-2.5 py-1 rounded-full shrink-0">
+                    {splashBanners.filter((b) => b.isActive).length} بانر نشط
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                  <input
+                    type="text"
+                    value={splashTitle}
+                    onChange={(e) => setSplashTitle(e.target.value)}
+                    placeholder="عنوان الترحيب أو الإهداء..."
+                    className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 outline-none focus:border-amber-500"
+                  />
+                  <input
+                    type="text"
+                    value={splashSender}
+                    onChange={(e) => setSplashSender(e.target.value)}
+                    placeholder="اسم المُهدي (مثال: إدارة LIVO)"
+                    className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 outline-none focus:border-amber-500"
+                  />
+                  <input
+                    type="text"
+                    value={splashRecipient}
+                    onChange={(e) => setSplashRecipient(e.target.value)}
+                    placeholder="المُهدى إليه (اختياري)"
+                    className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 outline-none focus:border-amber-500"
+                  />
+                  <input
+                    type="text"
+                    value={splashDedication}
+                    onChange={(e) => setSplashDedication(e.target.value)}
+                    placeholder="رسالة الإهداء أو الترحيب..."
+                    className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {splashImageUrl && (
+                    <img
+                      src={splashImageUrl}
+                      alt="Splash Preview"
+                      className="w-14 h-14 rounded-xl object-cover border border-amber-300 shrink-0"
+                    />
+                  )}
+                  <label className="cursor-pointer bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5">
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>{isUploadingSplashImg ? 'جاري رفع الصورة...' : 'رفع صورة البانر'}</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const f = e.target.files?.[0];
+                        e.target.value = '';
+                        if (!f) return;
+                        setIsUploadingSplashImg(true);
+                        try {
+                          const url = await firebaseService.uploadImage(`splash/splash_${Date.now()}.jpg`, f, {
+                            maxDim: 900,
+                            maxBytes: 220_000
+                          });
+                          setSplashImageUrl(url);
+                          showToast('تم رفع صورة البانر بنجاح ✓');
+                        } catch {
+                          const compressed = await compressImageForFirestore(f, { maxDim: 900, maxBytes: 220_000 });
+                          setSplashImageUrl(compressed);
+                          showToast('تم تجهيز صورة البانر ✓');
+                        } finally {
+                          setIsUploadingSplashImg(false);
+                        }
+                      }}
+                    />
+                  </label>
+                  <input
+                    type="text"
+                    value={splashImageUrl}
+                    onChange={(e) => setSplashImageUrl(e.target.value)}
+                    placeholder="أو الصق رابط صورة البانر هنا..."
+                    className="flex-1 min-w-[200px] bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!splashTitle.trim() || !splashImageUrl.trim()) {
+                        showToast('يرجى إدخال عنوان وصورة البانر أولاً');
+                        return;
+                      }
+                      livoStore.saveSplashBanner({
+                        id: `splash-${Date.now()}`,
+                        title: splashTitle.trim(),
+                        dedicationMessage: splashDedication.trim() || undefined,
+                        senderName: splashSender.trim() || 'إدارة LIVO',
+                        recipientName: splashRecipient.trim() || undefined,
+                        imageUrl: splashImageUrl.trim(),
+                        isActive: true,
+                        durationMs: 3000,
+                        createdAt: new Date().toISOString(),
+                        createdBy: actorEmail
+                      });
+                      setSplashTitle('');
+                      setSplashDedication('');
+                      setSplashRecipient('');
+                      setSplashImageUrl('');
+                      showToast('تم تفعيل بانر الدخول (3 ثوانٍ) بنجاح ✓');
+                    }}
+                    className="px-4 py-2 bg-[#FFE600] hover:bg-yellow-400 text-black font-black text-xs rounded-xl shadow-sm"
+                  >
+                    نشر وتفعيل البانر الآن ✨
+                  </button>
+                </div>
+
+                {splashBanners.length > 0 && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 pt-2">
+                    {splashBanners.map((sb) => (
+                      <div key={sb.id} className="rounded-xl border border-gray-200 bg-gray-50 overflow-hidden flex flex-col justify-between">
+                        <div className="flex items-center gap-3 p-2.5">
+                          <img src={sb.imageUrl} alt={sb.title} className="w-16 h-16 rounded-lg object-cover border border-gray-200 shrink-0" />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-black ${
+                                sb.isActive ? 'bg-emerald-500 text-white' : 'bg-gray-300 text-gray-700'
+                              }`}>
+                                {sb.isActive ? 'نشط الآن' : 'متوقف'}
+                              </span>
+                            </div>
+                            <h4 className="font-bold text-xs text-gray-900 truncate mt-1">{sb.title}</h4>
+                            {sb.dedicationMessage && (
+                              <p className="text-[10px] text-gray-600 line-clamp-1">{sb.dedicationMessage}</p>
+                            )}
+                            {(sb.senderName || sb.recipientName) && (
+                              <p className="text-[9px] text-amber-700 font-bold truncate mt-0.5">
+                                {sb.senderName ? `من: ${sb.senderName}` : ''} {sb.recipientName ? `• إلى: ${sb.recipientName}` : ''}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <div className="px-2.5 py-2 bg-white border-t border-gray-200 flex items-center justify-between gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              livoStore.saveSplashBanner({ ...sb, isActive: !sb.isActive });
+                              showToast(sb.isActive ? 'تم إيقاف البانر' : 'تم تفعيل البانر على واجهة المستخدم ✓');
+                            }}
+                            className={`flex-1 py-1 rounded-lg text-[11px] font-bold ${
+                              sb.isActive ? 'bg-amber-50 text-amber-800 border border-amber-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                            }`}
+                          >
+                            {sb.isActive ? 'إيقاف البانر' : 'تفعيل'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              livoStore.deleteSplashBanner(sb.id);
+                              showToast('تم حذف البانر');
+                            }}
+                            className="p-1.5 bg-red-50 text-red-600 rounded-lg border border-red-200 hover:bg-red-100"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -2485,7 +2688,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                     كل مستخدم يمتلك UID فريد ثابت • حسابات حقيقية موثقة عبر Firebase بدون أي حسابات وهمية
                   </p>
                 </div>
-                <div className="flex items-center gap-2 w-full sm:w-auto">
+                <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
                   <div className="relative flex-1 sm:w-72">
                     <Search className="w-4 h-4 text-gray-400 absolute right-3 top-2.5" />
                     <input
@@ -2509,6 +2712,23 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                   >
                     {isSearchingServer ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
                     <span>بحث الخادم</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isPurgingFakeUsers}
+                    onClick={async () => {
+                      setIsPurgingFakeUsers(true);
+                      try {
+                        const res = await livoStore.purgeFakeUsersFromFirestore(actorEmail);
+                        showToast(res.message);
+                      } finally {
+                        setIsPurgingFakeUsers(false);
+                      }
+                    }}
+                    className="bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 font-bold text-xs px-3 py-2 rounded-xl shrink-0 flex items-center gap-1"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>{isPurgingFakeUsers ? 'جاري التنظيف...' : 'تنظيف الحسابات الوهمية'}</span>
                   </button>
                 </div>
               </div>
@@ -2543,6 +2763,8 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                           customIconGlow={u.customIconGlow}
                           customIconAnimated={u.customIconAnimated}
                           customIconLabel={u.customIconLabel}
+                          agencyLabel={livoStore.getAgencyDisplayLabel(u)}
+                          agencyLabelBelow={true}
                           badgeSize={14}
                           iconSize={17}
                           nameClassName="font-bold text-xs text-gray-900"
@@ -2550,7 +2772,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                         <span className="text-[11px] text-gray-500 font-digits block truncate">
                           UID: <strong className="text-amber-700">{u.uid}</strong> • @{u.username}
                         </span>
-                        <div className="flex items-center gap-2 mt-1">
+                        <div className="flex items-center gap-2 mt-1 flex-wrap">
                           <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
                             u.role === 'owner'
                               ? 'bg-amber-100 text-amber-800'
@@ -2567,7 +2789,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                               : u.role === 'charging_agent'
                               ? 'وكيل شحن'
                               : u.role === 'distributor_agent'
-                              ? 'وكيل موزعين'
+                              ? 'وكيل مذيعين'
                               : u.role === 'agent'
                               ? 'وكيل معتمد'
                               : 'مستخدم عادي'}
@@ -2575,11 +2797,16 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                           <span className="text-[10px] text-gray-600 font-digits font-bold">
                             الرصيد: {u.coins.toLocaleString()}
                           </span>
+                          {u.canStealthRooms && (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800 text-amber-300 font-bold">
+                              دخول متخفي ✓
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-1.5 shrink-0">
+                    <div className="flex flex-wrap items-center gap-1.5 shrink-0">
                       <button
                         onClick={() => {
                           selectUserForCosmetics(u);
@@ -2591,6 +2818,36 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                         <Crown className="w-3.5 h-3.5" />
                         <span>VIP والتوثيق</span>
                       </button>
+                      {u.uid !== '10000' && u.role !== 'owner' && (
+                        <>
+                          <button
+                            onClick={() => {
+                              const res = livoStore.setUserStealthPermission(u.uid, !u.canStealthRooms, actorEmail);
+                              showToast(res.message);
+                            }}
+                            className={`text-[11px] font-bold px-2.5 py-1.5 rounded-xl border flex items-center gap-1 ${
+                              u.canStealthRooms
+                                ? 'bg-slate-800 text-amber-300 border-slate-700'
+                                : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+                            }`}
+                            title="منح أو سحب صلاحية الدخول المتخفي للغرف"
+                          >
+                            <EyeOff className="w-3.5 h-3.5" />
+                            <span>{u.canStealthRooms ? 'سحب التخفي' : 'منح تخفي'}</span>
+                          </button>
+                          <button
+                            onClick={() => {
+                              setUidChangeTarget(u);
+                              setUidChangeInput(u.uid);
+                            }}
+                            className="text-[11px] font-bold text-blue-700 hover:bg-blue-100 bg-blue-50 px-2.5 py-1.5 rounded-xl border border-blue-200 flex items-center gap-1"
+                            title="تغيير رقم UID العضو"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                            <span>تغيير UID</span>
+                          </button>
+                        </>
+                      )}
                       <button
                         onClick={() => {
                           setSelectedUserForCoins(u);
@@ -3901,21 +4158,42 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                     إضافة وتعديل أسعار الهدايا وصور PNG الشفافة + منصة ضرب وإرسال الهدايا الطائرة مباشرة للغرف
                   </p>
                 </div>
-                <button
-                  onClick={() => {
-                    setEditGiftId(null);
-                    setNewGiftName('');
-                    setNewGiftPrice('');
-                    setNewGiftIcon('🎁');
-                    setNewGiftImageUrl('');
-                    setNewGiftAnimation('heart');
-                    setShowAddGiftModal(true);
-                  }}
-                  className="bg-[#FFE600] hover:bg-yellow-400 text-black font-black text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow-sm transition-all shrink-0"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>إضافة هدية جديدة للمتجر</span>
-                </button>
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    disabled={isSyncing200Gifts}
+                    onClick={async () => {
+                      setIsSyncing200Gifts(true);
+                      try {
+                        const res = await livoStore.syncInitial200GiftsToFirestore(actorEmail);
+                        showToast(res.message);
+                      } finally {
+                        setIsSyncing200Gifts(false);
+                      }
+                    }}
+                    className="bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 font-bold text-xs px-3 py-2 rounded-xl flex items-center gap-1.5"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isSyncing200Gifts ? 'animate-spin' : ''}`} />
+                    <span>{isSyncing200Gifts ? 'جاري المزامنة...' : 'مزامنة باقة 200+ هدية'}</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setEditGiftId(null);
+                      setNewGiftName('');
+                      setNewGiftPrice('');
+                      setNewGiftIcon('🎁');
+                      setNewGiftImageUrl('');
+                      setNewGiftAnimation('heart');
+                      setNewGiftIsCard(false);
+                      setNewGiftCategory('ملكي');
+                      setShowAddGiftModal(true);
+                    }}
+                    className="bg-[#FFE600] hover:bg-yellow-400 text-black font-black text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow-sm transition-all shrink-0"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>إضافة هدية جديدة للمتجر</span>
+                  </button>
+                </div>
               </div>
 
               {/* Live Room Gift Blaster (ضرب وإرسال الهدايا للغرف) */}
@@ -4012,6 +4290,26 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                   </div>
                 </div>
 
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                  <label className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-xs font-bold text-amber-900 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={blastTargetAll}
+                      onChange={(e) => setBlastTargetAll(e.target.checked)}
+                      className="rounded text-amber-600"
+                    />
+                    <span>إهداء وضرب لجميع المقاعد داخل الغرفة معاً (الكل)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={blastCardMessage}
+                    onChange={(e) => setBlastCardMessage(e.target.value)}
+                    placeholder="رسالة الكارت / الإهداء الظاهرة في الغرفة (اختياري)..."
+                    maxLength={80}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 outline-none focus:border-amber-500"
+                  />
+                </div>
+
                 <button
                   type="button"
                   onClick={() => {
@@ -4025,7 +4323,9 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                       roomId: targetRoomId,
                       giftId: targetGiftId,
                       count: blastCount,
-                      recipientUid: blastRecipientUid || undefined,
+                      recipientUid: blastTargetAll ? undefined : (blastRecipientUid || undefined),
+                      targetAll: blastTargetAll,
+                      cardMessage: blastCardMessage.trim() || undefined,
                       senderName: blastSenderName.trim() || 'إدارة LIVO الملكية',
                       adminEmail: actorEmail
                     });
@@ -4038,14 +4338,54 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                 </button>
               </div>
 
-              {/* Gifts Grid */}
-              <div className="space-y-2">
-                <h3 className="font-bold text-sm text-gray-900 flex items-center gap-2">
-                  <Gift className="w-4 h-4 text-amber-500" />
-                  <span>هدايا الغرف والمحادثات ({giftsList.length})</span>
-                </h3>
+              {/* Gifts Grid with Search & Categories */}
+              <div className="space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <h3 className="font-bold text-sm text-gray-900 flex items-center gap-2">
+                    <Gift className="w-4 h-4 text-amber-500" />
+                    <span>هدايا الغرف والمحادثات ({giftsList.length})</span>
+                  </h3>
+                  <div className="relative sm:w-64">
+                    <Search className="w-3.5 h-3.5 text-gray-400 absolute right-3 top-2.5" />
+                    <input
+                      type="text"
+                      value={giftAdminSearch}
+                      onChange={(e) => setGiftAdminSearch(e.target.value)}
+                      placeholder="ابحث في الـ 200+ هدية..."
+                      className="w-full bg-white border border-gray-200 rounded-xl pr-8 pl-3 py-1.5 text-xs text-gray-900 outline-none focus:border-amber-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+                  {['الكل', 'كروت إهداء', 'ملكي', 'حيوانات', 'سيارات وطائرات', 'حب', 'ألماس', 'حفلات'].map((cat) => (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setGiftAdminCategory(cat)}
+                      className={`px-3 py-1 rounded-full text-[11px] font-bold shrink-0 border transition-all ${
+                        giftAdminCategory === cat
+                          ? 'bg-[#FFE600] text-black border-amber-400 font-black'
+                          : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-                  {giftsList.map((gift) => (
+                  {giftsList
+                    .filter((g) => {
+                      const matchesCat =
+                        giftAdminCategory === 'الكل' ||
+                        (giftAdminCategory === 'كروت إهداء' && (g.isCard || g.category === 'كروت إهداء')) ||
+                        g.category === giftAdminCategory;
+                      const q = giftAdminSearch.trim().toLowerCase();
+                      const matchesQ = !q || g.name.toLowerCase().includes(q) || g.icon.includes(q);
+                      return matchesCat && matchesQ;
+                    })
+                    .map((gift) => (
                     <div
                       key={gift.id}
                       className={`bg-white p-3 rounded-2xl border shadow-sm flex flex-col items-center text-center justify-between relative ${
@@ -4071,6 +4411,8 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                               setNewGiftIcon(gift.icon);
                               setNewGiftImageUrl(gift.imageUrl || '');
                               setNewGiftAnimation(gift.animationType);
+                              setNewGiftIsCard(Boolean(gift.isCard));
+                              setNewGiftCategory(gift.category || 'ملكي');
                               setShowAddGiftModal(true);
                             }}
                             className="text-gray-500 hover:text-amber-600 p-1"
@@ -4092,12 +4434,12 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                       ) : (
                         <span className="text-4xl filter drop-shadow my-1">{gift.icon}</span>
                       )}
-                      <h4 className="font-bold text-xs text-gray-900 mt-1">{gift.name}</h4>
+                      <h4 className="font-bold text-xs text-gray-900 mt-1 line-clamp-1">{gift.name}</h4>
                       <span className="text-xs font-digits font-black text-amber-600 mt-0.5">
                         {gift.coins.toLocaleString()} كوينز
                       </span>
                       <span className="text-[9px] text-gray-400 mt-0.5">
-                        تأثير: {gift.animationType}
+                        {gift.isCard ? 'كارت كتابة 💌 • ' : ''}{gift.category || gift.animationType}
                       </span>
                     </div>
                   ))}
@@ -5544,23 +5886,56 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">نوع التأثير في الغرفة:</label>
-                <select
-                  value={newGiftAnimation}
-                  onChange={(e) => setNewGiftAnimation(e.target.value as GiftItem['animationType'])}
-                  className="w-full bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-xs text-gray-900 outline-none"
-                >
-                  <option value="heart">قلب متوهج (Heart)</option>
-                  <option value="rose">وردة (Rose)</option>
-                  <option value="diamond">ألماسة متلألئة (Diamond)</option>
-                  <option value="rocket">صاروخ ناري (Rocket)</option>
-                  <option value="lion">أسد ذهبي يزأر (Lion Roar)</option>
-                  <option value="car">سيارة رياضية فاخرة (Supercar)</option>
-                  <option value="dragon">تنين أسطوري (Dragon Flight)</option>
-                  <option value="castle">قصر ملكي (Castle)</option>
-                </select>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">الفئة:</label>
+                  <select
+                    value={newGiftCategory}
+                    onChange={(e) => setNewGiftCategory(e.target.value)}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-xs text-gray-900 outline-none"
+                  >
+                    <option value="ملكي">ملكي</option>
+                    <option value="كروت إهداء">كروت إهداء</option>
+                    <option value="حيوانات">حيوانات</option>
+                    <option value="سيارات وطائرات">سيارات وطائرات</option>
+                    <option value="حب">حب</option>
+                    <option value="ألماس">ألماس</option>
+                    <option value="حفلات">حفلات</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">نوع التأثير:</label>
+                  <select
+                    value={newGiftAnimation}
+                    onChange={(e) => setNewGiftAnimation(e.target.value as GiftItem['animationType'])}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-xs text-gray-900 outline-none"
+                  >
+                    <option value="heart">قلب متوهج (Heart)</option>
+                    <option value="rose">وردة (Rose)</option>
+                    <option value="diamond">ألماسة متلألئة (Diamond)</option>
+                    <option value="rocket">صاروخ ناري (Rocket)</option>
+                    <option value="lion">أسد ذهبي يمشي بالشاشة (Lion Walk)</option>
+                    <option value="car">سيارة رياضية فاخرة (Supercar)</option>
+                    <option value="ship">يخت / سفينة فاخرة (Ship)</option>
+                    <option value="dragon">تنين أسطوري (Dragon Flight)</option>
+                    <option value="castle">قصر ملكي (Castle)</option>
+                    <option value="crown">تاج ملكي (Crown)</option>
+                    <option value="wings">أجنحة ضوئية (Wings)</option>
+                    <option value="fireworks">ألعاب نارية (Fireworks)</option>
+                    <option value="card">كارت إهداء بالكتابة (Gift Card)</option>
+                  </select>
+                </div>
               </div>
+
+              <label className="flex items-center gap-2 bg-purple-50 border border-purple-200 rounded-xl px-3 py-2 text-xs font-bold text-purple-900 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={newGiftIsCard || newGiftAnimation === 'card'}
+                  onChange={(e) => setNewGiftIsCard(e.target.checked)}
+                  className="rounded text-purple-600"
+                />
+                <span>تفعيل الكتابة على الهدية (كارت إهداء يظهر بالكلام) 💌</span>
+              </label>
 
               <div className="flex items-center gap-2 pt-2">
                 <button
@@ -5812,6 +6187,72 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
           }
         }}
       />
+
+      {/* MODAL: ADMIN CHANGE USER UID */}
+      {uidChangeTarget && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-sm rounded-2xl border border-gray-200 shadow-2xl p-5 space-y-4 text-gray-900">
+            <div className="flex items-center justify-between pb-2 border-b border-gray-100">
+              <h3 className="font-bold text-sm text-gray-900">تغيير معرّف (UID) العضو</h3>
+              <button
+                onClick={() => setUidChangeTarget(null)}
+                className="text-gray-400 hover:text-gray-700"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="space-y-2 text-xs">
+              <p className="text-gray-600">
+                العضو: <strong className="text-gray-900">{uidChangeTarget.displayName}</strong>
+              </p>
+              <p className="text-gray-500 font-digits">
+                الـ UID الحالي: <strong>{uidChangeTarget.uid}</strong>
+              </p>
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">الـ UID الجديد (4 إلى 24 حرف أو رقم إنجليزي):</label>
+                <input
+                  type="text"
+                  value={uidChangeInput}
+                  onChange={(e) => setUidChangeInput(e.target.value)}
+                  placeholder="مثال: 77777"
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-sm font-digits text-gray-900 outline-none focus:border-amber-500"
+                />
+              </div>
+              <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-xl p-2">
+                يتم ترحيل بيانات العضو ورصيده وغرفه تلقائياً للمعرّف الجديد دون فقدان الحساب.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={isChangingUid}
+                onClick={async () => {
+                  setIsChangingUid(true);
+                  try {
+                    const res = await livoStore.adminChangeUserUid(uidChangeTarget.uid, uidChangeInput, actorEmail);
+                    showToast(res.message);
+                    if (res.success) {
+                      setUidChangeTarget(null);
+                    }
+                  } finally {
+                    setIsChangingUid(false);
+                  }
+                }}
+                className="flex-1 py-2.5 bg-[#FFE600] hover:bg-yellow-400 text-black font-black text-xs rounded-xl shadow-sm"
+              >
+                {isChangingUid ? 'جاري التغيير...' : 'تأكيد تغيير الـ UID ✓'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setUidChangeTarget(null)}
+                className="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-xs rounded-xl"
+              >
+                إلغاء
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

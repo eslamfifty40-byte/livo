@@ -11,9 +11,10 @@ import {
   Sparkles,
   Lock,
   MessageCircle,
-  Loader2
+  Loader2,
+  Trophy
 } from 'lucide-react';
-import { UserProfile, VoiceRoom } from '../../types';
+import { UserProfile, VoiceRoom, SupporterRankEntry } from '../../types';
 import { livoStore } from '../../services/livoStore';
 import { RoyalVoiceRoomModal } from './RoyalVoiceRoomModal';
 import { LiveStreamView } from './LiveStreamView';
@@ -58,6 +59,8 @@ export const PartyView: React.FC<PartyViewProps> = ({
   const [newRoomSeatCount, setNewRoomSeatCount] = useState<6 | 12>(12);
   const [newRoomTitle, setNewRoomTitle] = useState('');
   const [newRoomCategory, setNewRoomCategory] = useState('دردشة صوتية');
+  const [showLeaderboardModal, setShowLeaderboardModal] = useState(false);
+  const [leaderboardPeriod, setLeaderboardPeriod] = useState<'daily' | 'weekly' | 'monthly'>('daily');
 
   useEffect(() => {
     const unsub = livoStore.subscribe(() => {
@@ -364,6 +367,13 @@ export const PartyView: React.FC<PartyViewProps> = ({
               {pill.label}
             </button>
           ))}
+          <button
+            onClick={() => setShowLeaderboardModal(true)}
+            className="px-3 py-1 rounded-full transition-all shrink-0 bg-gradient-to-l from-amber-500 to-yellow-400 text-black font-black shadow-sm flex items-center gap-1"
+          >
+            <Trophy className="w-3.5 h-3.5" />
+            <span>كأس الداعمين</span>
+          </button>
         </div>
       </div>
 
@@ -401,6 +411,8 @@ export const PartyView: React.FC<PartyViewProps> = ({
                           customIconUrl={u.customIconUrl}
                           customIconGlow={u.customIconGlow}
                           customIconAnimated={u.customIconAnimated}
+                          agencyLabel={livoStore.getAgencyDisplayLabel(u)}
+                          agencyLabelBelow={true}
                           badgeSize={12}
                           iconSize={15}
                           nameClassName="text-xs font-extrabold text-gray-900"
@@ -816,6 +828,109 @@ export const PartyView: React.FC<PartyViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Modal: Supporters Leaderboard Cup (يومي / أسبوعي / شهري) */}
+      {showLeaderboardModal && (() => {
+        const ranks: SupporterRankEntry[] = livoStore.getSupporterLeaderboard(leaderboardPeriod);
+        return (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
+            <div className="bg-white w-full max-w-[430px] rounded-t-3xl sm:rounded-3xl border border-gray-200 shadow-2xl overflow-hidden flex flex-col max-h-[82dvh] text-gray-900">
+              <div className="bg-gradient-to-l from-[#170b2c] via-[#2b1055] to-[#170b2c] text-white px-4 py-3.5 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-9 h-9 rounded-2xl bg-[#FFE600] text-black flex items-center justify-center shadow">
+                    <Trophy className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black">🏆 كأس الداعمين الملكي</h3>
+                    <p className="text-[10px] text-amber-200">ترتيب أعلى داعمي الهدايا الحقيقيين في LIVO</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowLeaderboardModal(false)}
+                  className="p-1.5 rounded-full bg-white/15 hover:bg-white/25 text-white"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="flex items-center gap-1.5 p-3 bg-gray-50 border-b border-gray-100">
+                {([
+                  { id: 'daily', label: 'اليوم' },
+                  { id: 'weekly', label: 'الأسبوع' },
+                  { id: 'monthly', label: 'الشهر' }
+                ] as const).map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setLeaderboardPeriod(tab.id)}
+                    className={`flex-1 py-2 rounded-xl text-xs font-black transition-all ${
+                      leaderboardPeriod === tab.id
+                        ? 'bg-[#FFE600] text-black shadow-xs'
+                        : 'bg-white text-gray-600 border border-gray-200'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                {ranks.length === 0 ? (
+                  <div className="text-center py-10 space-y-2">
+                    <Trophy className="w-10 h-10 text-amber-300 mx-auto" />
+                    <p className="text-xs font-bold text-gray-500">لا توجد عمليات دعم مسجلة في هذه الفترة بعد</p>
+                    <p className="text-[10px] text-gray-400">أرسل هدية داخل أي غرفة صوتية لتتصدر كأس الداعمين!</p>
+                  </div>
+                ) : (
+                  ranks.map((entry, idx) => (
+                    <div
+                      key={entry.uid}
+                      className={`flex items-center justify-between gap-2 p-2.5 rounded-2xl border ${
+                        idx === 0
+                          ? 'bg-amber-50 border-amber-300 shadow-xs'
+                          : idx === 1
+                          ? 'bg-slate-50 border-slate-300'
+                          : idx === 2
+                          ? 'bg-orange-50/70 border-orange-200'
+                          : 'bg-white border-gray-100'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className="w-6 text-center font-black font-digits text-sm shrink-0">
+                          {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `${idx + 1}`}
+                        </span>
+                        <AvatarWithFrame
+                          avatarUrl={entry.avatar}
+                          displayName={entry.displayName}
+                          sizePx={40}
+                        />
+                        <div className="min-w-0">
+                          <UserNameWithBadges
+                            displayName={entry.displayName}
+                            isVerified={entry.isVerified}
+                            verifiedBadgeColor={entry.verifiedBadgeColor}
+                            agencyLabel={entry.agencyBadgeLabel}
+                            agencyLabelBelow={true}
+                            badgeSize={12}
+                            nameClassName="text-xs font-extrabold text-gray-900"
+                          />
+                          <span className="text-[10px] text-gray-400 font-digits block">
+                            UID: {entry.uid} • {entry.giftsCount} هدية
+                          </span>
+                        </div>
+                      </div>
+                      <div className="text-left shrink-0 bg-[#FFE600]/25 border border-amber-300 px-2.5 py-1 rounded-xl">
+                        <span className="text-xs font-black font-digits text-amber-800 block">
+                          {entry.totalCoins.toLocaleString()} 🪙
+                        </span>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };

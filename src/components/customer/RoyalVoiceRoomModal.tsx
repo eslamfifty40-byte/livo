@@ -27,10 +27,18 @@ import {
   Play,
   Pause,
   Volume2,
-  Minimize2
+  Minimize2,
+  Trophy,
+  EyeOff,
+  Eye,
+  Gamepad2,
+  Dices,
+  Heart,
+  Search
 } from 'lucide-react';
-import { UserProfile, GiftItem, VoiceRoom, RoomSeat } from '../../types';
+import { UserProfile, GiftItem, VoiceRoom, RoomSeat, RoomGameEvent } from '../../types';
 import { livoStore } from '../../services/livoStore';
+import { roomRtcAudio } from '../../services/roomRtcAudio';
 import { GiftAnimationOverlay } from './GiftAnimationOverlay';
 import { AvatarWithFrame } from '../common/AvatarWithFrame';
 import { UserNameWithBadges } from '../common/UserNameWithBadges';
@@ -132,14 +140,32 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
   const [gifts, setGifts] = useState<GiftItem[]>(livoStore.getActiveGifts());
   const [showGiftsTray, setShowGiftsTray] = useState(false);
   const [giftCount, setGiftCount] = useState<number>(1);
-  const [giftRecipientUid, setGiftRecipientUid] = useState<string>('');
-  const [activeGiftAnim, setActiveGiftAnim] = useState<{
+  const [giftRecipientUids, setGiftRecipientUids] = useState<string[]>([]);
+  const [giftTargetAll, setGiftTargetAll] = useState<boolean>(false);
+  const [giftCategory, setGiftCategory] = useState<string>('الكل');
+  const [giftSearch, setGiftSearch] = useState<string>('');
+  const [pendingCardGift, setPendingCardGift] = useState<GiftItem | null>(null);
+  const [cardMessageText, setCardMessageText] = useState<string>('');
+  const [giftAnimQueue, setGiftAnimQueue] = useState<Array<{
     gift: GiftItem;
     senderName: string;
     recipientName?: string;
+    cardMessage?: string;
     count: number;
-  } | null>(null);
+  }>>([]);
   const lastSeenBlastIdRef = useRef<string | null>(room.latestGiftBlast?.id || null);
+  const lastSeenGameIdRef = useRef<string | null>(room.latestGameEvent?.id || null);
+
+  // Room Cup, Stealth, Mini Games & Speaking Detection
+  const [showSupportersModal, setShowSupportersModal] = useState(false);
+  const [showGamesModal, setShowGamesModal] = useState(false);
+  const [couplePartner1, setCouplePartner1] = useState<string>('');
+  const [couplePartner2, setCouplePartner2] = useState<string>('');
+  const [activeGameOverlay, setActiveGameOverlay] = useState<RoomGameEvent | null>(null);
+  const [speakingUids, setSpeakingUids] = useState<Record<string, boolean>>({});
+  const [isStealth, setIsStealth] = useState<boolean>(() =>
+    Boolean(currentUser && room.stealthUids?.includes(currentUser.uid))
+  );
 
   const [chatInput, setChatInput] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -169,9 +195,6 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
   const [bgPreviewValue, setBgPreviewValue] = useState<string>(ROOM_BG_PRESETS[0].value);
   const [bgScope, setBgScope] = useState<'personal' | 'room'>('personal');
 
-  // Real microphone audio stream reference
-  const audioStreamRef = useRef<MediaStream | null>(null);
-
   // Selected Seat for Moderation (ONLY for moderating OTHER users or locked/empty seats)
   const [moderationSeat, setModerationSeat] = useState<RoomSeat | null>(null);
 
@@ -183,22 +206,34 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
         if (latest.latestGiftBlast && latest.latestGiftBlast.id !== lastSeenBlastIdRef.current) {
           lastSeenBlastIdRef.current = latest.latestGiftBlast.id;
           const ageMs = Date.now() - new Date(latest.latestGiftBlast.createdAt).getTime();
-          if (ageMs < 9000) {
+          if (ageMs < 12000) {
             const b = latest.latestGiftBlast;
-            setActiveGiftAnim({
-              gift: {
-                id: b.giftId,
-                name: b.giftName,
-                coins: b.coinsEach,
-                icon: b.giftIcon,
-                imageUrl: b.giftImageUrl,
-                animationType: b.animationType,
-                durationMs: 3200
-              },
-              senderName: b.senderName,
-              recipientName: b.recipientName,
-              count: b.count
-            });
+            setGiftAnimQueue((prev) => [
+              ...prev,
+              {
+                gift: {
+                  id: b.giftId,
+                  name: b.giftName,
+                  coins: b.coinsEach,
+                  icon: b.giftIcon,
+                  imageUrl: b.giftImageUrl,
+                  animationType: b.animationType,
+                  isCard: Boolean(b.cardMessage || b.animationType === 'card'),
+                  durationMs: b.animationType === 'lion' ? 3800 : b.cardMessage ? 3800 : 3000
+                },
+                senderName: b.senderName,
+                recipientName: b.recipientName,
+                cardMessage: b.cardMessage,
+                count: b.count
+              }
+            ]);
+          }
+        }
+        if (latest.latestGameEvent && latest.latestGameEvent.id !== lastSeenGameIdRef.current) {
+          lastSeenGameIdRef.current = latest.latestGameEvent.id;
+          const ageMs = Date.now() - new Date(latest.latestGameEvent.createdAt).getTime();
+          if (ageMs < 9000) {
+            setActiveGameOverlay(latest.latestGameEvent);
           }
         }
       }
@@ -212,6 +247,14 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
     return () => unsub();
   }, [room.id, currentUser?.uid]);
 
+  // Auto-dismiss Mini-Game overlay (3 seconds for couple heart / dice)
+  useEffect(() => {
+    if (!activeGameOverlay) return;
+    const ms = activeGameOverlay.type === 'couple_heart' ? 3000 : 2800;
+    const timer = setTimeout(() => setActiveGameOverlay(null), ms);
+    return () => clearTimeout(timer);
+  }, [activeGameOverlay]);
+
   const targetSeatCount: 6 | 12 = liveRoom.seatCount === 6 ? 6 : 12;
 
   // Build active seat array (6 or 12)
@@ -221,33 +264,44 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
   });
 
   const mySeat = currentUser ? seats.find(s => s.occupiedByUid === currentUser?.uid) || null : null;
-  const isMyMicMuted = mySeat ? mySeat.isMuted : true;
+  const isMyMicBlocked = Boolean(
+    mySeat?.isMicBlocked || (currentUser && liveRoom.micBlockedUsers?.includes(currentUser.uid))
+  );
+  const isMyMicMuted = mySeat ? Boolean(mySeat.isMuted || isMyMicBlocked) : true;
 
-  // Manage real WebRTC microphone hardware based on current user's seat & mute state
+  // Manage real WebRTC multi-peer audio mesh & speaking detection
   useEffect(() => {
-    const syncAudioHardware = async () => {
-      if (!mySeat || mySeat.isMuted) {
-        if (audioStreamRef.current) {
-          audioStreamRef.current.getAudioTracks().forEach(t => {
-            t.enabled = false;
-          });
-        }
-        return;
+    if (!isOpen || !currentUser) {
+      roomRtcAudio.stop();
+      return;
+    }
+    roomRtcAudio.start({
+      roomId: liveRoom.id,
+      myUid: currentUser.uid,
+      onSpeakingChange: setSpeakingUids,
+      onMicError: (errMsg) => setToastMessage(errMsg)
+    });
+  }, [isOpen, liveRoom.id, currentUser?.uid]);
+
+  useEffect(() => {
+    if (!isOpen || !currentUser) return;
+    const peerUids = new Set<string>();
+    if (liveRoom.ownerUid && liveRoom.ownerUid !== currentUser.uid) {
+      peerUids.add(liveRoom.ownerUid);
+    }
+    seats.forEach((s) => {
+      if (s.occupiedByUid && s.occupiedByUid !== currentUser.uid) {
+        peerUids.add(s.occupiedByUid);
       }
-      try {
-        if (!audioStreamRef.current) {
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          audioStreamRef.current = stream;
-        }
-        audioStreamRef.current.getAudioTracks().forEach(t => {
-          t.enabled = true;
-        });
-      } catch {
-        // Microphone denied or unavailable
-      }
-    };
-    syncAudioHardware();
-  }, [mySeat?.seatIndex, mySeat?.isMuted]);
+    });
+    roomRtcAudio.syncPeers(Array.from(peerUids));
+  }, [isOpen, currentUser?.uid, liveRoom.ownerUid, liveRoom.seats]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const shouldSpeak = Boolean(mySeat && !mySeat.isMuted && !isMyMicBlocked);
+    roomRtcAudio.setMicEnabled(shouldSpeak);
+  }, [isOpen, mySeat?.seatIndex, mySeat?.isMuted, isMyMicBlocked]);
 
   // Sync room music playback (Local File OR Built-in WebAudio Synth)
   const stopAmbientSynth = () => {
@@ -343,10 +397,7 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
       if (customAudioUrl) {
         URL.revokeObjectURL(customAudioUrl);
       }
-      if (audioStreamRef.current) {
-        audioStreamRef.current.getTracks().forEach(t => t.stop());
-        audioStreamRef.current = null;
-      }
+      roomRtcAudio.stop();
     };
   }, []);
 
@@ -369,6 +420,8 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
     currentUser && livoStore.isRoomModerator(liveRoom, currentUser?.uid, currentUser)
   );
 
+  const canUseStealth = Boolean(currentUser && livoStore.canUserStealth(currentUser));
+
   const isUserMutedInRoom = Boolean(
     currentUser && liveRoom.mutedUsers?.includes(currentUser?.uid)
   );
@@ -388,9 +441,10 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
     if (localAudioElRef.current) {
       localAudioElRef.current.pause();
     }
-    if (audioStreamRef.current) {
-      audioStreamRef.current.getTracks().forEach(t => t.stop());
-      audioStreamRef.current = null;
+    roomRtcAudio.stop();
+
+    if (currentUser && isStealth) {
+      livoStore.toggleRoomStealth(liveRoom.id, currentUser.uid, false);
     }
 
     if (closeRoomForAll && isTopOwner) {
@@ -426,7 +480,11 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
     const targetSeat = seats[index];
 
     if (targetSeat.occupiedByUid === actor.uid) {
-      const nextMuted = livoStore.toggleSeatMute(liveRoom.id, index);
+      if (isMyMicBlocked && !isOwnerOrMod && (targetSeat.isMuted || isMyMicBlocked)) {
+        showToast('تم قفل المايكروفون الخاص بك بواسطة الإدارة 🔒');
+        return;
+      }
+      const nextMuted = livoStore.toggleSeatMute(liveRoom.id, index, undefined, actor.uid);
       showToast(nextMuted ? 'تم كتم المايك الخاص بك 🔇' : 'تم فتح المايك الخاص بك 🎙️');
       return;
     }
@@ -469,17 +527,33 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
       showToast(res.message);
       return;
     }
-    const nextMuted = livoStore.toggleSeatMute(liveRoom.id, mySeat.seatIndex);
+    if (isMyMicBlocked && !isOwnerOrMod) {
+      showToast('تم قفل المايكروفون الخاص بك بواسطة الإدارة 🔒');
+      return;
+    }
+    const nextMuted = livoStore.toggleSeatMute(liveRoom.id, mySeat.seatIndex, undefined, actor.uid);
     showToast(nextMuted ? 'تم كتم المايك 🔇' : 'تم فتح المايك 🎙️');
   };
 
-  const handleSendGift = (gift: GiftItem) => {
+  const handleToggleRecipientUid = (uid: string) => {
+    setGiftTargetAll(false);
+    setGiftRecipientUids((prev) =>
+      prev.includes(uid) ? prev.filter((item) => item !== uid) : [...prev, uid]
+    );
+  };
+
+  const executeGiftSend = (gift: GiftItem, customCardMsg?: string) => {
     const actor = ensureAuthenticated();
     if (!actor) return;
 
-    const totalCost = gift.coins * giftCount;
+    const occupiedCount = Math.max(1, occupiedUsersForGifts.length);
+    const recipientsLen = giftTargetAll
+      ? occupiedCount
+      : Math.max(1, giftRecipientUids.length);
+    const totalCost = gift.coins * giftCount * recipientsLen;
+
     if (actor.coins < totalCost) {
-      showToast(`رصيد الكوينز غير كافٍ لإرسال ${giftCount}× ${gift.name}`);
+      showToast(`رصيد الكوينز غير كافٍ (${totalCost.toLocaleString()} كوينز مطلوب)`);
       onOpenRecharge();
       return;
     }
@@ -488,7 +562,9 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
       roomId: liveRoom.id,
       senderUid: actor.uid,
       giftId: gift.id,
-      recipientUid: giftRecipientUid || undefined,
+      recipientUids: giftTargetAll ? undefined : giftRecipientUids,
+      targetAll: giftTargetAll,
+      cardMessage: customCardMsg?.trim() || undefined,
       count: giftCount
     });
     if (!res.success) {
@@ -498,14 +574,40 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
 
     if (res.blast) {
       lastSeenBlastIdRef.current = res.blast.id;
-      setActiveGiftAnim({
-        gift,
-        senderName: actor.displayName,
-        recipientName: res.blast.recipientName,
-        count: giftCount
-      });
+      setGiftAnimQueue((prev) => [
+        ...prev,
+        {
+          gift,
+          senderName: actor.displayName,
+          recipientName: res.blast!.recipientName,
+          cardMessage: res.blast!.cardMessage,
+          count: giftCount
+        }
+      ]);
     }
+    setPendingCardGift(null);
+    setCardMessageText('');
     setShowGiftsTray(false);
+  };
+
+  const handleGiftCardOrTap = (gift: GiftItem) => {
+    if (gift.isCard || gift.animationType === 'card') {
+      setPendingCardGift(gift);
+      return;
+    }
+    executeGiftSend(gift);
+  };
+
+  const handleToggleStealth = () => {
+    if (!currentUser || !canUseStealth) return;
+    const next = !isStealth;
+    setIsStealth(next);
+    livoStore.toggleRoomStealth(liveRoom.id, currentUser.uid, next);
+    showToast(
+      next
+        ? 'تم تفعيل وضع التخفي 👻 — أنت غير مرئي الآن'
+        : 'تم تفعيل الظهور الآن 👁️'
+    );
   };
 
   const handleSendMessage = (e: React.FormEvent) => {
@@ -654,11 +756,12 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
         <audio ref={localAudioElRef} src={customAudioUrl} loop playsInline className="hidden" />
       )}
       <GiftAnimationOverlay
-        gift={activeGiftAnim?.gift || null}
-        senderName={activeGiftAnim?.senderName || ''}
-        recipientName={activeGiftAnim?.recipientName}
-        count={activeGiftAnim?.count || 1}
-        onFinished={() => setActiveGiftAnim(null)}
+        gift={giftAnimQueue[0]?.gift || null}
+        senderName={giftAnimQueue[0]?.senderName || ''}
+        recipientName={giftAnimQueue[0]?.recipientName}
+        cardMessage={giftAnimQueue[0]?.cardMessage}
+        count={giftAnimQueue[0]?.count || 1}
+        onFinished={() => setGiftAnimQueue((prev) => prev.slice(1))}
       />
 
       <div
@@ -674,12 +777,61 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
           </div>
         )}
 
+        {/* Active Mini-Game Centerpiece Overlay (3s Couple Big Heart / Dice Roll) */}
+        {activeGameOverlay && (
+          <div className="fixed inset-0 pointer-events-none z-50 flex items-center justify-center p-4">
+            {activeGameOverlay.type === 'couple_heart' ? (
+              <div className="livo-couple-heart relative flex flex-col items-center justify-center">
+                <div className="relative w-64 h-56 flex items-center justify-center">
+                  <div className="absolute inset-0 flex items-center justify-center text-[190px] leading-none drop-shadow-[0_0_35px_rgba(236,72,153,0.9)]">
+                    ❤️
+                  </div>
+                  <div className="relative z-10 flex items-center gap-3 -mt-3">
+                    <div className="flex flex-col items-center">
+                      <img
+                        src={activeGameOverlay.partner1Avatar || '/assets/livo/customer_icon.jpg'}
+                        alt={activeGameOverlay.partner1Name}
+                        className="w-16 h-16 rounded-full object-cover border-[3px] border-[#FFE600] shadow-xl"
+                      />
+                      <span className="mt-1 px-2 py-0.5 rounded-full bg-black/70 text-[#FFE600] text-[10px] font-black max-w-[78px] truncate">
+                        {activeGameOverlay.partner1Name}
+                      </span>
+                    </div>
+                    <span className="text-2xl animate-pulse">💘</span>
+                    <div className="flex flex-col items-center">
+                      <img
+                        src={activeGameOverlay.partner2Avatar || '/assets/livo/customer_icon.jpg'}
+                        alt={activeGameOverlay.partner2Name}
+                        className="w-16 h-16 rounded-full object-cover border-[3px] border-[#FFE600] shadow-xl"
+                      />
+                      <span className="mt-1 px-2 py-0.5 rounded-full bg-black/70 text-[#FFE600] text-[10px] font-black max-w-[78px] truncate">
+                        {activeGameOverlay.partner2Name}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-1 px-4 py-1 rounded-full bg-gradient-to-r from-pink-600 via-rose-500 to-amber-500 text-white text-xs font-black border border-white/60 shadow-2xl">
+                  💖 قلب الثنائي الملكي
+                </div>
+              </div>
+            ) : (
+              <div className="livo-dice-roll bg-[#170b2c]/95 border-2 border-[#FFE600] rounded-3xl px-7 py-5 text-center shadow-[0_20px_50px_rgba(255,230,0,0.45)]">
+                <div className="text-6xl leading-none mb-2">🎲</div>
+                <p className="text-xs text-purple-200 font-bold">{activeGameOverlay.actorName} رمى النرد</p>
+                <div className="mt-1 text-3xl font-digits font-black text-[#FFE600]">
+                  {activeGameOverlay.diceValue}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Top Room Bar */}
-        <div className="p-3 pt-4 flex items-center justify-between border-b border-purple-900/40 bg-black/50 backdrop-blur-md z-20 gap-1">
+        <div className="p-2.5 pt-3.5 flex items-center justify-between border-b border-purple-900/40 bg-black/55 backdrop-blur-md z-20 gap-1">
           <div className="flex items-center gap-1.5 min-w-0">
             <button
               onClick={handleExitButtonTap}
-              className="w-8 h-8 rounded-full bg-black/50 hover:bg-black/70 flex items-center justify-center text-white transition-colors shrink-0"
+              className="w-7 h-7 rounded-full bg-black/50 hover:bg-black/70 flex items-center justify-center text-white transition-colors shrink-0"
               title="رجوع"
             >
               <ArrowRight className="w-4 h-4" />
@@ -689,12 +841,12 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
                 <span className="text-[9px] bg-[#FFE600] text-black font-black px-1.5 py-0.5 rounded shrink-0">
                   {targetSeatCount} مايك
                 </span>
-                <h3 className="font-bold text-xs text-white truncate max-w-[100px]">{liveRoom.title}</h3>
+                <h3 className="font-bold text-xs text-white truncate max-w-[85px]">{liveRoom.title}</h3>
               </div>
               {(() => {
                 const roomOwner = livoStore.getUserByUid(liveRoom.ownerUid);
                 return (
-                  <div className="text-[10px] text-purple-300 flex items-center gap-1 mt-0.5 max-w-[130px]">
+                  <div className="text-[10px] text-purple-300 flex items-center gap-1 mt-0.5 max-w-[115px]">
                     <UserNameWithBadges
                       displayName={roomOwner?.displayName || liveRoom.ownerName}
                       nameGlowColor={roomOwner?.nameGlowColor}
@@ -705,8 +857,8 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
                       customIconUrl={roomOwner?.customIconUrl}
                       customIconGlow={roomOwner?.customIconGlow}
                       customIconAnimated={roomOwner?.customIconAnimated}
-                      badgeSize={12}
-                      iconSize={15}
+                      badgeSize={11}
+                      iconSize={14}
                       nameClassName="text-amber-400 font-semibold text-[10px]"
                     />
                   </div>
@@ -716,27 +868,51 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
           </div>
 
           <div className="flex items-center gap-1 shrink-0">
-            <div className="flex items-center gap-1 bg-black/50 px-2 py-1 rounded-full border border-purple-800/40 text-[10px] text-purple-200">
-              <Users className="w-3 h-3 text-amber-400" />
-              <span className="font-digits font-extrabold">
-                {seats.filter(s => s.occupiedByUid).length || 1}
-              </span>
-            </div>
+            {canUseStealth && (
+              <button
+                onClick={handleToggleStealth}
+                className={`px-2 h-7 rounded-full text-[9px] font-black flex items-center gap-1 border transition-colors ${
+                  isStealth
+                    ? 'bg-emerald-500 text-black border-emerald-300 shadow'
+                    : 'bg-purple-950/80 text-purple-200 border-purple-600/50'
+                }`}
+                title={isStealth ? 'أنت متخفي الآن — اضغط لتفعيل الظهور' : 'تفعيل الدخول المتخفي'}
+              >
+                {isStealth ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+                <span>{isStealth ? 'تفعيل الظهور' : 'تخفي'}</span>
+              </button>
+            )}
+
+            {/* Room Supporters Cup 🏆 Button (next to Settings) */}
+            {(() => {
+              const topSup = livoStore.getRoomSupporters(liveRoom.id)[0];
+              return (
+                <button
+                  onClick={() => setShowSupportersModal(true)}
+                  className="h-7 px-2 rounded-full bg-gradient-to-r from-amber-500/90 to-yellow-400/90 text-black flex items-center gap-1 text-[10px] font-black shadow border border-amber-200/70 hover:scale-105 transition-transform"
+                  title="كأس الداعمين في الغرفة"
+                >
+                  <Trophy className="w-3.5 h-3.5 shrink-0" />
+                  <span className="max-w-[52px] truncate hidden sm:inline">
+                    {topSup ? topSup.displayName : 'الكأس'}
+                  </span>
+                </button>
+              );
+            })()}
 
             {isOwnerOrMod && (
               <button
                 onClick={() => setShowSettingsDrawer(true)}
-                className="w-8 h-8 sm:w-auto sm:px-2 rounded-full bg-[#FFE600] hover:bg-yellow-400 text-black flex items-center justify-center gap-1 text-[10px] font-black shadow transition-colors"
+                className="w-7 h-7 rounded-full bg-[#FFE600] hover:bg-yellow-400 text-black flex items-center justify-center shadow transition-colors"
                 title="إعدادات الغرفة والمشرفين"
               >
                 <Settings className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">إعدادات</span>
               </button>
             )}
 
             <button
               onClick={() => setShowMusicPanel(v => !v)}
-              className={`w-8 h-8 rounded-full border flex items-center justify-center transition-colors ${
+              className={`w-7 h-7 rounded-full border flex items-center justify-center transition-colors ${
                 musicPlaying
                   ? 'bg-emerald-600/80 border-emerald-400 text-white animate-pulse'
                   : 'bg-purple-900/70 hover:bg-purple-800 border-purple-500/40 text-purple-200'
@@ -748,7 +924,7 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
 
             <button
               onClick={openBackgroundPicker}
-              className="w-8 h-8 rounded-full bg-purple-900/70 hover:bg-purple-800 border border-purple-500/40 flex items-center justify-center text-amber-300 transition-colors"
+              className="w-7 h-7 rounded-full bg-purple-900/70 hover:bg-purple-800 border border-purple-500/40 flex items-center justify-center text-amber-300 transition-colors"
               title="تغيير الخلفية من ملفاتي"
             >
               <ImageIcon className="w-3.5 h-3.5" />
@@ -759,7 +935,7 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
                 navigator.clipboard?.writeText(`https://livo.live/room/${liveRoom.id}`);
                 showToast('تم نسخ رابط الغرفة 📋');
               }}
-              className="w-8 h-8 rounded-full bg-black/40 flex items-center justify-center text-purple-300 hover:text-white"
+              className="w-7 h-7 rounded-full bg-black/40 flex items-center justify-center text-purple-300 hover:text-white"
               title="مشاركة الغرفة"
             >
               <Share2 className="w-3.5 h-3.5" />
@@ -768,7 +944,7 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
             {onMinimize && (
               <button
                 onClick={onMinimize}
-                className="w-8 h-8 rounded-full bg-amber-500/90 hover:bg-amber-400 text-black flex items-center justify-center"
+                className="w-7 h-7 rounded-full bg-amber-500/90 hover:bg-amber-400 text-black flex items-center justify-center"
                 title="لايف مصغر (تصغير الغرفة)"
               >
                 <Minimize2 className="w-3.5 h-3.5" />
@@ -777,10 +953,10 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
 
             <button
               onClick={handleExitButtonTap}
-              className="w-8 h-8 rounded-full bg-red-600/80 hover:bg-red-600 flex items-center justify-center text-white"
+              className="w-7 h-7 rounded-full bg-red-600/80 hover:bg-red-600 flex items-center justify-center text-white"
               title="إغلاق / خروج"
             >
-              <X className="w-4 h-4" />
+              <X className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
@@ -883,6 +1059,19 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
                 seat.occupiedByUid && liveRoom.moderatorUids?.includes(seat.occupiedByUid)
               );
 
+              const seatIsBlocked = Boolean(
+                seat.isMicBlocked ||
+                  (seat.occupiedByUid && liveRoom.micBlockedUsers?.includes(seat.occupiedByUid))
+              );
+              const seatIsSpeaking = Boolean(
+                seat.occupiedByUid &&
+                  !seat.isMuted &&
+                  !seatIsBlocked &&
+                  speakingUids[seat.occupiedByUid]
+              );
+              const seatUserProf = seat.occupiedByUid ? livoStore.getUserByUid(seat.occupiedByUid) : undefined;
+              const seatAgencyLabel = seat.agencyBadgeLabel || livoStore.getAgencyDisplayLabel(seatUserProf);
+
               return (
                 <div
                   key={index}
@@ -891,7 +1080,11 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
                 >
                   <div className="relative flex items-center justify-center" style={{ width: avatarFrameSize, height: avatarFrameSize }}>
                     {isOccupied ? (
-                      <div className="relative flex items-center justify-center">
+                      <div
+                        className={`relative flex items-center justify-center rounded-full ${
+                          seatIsSpeaking ? 'ring-2 ring-emerald-400 ring-offset-2 ring-offset-[#170b2c] shadow-[0_0_16px_rgba(16,185,129,0.75)]' : ''
+                        }`}
+                      >
                         <AvatarWithFrame
                           sizePx={avatarFrameSize}
                           avatarUrl={seat.occupiedByAvatar}
@@ -916,12 +1109,23 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
                           </span>
                         )}
 
-                        {seat.isMuted ? (
+                        {seatIsBlocked ? (
+                          <span
+                            className="absolute -bottom-0.5 -right-0.5 px-1 h-4 rounded-full bg-red-700 border border-[#FFE600] flex items-center justify-center text-[8px] font-black text-white z-20"
+                            title="المايك مقفل بواسطة الإدارة"
+                          >
+                            🔒
+                          </span>
+                        ) : seat.isMuted ? (
                           <span className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-red-600 border border-black flex items-center justify-center z-20">
                             <MicOff className="w-2.5 h-2.5 text-white" />
                           </span>
                         ) : (
-                          <span className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-emerald-500 border border-black flex items-center justify-center animate-pulse z-20">
+                          <span
+                            className={`absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-emerald-500 border border-black flex items-center justify-center z-20 ${
+                              seatIsSpeaking ? 'animate-ping' : 'animate-pulse'
+                            }`}
+                          >
                             <Mic className="w-2.5 h-2.5 text-white" />
                           </span>
                         )}
@@ -938,22 +1142,32 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
                     )}
                   </div>
 
-                  <div className="flex items-center justify-center gap-0.5 mt-1 max-w-[88px]">
+                  <div className="flex flex-col items-center justify-center mt-1 max-w-[88px]">
                     {isOccupied ? (
-                      <UserNameWithBadges
-                        displayName={seat.occupiedByName || ''}
-                        nameGlowColor={seat.nameGlowColor}
-                        isVerified={seat.isVerified}
-                        verifiedBadgeColor={seat.verifiedBadgeColor}
-                        verifiedBadgeShape={seat.verifiedBadgeShape}
-                        verifiedBadgeGlow={seat.verifiedBadgeGlow}
-                        customIconUrl={seat.customIconUrl}
-                        customIconGlow={seat.customIconGlow}
-                        customIconAnimated={seat.customIconAnimated}
-                        badgeSize={10}
-                        iconSize={13}
-                        nameClassName="text-[10px] font-bold text-purple-100"
-                      />
+                      <>
+                        <UserNameWithBadges
+                          displayName={seat.occupiedByName || ''}
+                          nameGlowColor={seat.nameGlowColor}
+                          isVerified={seat.isVerified}
+                          verifiedBadgeColor={seat.verifiedBadgeColor}
+                          verifiedBadgeShape={seat.verifiedBadgeShape}
+                          verifiedBadgeGlow={seat.verifiedBadgeGlow}
+                          customIconUrl={seat.customIconUrl}
+                          customIconGlow={seat.customIconGlow}
+                          customIconAnimated={seat.customIconAnimated}
+                          badgeSize={10}
+                          iconSize={13}
+                          nameClassName="text-[10px] font-bold text-purple-100"
+                        />
+                        {seatAgencyLabel && (
+                          <span className="text-[8px] font-black text-[#FFE600] leading-none mt-0.5">
+                            {seatAgencyLabel}
+                          </span>
+                        )}
+                        <span className="mt-0.5 px-1.5 py-[1px] rounded-full bg-black/55 border border-amber-400/40 text-[9px] font-digits font-black text-amber-300 leading-none">
+                          {(seat.giftsCount || seat.points || 0).toLocaleString()} 🎁
+                        </span>
+                      </>
                     ) : (
                       <span className="text-[10px] truncate font-bold text-purple-100">
                         {seatNumber === 1 ? 'مقعد المالك' : `مايك ${seatNumber}`}
@@ -1063,14 +1277,22 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
           </div>
         )}
 
-        {/* Sticky Bottom Toolbar (Visible Chat Input + Emoji + Gift + Mic) */}
-        <div className="p-2.5 px-3 bg-black/85 backdrop-blur-lg border-t border-purple-900/50 flex items-center justify-between gap-2 z-20 shrink-0">
+        {/* Sticky Bottom Toolbar (Visible Chat Input + Games + Emoji + Gift + Mic) */}
+        <div className="p-2.5 px-3 bg-black/85 backdrop-blur-lg border-t border-purple-900/50 flex items-center justify-between gap-1.5 z-20 shrink-0">
           <button
             onClick={() => setShowGiftsTray(true)}
             className="w-10 h-10 rounded-full bg-gradient-to-tr from-amber-500 via-orange-500 to-yellow-400 text-black flex items-center justify-center shadow-lg shadow-amber-500/30 hover:scale-105 transition-all shrink-0"
             title="إرسال هدية"
           >
             <Gift className="w-5 h-5" />
+          </button>
+
+          <button
+            onClick={() => setShowGamesModal(true)}
+            className="w-9 h-9 rounded-full bg-purple-900/80 hover:bg-purple-800 border border-purple-500/50 text-[#FFE600] flex items-center justify-center shrink-0 transition-transform active:scale-95"
+            title="ألعاب الغرفة (نرد / قلب الثنائي)"
+          >
+            <Gamepad2 className="w-4 h-4" />
           </button>
 
           <form onSubmit={handleSendMessage} className="flex-1 flex items-center bg-[#1b0825] border border-purple-700/60 rounded-full px-2.5 py-1.5 gap-1">
@@ -1119,11 +1341,21 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
           <button
             onClick={handleBottomMicToggle}
             className={`w-9 h-9 rounded-full border flex items-center justify-center transition-colors shrink-0 ${
-              mySeat && !isMyMicMuted
+              isMyMicBlocked && !isOwnerOrMod
+                ? 'bg-red-800 border-red-400 text-white'
+                : mySeat && !isMyMicMuted
                 ? 'bg-emerald-600 border-emerald-500 text-white'
                 : 'bg-purple-900/60 border-purple-700/60 text-purple-200'
             }`}
-            title={mySeat ? (isMyMicMuted ? 'فتح المايك' : 'كتم المايك') : 'الصعود على المايك'}
+            title={
+              isMyMicBlocked && !isOwnerOrMod
+                ? 'المايك مقفل بواسطة الإدارة'
+                : mySeat
+                ? isMyMicMuted
+                  ? 'فتح المايك'
+                  : 'كتم المايك'
+                : 'الصعود على المايك'
+            }
           >
             {mySeat && !isMyMicMuted ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
           </button>
@@ -1397,7 +1629,7 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
 
                     <button
                       onClick={() => {
-                        const next = livoStore.toggleSeatMute(liveRoom.id, moderationSeat.seatIndex);
+                        const next = livoStore.toggleSeatMute(liveRoom.id, moderationSeat.seatIndex, undefined, currentUser.uid);
                         setModerationSeat(null);
                         showToast(next ? 'تم كتم المايك' : 'تم إلغاء كتم المايك');
                       }}
@@ -1406,6 +1638,43 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
                       <VolumeX className="w-4 h-4 text-orange-400" />
                       <span>{moderationSeat.isMuted ? 'إلغاء الكتم' : 'كتم المايك'}</span>
                     </button>
+
+                    {(() => {
+                      const isTargetMicBlocked = Boolean(
+                        moderationSeat.isMicBlocked ||
+                          (moderationSeat.occupiedByUid && liveRoom.micBlockedUsers?.includes(moderationSeat.occupiedByUid))
+                      );
+                      return (
+                        <button
+                          onClick={() => {
+                            const res = livoStore.setSeatMicBlocked(
+                              liveRoom.id,
+                              moderationSeat.seatIndex,
+                              !isTargetMicBlocked,
+                              currentUser.uid
+                            );
+                            setModerationSeat(null);
+                            showToast(res.message);
+                          }}
+                          className={`col-span-2 p-2.5 rounded-xl flex items-center justify-center gap-2 border ${
+                            isTargetMicBlocked
+                              ? 'bg-emerald-900/60 hover:bg-emerald-800 border-emerald-500/60 text-emerald-200'
+                              : 'bg-red-900/50 hover:bg-red-800 border-red-500/60 text-red-200'
+                          }`}
+                        >
+                          {isTargetMicBlocked ? (
+                            <Unlock className="w-4 h-4 text-emerald-300" />
+                          ) : (
+                            <Lock className="w-4 h-4 text-red-300" />
+                          )}
+                          <span>
+                            {isTargetMicBlocked
+                              ? 'فك قفل المايك عن العضو'
+                              : 'قفل المايك نهائياً عن العضو'}
+                          </span>
+                        </button>
+                      );
+                    })()}
 
                     <button
                       onClick={() => {
@@ -1471,21 +1740,217 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
           </div>
         )}
 
-        {/* Dynamic Gifts Tray with Combo Count & Recipient Selector */}
+        {/* Room Supporters Cup Modal (🏆) */}
+        {showSupportersModal && (
+          <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex flex-col justify-end animate-in fade-in">
+            <div className="bg-[#180a28] rounded-t-3xl border-t border-amber-400/70 p-4 space-y-3 max-h-[80dvh] overflow-y-auto text-right">
+              <div className="flex items-center justify-between border-b border-purple-800/50 pb-2.5">
+                <div className="flex items-center gap-2">
+                  <Trophy className="w-5 h-5 text-[#FFE600]" />
+                  <div>
+                    <h4 className="text-sm font-black text-white">كأس الداعمين في الغرفة</h4>
+                    <p className="text-[10px] text-purple-300">ترتيب أعلى المهدين في {liveRoom.title}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowSupportersModal(false)}
+                  className="w-7 h-7 rounded-full bg-purple-900/50 text-purple-200 flex items-center justify-center"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {(() => {
+                const list = livoStore.getRoomSupporters(liveRoom.id);
+                if (list.length === 0) {
+                  return (
+                    <div className="py-10 text-center text-xs text-purple-300">
+                      لا يوجد دعم مسجل داخل هذه الغرفة حتى الآن — كن أول الداعمين! 🎁
+                    </div>
+                  );
+                }
+                return (
+                  <div className="space-y-2">
+                    {list.map((entry, idx) => (
+                      <div
+                        key={entry.uid}
+                        className={`flex items-center justify-between p-2.5 rounded-2xl border ${
+                          idx === 0
+                            ? 'bg-gradient-to-r from-amber-500/20 to-yellow-500/10 border-amber-400/70'
+                            : 'bg-black/40 border-purple-800/50'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span
+                            className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-digits font-black shrink-0 ${
+                              idx === 0
+                                ? 'bg-[#FFE600] text-black'
+                                : idx === 1
+                                ? 'bg-gray-300 text-black'
+                                : idx === 2
+                                ? 'bg-amber-700 text-white'
+                                : 'bg-purple-900 text-purple-200'
+                            }`}
+                          >
+                            {idx + 1}
+                          </span>
+                          <img
+                            src={entry.avatar}
+                            alt={entry.displayName}
+                            className="w-9 h-9 rounded-full object-cover border border-amber-400/50 shrink-0"
+                          />
+                          <div className="min-w-0">
+                            <UserNameWithBadges
+                              displayName={entry.displayName}
+                              isVerified={entry.isVerified}
+                              verifiedBadgeColor={entry.verifiedBadgeColor}
+                              agencyLabel={entry.agencyBadgeLabel}
+                              badgeSize={12}
+                              nameClassName="text-xs font-black text-white"
+                            />
+                            <span className="text-[10px] text-purple-300 font-digits block">
+                              UID: {entry.uid} • {entry.giftsCount} هدية
+                            </span>
+                          </div>
+                        </div>
+                        <span className="text-xs font-digits font-black text-[#FFE600] shrink-0">
+                          {entry.totalCoins.toLocaleString()} 🪙
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+        )}
+
+        {/* HAGO In-Room Mini Games Modal (🎲 Dice & 💖 Couple Heart) */}
+        {showGamesModal && currentUser && (
+          <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex flex-col justify-end animate-in fade-in">
+            <div className="bg-[#180a28] rounded-t-3xl border-t border-purple-500/70 p-4 space-y-4 max-h-[82dvh] overflow-y-auto text-right">
+              <div className="flex items-center justify-between border-b border-purple-800/50 pb-2.5">
+                <div className="flex items-center gap-2">
+                  <Gamepad2 className="w-5 h-5 text-[#FFE600]" />
+                  <div>
+                    <h4 className="text-sm font-black text-white">ألعاب التفاعل (HAGO Games)</h4>
+                    <p className="text-[10px] text-purple-300">تحديات جماعية تظهر مباشرة لجميع أعضاء الغرفة</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowGamesModal(false)}
+                  className="w-7 h-7 rounded-full bg-purple-900/50 text-purple-200 flex items-center justify-center"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Game 1: Roll Dice */}
+              <button
+                type="button"
+                onClick={() => {
+                  const res = livoStore.rollRoomDice(liveRoom.id, currentUser.uid);
+                  setShowGamesModal(false);
+                  if (!res.success) showToast(res.message);
+                }}
+                className="w-full p-3.5 rounded-2xl bg-gradient-to-r from-indigo-900/70 to-purple-900/70 border border-indigo-400/50 hover:border-[#FFE600] flex items-center justify-between transition-all"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-2xl bg-[#FFE600] text-black flex items-center justify-center shadow">
+                    <Dices className="w-6 h-6" />
+                  </div>
+                  <div className="text-right">
+                    <h5 className="text-xs font-black text-white">🎲 لف النرد العشوائي</h5>
+                    <p className="text-[10px] text-purple-200">ارمِ النرد وأظهر الرقم للجميع في الشات والغرفة</p>
+                  </div>
+                </div>
+                <span className="px-3 py-1 rounded-xl bg-[#FFE600] text-black text-[11px] font-black">
+                  ارمِ الآن
+                </span>
+              </button>
+
+              {/* Game 2: Couple Big Heart (Select 2 members -> 3s Centerpiece) */}
+              <div className="p-3.5 rounded-2xl bg-gradient-to-br from-pink-950/70 to-purple-950/70 border border-pink-500/50 space-y-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-2xl bg-pink-500 text-white flex items-center justify-center shadow">
+                    <Heart className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h5 className="text-xs font-black text-white">💖 لعبة قلب الثنائي (3 ثواني)</h5>
+                    <p className="text-[10px] text-pink-200">اختر شخصين ليظهرا معاً داخل قلب مضيء في منتصف الغرفة</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-[11px]">
+                  <select
+                    value={couplePartner1}
+                    onChange={(e) => setCouplePartner1(e.target.value)}
+                    className="bg-black/55 border border-pink-500/40 rounded-xl px-2.5 py-2 text-white font-bold outline-none"
+                  >
+                    <option value="">اختر الشخص الأول</option>
+                    {occupiedUsersForGifts.map((s) => (
+                      <option key={`p1-${s.occupiedByUid}`} value={s.occupiedByUid}>
+                        {s.occupiedByName} (مايك {s.seatIndex + 1})
+                      </option>
+                    ))}
+                  </select>
+
+                  <select
+                    value={couplePartner2}
+                    onChange={(e) => setCouplePartner2(e.target.value)}
+                    className="bg-black/55 border border-pink-500/40 rounded-xl px-2.5 py-2 text-white font-bold outline-none"
+                  >
+                    <option value="">اختر الشخص الثاني</option>
+                    {occupiedUsersForGifts.map((s) => (
+                      <option key={`p2-${s.occupiedByUid}`} value={s.occupiedByUid}>
+                        {s.occupiedByName} (مايك {s.seatIndex + 1})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const res = livoStore.triggerCoupleHeartGame(
+                      liveRoom.id,
+                      currentUser.uid,
+                      couplePartner1,
+                      couplePartner2
+                    );
+                    if (res.success) {
+                      setShowGamesModal(false);
+                    } else {
+                      showToast(res.message);
+                    }
+                  }}
+                  className="w-full py-2.5 rounded-xl bg-gradient-to-r from-pink-500 to-rose-500 text-white font-black text-xs shadow-lg"
+                >
+                  عرض قلب الثنائي للجميع 💖
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Dynamic Gifts Tray (208+ Gifts, Search, Category Filter, Multi-Seat & All-Seats, Writable Gift Cards) */}
         {showGiftsTray && (
           <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex flex-col justify-end animate-in fade-in">
-            <div className="bg-[#1a0a2a] rounded-t-3xl border-t border-purple-800/80 p-4 space-y-3">
-              <div className="flex items-center justify-between border-b border-purple-900/50 pb-2">
+            <div className="bg-[#1a0a2a] rounded-t-3xl border-t border-purple-800/80 p-4 space-y-2.5 max-h-[85dvh] flex flex-col">
+              <div className="flex items-center justify-between border-b border-purple-900/50 pb-2 shrink-0">
                 <div className="flex items-center gap-2">
                   <Gift className="w-5 h-5 text-amber-400" />
-                  <span className="text-xs font-bold text-white">متجر الهدايا</span>
+                  <span className="text-xs font-bold text-white">متجر الهدايا ({gifts.length})</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] font-digits text-amber-300 font-bold">
                     {currentUser ? `${currentUser?.coins.toLocaleString()} 🪙` : 'سجّل الدخول للإرسال'}
                   </span>
                   <button
-                    onClick={() => setShowGiftsTray(false)}
+                    onClick={() => {
+                      setPendingCardGift(null);
+                      setShowGiftsTray(false);
+                    }}
                     className="w-7 h-7 rounded-full bg-purple-900/40 flex items-center justify-center text-purple-300 hover:text-white"
                   >
                     <X className="w-4 h-4" />
@@ -1493,55 +1958,180 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
                 </div>
               </div>
 
-              {/* Recipient & Combo Selector */}
-              <div className="flex items-center justify-between gap-2 text-[10px]">
-                <select
-                  value={giftRecipientUid}
-                  onChange={(e) => setGiftRecipientUid(e.target.value)}
-                  className="flex-1 bg-black/50 border border-purple-800/60 rounded-xl px-2.5 py-1.5 text-purple-100 font-bold outline-none"
-                >
-                  <option value="">إهداء لصاحب الغرفة ({liveRoom.ownerName})</option>
-                  {occupiedUsersForGifts.map(s => (
-                    <option key={s.occupiedByUid} value={s.occupiedByUid}>
-                      إلى {s.occupiedByName} (مايك {s.seatIndex + 1})
-                    </option>
-                  ))}
-                </select>
+              {/* Recipient Multi-Select Chips + "All Seats" Toggle + Combo Count */}
+              <div className="space-y-1.5 shrink-0">
+                <div className="flex items-center justify-between gap-2 text-[10px]">
+                  <span className="text-purple-200 font-bold">إرسال إلى:</span>
+                  <div className="flex items-center gap-1 bg-black/50 border border-purple-800/60 rounded-xl p-0.5">
+                    {[1, 5, 10, 20].map((c) => (
+                      <button
+                        key={c}
+                        type="button"
+                        onClick={() => setGiftCount(c)}
+                        className={`px-2 py-0.5 rounded-lg font-digits font-black transition-all ${
+                          giftCount === c ? 'bg-[#FFE600] text-black' : 'text-purple-200'
+                        }`}
+                      >
+                        ×{c}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
-                <div className="flex items-center gap-1 bg-black/50 border border-purple-800/60 rounded-xl p-1">
-                  {[1, 5, 10].map((c) => (
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setGiftTargetAll((v) => !v);
+                      setGiftRecipientUids([]);
+                    }}
+                    className={`px-2.5 py-1 rounded-full text-[10px] font-black shrink-0 border transition-all ${
+                      giftTargetAll
+                        ? 'bg-[#FFE600] text-black border-amber-300'
+                        : 'bg-black/45 text-purple-200 border-purple-700/60'
+                    }`}
+                  >
+                    ✨ الكل ({occupiedUsersForGifts.length || 1} مقاعد)
+                  </button>
+                  {occupiedUsersForGifts.map((s) => {
+                    const uid = s.occupiedByUid!;
+                    const selected = !giftTargetAll && giftRecipientUids.includes(uid);
+                    return (
+                      <button
+                        key={uid}
+                        type="button"
+                        onClick={() => handleToggleRecipientUid(uid)}
+                        className={`px-2 py-1 rounded-full text-[10px] font-bold flex items-center gap-1 shrink-0 border transition-all ${
+                          selected
+                            ? 'bg-purple-600 text-white border-[#FFE600]'
+                            : 'bg-black/45 text-purple-200 border-purple-800/60'
+                        }`}
+                      >
+                        <img
+                          src={s.occupiedByAvatar || '/assets/livo/customer_icon.jpg'}
+                          alt=""
+                          className="w-4 h-4 rounded-full object-cover"
+                        />
+                        <span className="max-w-[70px] truncate">{s.occupiedByName}</span>
+                        <span className="text-[9px] text-amber-300 font-digits">#{s.seatIndex + 1}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Search & Category Filter */}
+              <div className="space-y-1.5 shrink-0">
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-purple-300 absolute right-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={giftSearch}
+                    onChange={(e) => setGiftSearch(e.target.value)}
+                    placeholder="ابحث بين 200+ هدية وكارت إهداء..."
+                    className="w-full bg-black/50 border border-purple-800/60 rounded-xl pr-8 pl-3 py-1.5 text-[11px] text-white outline-none"
+                  />
+                </div>
+                <div className="flex items-center gap-1 overflow-x-auto pb-0.5">
+                  {['الكل', 'كروت إهداء', 'ملكي', 'حيوانات', 'سيارات وطائرات', 'حب', 'ألماس', 'حفلات'].map((cat) => (
                     <button
-                      key={c}
+                      key={cat}
                       type="button"
-                      onClick={() => setGiftCount(c)}
-                      className={`px-2 py-0.5 rounded-lg font-digits font-black transition-all ${
-                        giftCount === c ? 'bg-[#FFE600] text-black' : 'text-purple-200'
+                      onClick={() => setGiftCategory(cat)}
+                      className={`px-2.5 py-1 rounded-xl text-[10px] font-black shrink-0 border ${
+                        giftCategory === cat
+                          ? 'bg-[#FFE600] text-black border-amber-300'
+                          : 'bg-black/40 text-purple-200 border-purple-800/60'
                       }`}
                     >
-                      ×{c}
+                      {cat}
                     </button>
                   ))}
                 </div>
               </div>
 
-              <div className="grid grid-cols-4 gap-2.5 max-h-[250px] overflow-y-auto">
-                {gifts.map((g) => (
-                  <button
-                    key={g.id}
-                    onClick={() => handleSendGift(g)}
-                    className="p-2.5 rounded-2xl bg-purple-950/40 hover:bg-purple-900/60 border border-purple-800/40 hover:border-amber-400 flex flex-col items-center gap-1 transition-all group"
-                  >
-                    {g.imageUrl ? (
-                      <img src={g.imageUrl} alt={g.name} className="w-9 h-9 object-contain group-hover:scale-125 transition-transform" />
-                    ) : (
-                      <span className="text-3xl group-hover:scale-125 transition-transform">{g.icon}</span>
-                    )}
-                    <span className="text-[10px] font-bold text-white truncate max-w-full">{g.name}</span>
-                    <span className="text-[9px] font-digits text-amber-300 font-bold">
-                      {(g.coins * giftCount).toLocaleString()} 🪙
+              {/* Writable Gift Card Text Prompt when a Card Gift is tapped */}
+              {pendingCardGift && (
+                <div className="bg-gradient-to-r from-purple-900/90 to-pink-900/80 border border-[#FFE600] rounded-2xl p-3 space-y-2 shrink-0">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black text-[#FFE600]">
+                      {pendingCardGift.icon} اكتب رسالتك على "{pendingCardGift.name}"
                     </span>
-                  </button>
-                ))}
+                    <button
+                      type="button"
+                      onClick={() => setPendingCardGift(null)}
+                      className="text-[10px] text-purple-200 underline"
+                    >
+                      تغيير الهدية
+                    </button>
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      maxLength={90}
+                      value={cardMessageText}
+                      onChange={(e) => setCardMessageText(e.target.value)}
+                      placeholder="اكتب إهداءك هنا ليظهر على الكارت لجميع الأعضاء..."
+                      className="flex-1 bg-black/55 border border-pink-400/50 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => executeGiftSend(pendingCardGift, cardMessageText)}
+                      className="px-3.5 py-2 rounded-xl bg-[#FFE600] text-black font-black text-xs shrink-0"
+                    >
+                      إرسال 💌
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Gifts Grid */}
+              <div className="grid grid-cols-4 gap-2 overflow-y-auto flex-1 min-h-[190px] max-h-[260px] pr-0.5">
+                {gifts
+                  .filter((g) => {
+                    if (giftCategory !== 'الكل') {
+                      if (giftCategory === 'كروت إهداء') {
+                        if (!g.isCard && g.category !== 'كروت إهداء') return false;
+                      } else if (g.category !== giftCategory) {
+                        return false;
+                      }
+                    }
+                    if (giftSearch.trim()) {
+                      return g.name.toLowerCase().includes(giftSearch.trim().toLowerCase());
+                    }
+                    return true;
+                  })
+                  .map((g) => {
+                    const recipientMultiplier = giftTargetAll
+                      ? Math.max(1, occupiedUsersForGifts.length)
+                      : Math.max(1, giftRecipientUids.length);
+                    return (
+                      <button
+                        key={g.id}
+                        onClick={() => handleGiftCardOrTap(g)}
+                        className={`p-2 rounded-2xl border flex flex-col items-center gap-1 transition-all group relative ${
+                          pendingCardGift?.id === g.id
+                            ? 'bg-pink-900/60 border-[#FFE600]'
+                            : 'bg-purple-950/40 hover:bg-purple-900/60 border-purple-800/40 hover:border-amber-400'
+                        }`}
+                      >
+                        {g.isCard && (
+                          <span className="absolute top-1 left-1 text-[8px] px-1 rounded bg-pink-500 text-white font-black">
+                            كارت
+                          </span>
+                        )}
+                        {g.imageUrl ? (
+                          <img src={g.imageUrl} alt={g.name} className="w-9 h-9 object-contain group-hover:scale-125 transition-transform" />
+                        ) : (
+                          <span className="text-3xl group-hover:scale-125 transition-transform">{g.icon}</span>
+                        )}
+                        <span className="text-[10px] font-bold text-white truncate max-w-full">{g.name}</span>
+                        <span className="text-[9px] font-digits text-amber-300 font-bold">
+                          {(g.coins * giftCount * recipientMultiplier).toLocaleString()} 🪙
+                        </span>
+                      </button>
+                    );
+                  })}
               </div>
             </div>
           </div>

@@ -65,7 +65,11 @@ import {
   StoreItem,
   RechargeCode,
   CoinPackage,
-  SupervisorRecord
+  SupervisorRecord,
+  GiftSupportLog,
+  SplashBannerConfig,
+  InAppNotification,
+  RoomRtcSignal
 } from '../types';
 
 /**
@@ -203,7 +207,11 @@ export const COLLECTIONS = {
   RECHARGE_CODES: 'recharge_codes',
   COIN_PACKAGES: 'coin_packages',
   SUPERVISORS: 'supervisors',
-  STAFF_AUTH: 'staff_auth'
+  STAFF_AUTH: 'staff_auth',
+  GIFT_LOGS: 'gift_logs',
+  SPLASH_BANNERS: 'splash_banners',
+  NOTIFICATIONS: 'notifications',
+  ROOM_RTC_SIGNALS: 'room_rtc_signals'
 };
 
 // 4. Firebase Service Implementation
@@ -702,6 +710,17 @@ export class FirebaseService {
       return true;
     } catch (e) {
       console.error('Error saving user profile to Firestore:', e);
+      return false;
+    }
+  }
+
+  public async deleteUserByUid(uid: string): Promise<boolean> {
+    if (!auth.currentUser || !uid?.trim()) return false;
+    try {
+      await deleteDoc(doc(db, COLLECTIONS.USERS, uid.trim()));
+      return true;
+    } catch (e) {
+      console.error('Error deleting user profile from Firestore:', e);
       return false;
     }
   }
@@ -1369,6 +1388,167 @@ export class FirebaseService {
       return true;
     } catch (e) {
       console.error('Error deleting video from Firestore:', e);
+      return false;
+    }
+  }
+
+  /**
+   * Real-time subscription to Gift Support Logs (Supporters cup & leaderboard)
+   */
+  public subscribeToGiftLogs(onUpdate: (logs: GiftSupportLog[]) => void): Unsubscribe {
+    const q = collection(db, COLLECTIONS.GIFT_LOGS);
+    const unsub = onSnapshot(
+      q,
+      (snapshot) => {
+        const list: GiftSupportLog[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push(docSnap.data() as GiftSupportLog);
+        });
+        list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        onUpdate(list);
+      },
+      (error) => {
+        console.warn('Error listening to gift logs:', error.message);
+      }
+    );
+    this.activeListeners.push(unsub);
+    return unsub;
+  }
+
+  public async saveGiftLog(log: GiftSupportLog): Promise<boolean> {
+    try {
+      await setDoc(doc(db, COLLECTIONS.GIFT_LOGS, log.id), stripUndefined(log));
+      return true;
+    } catch (e) {
+      console.error('Error saving gift log:', e);
+      return false;
+    }
+  }
+
+  /**
+   * Real-time subscription to Admin Splash Greeting/Gift Banners
+   */
+  public subscribeToSplashBanners(onUpdate: (banners: SplashBannerConfig[]) => void): Unsubscribe {
+    const q = collection(db, COLLECTIONS.SPLASH_BANNERS);
+    const unsub = onSnapshot(
+      q,
+      (snapshot) => {
+        const list: SplashBannerConfig[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push(docSnap.data() as SplashBannerConfig);
+        });
+        list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        onUpdate(list);
+      },
+      (error) => {
+        console.warn('Error listening to splash banners:', error.message);
+      }
+    );
+    this.activeListeners.push(unsub);
+    return unsub;
+  }
+
+  public async saveSplashBanner(banner: SplashBannerConfig): Promise<boolean> {
+    try {
+      await setDoc(doc(db, COLLECTIONS.SPLASH_BANNERS, banner.id), stripUndefined(banner), { merge: true });
+      return true;
+    } catch (e) {
+      console.error('Error saving splash banner:', e);
+      return false;
+    }
+  }
+
+  public async deleteSplashBanner(id: string): Promise<boolean> {
+    try {
+      await deleteDoc(doc(db, COLLECTIONS.SPLASH_BANNERS, id));
+      return true;
+    } catch (e) {
+      console.error('Error deleting splash banner:', e);
+      return false;
+    }
+  }
+
+  /**
+   * Real-time subscription to In-App Notifications for a user
+   */
+  public subscribeToNotifications(uid: string, onUpdate: (items: InAppNotification[]) => void): Unsubscribe {
+    if (!uid?.trim()) return () => {};
+    const q = query(collection(db, COLLECTIONS.NOTIFICATIONS), where('uid', '==', uid.trim()));
+    const unsub = onSnapshot(
+      q,
+      (snapshot) => {
+        const list: InAppNotification[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push(docSnap.data() as InAppNotification);
+        });
+        list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        onUpdate(list);
+      },
+      (error) => {
+        console.warn('Error listening to notifications:', error.message);
+      }
+    );
+    this.activeListeners.push(unsub);
+    return unsub;
+  }
+
+  public async saveNotification(notif: InAppNotification): Promise<boolean> {
+    try {
+      await setDoc(doc(db, COLLECTIONS.NOTIFICATIONS, notif.id), stripUndefined(notif), { merge: true });
+      return true;
+    } catch (e) {
+      console.error('Error saving notification:', e);
+      return false;
+    }
+  }
+
+  /**
+   * Real-time WebRTC signaling listener for a specific room & target user
+   */
+  public subscribeToRoomRtcSignals(
+    roomId: string,
+    toUid: string,
+    onSignals: (signals: RoomRtcSignal[]) => void
+  ): Unsubscribe {
+    if (!roomId || !toUid) return () => {};
+    const q = query(
+      collection(db, COLLECTIONS.ROOM_RTC_SIGNALS),
+      where('roomId', '==', roomId),
+      where('toUid', '==', toUid)
+    );
+    const unsub = onSnapshot(
+      q,
+      (snapshot) => {
+        const list: RoomRtcSignal[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push(docSnap.data() as RoomRtcSignal);
+        });
+        list.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+        onSignals(list);
+      },
+      (error) => {
+        console.warn('Error listening to RTC signals:', error.message);
+      }
+    );
+    this.activeListeners.push(unsub);
+    return unsub;
+  }
+
+  public async saveRoomRtcSignal(signal: RoomRtcSignal): Promise<boolean> {
+    try {
+      await setDoc(doc(db, COLLECTIONS.ROOM_RTC_SIGNALS, signal.id), stripUndefined(signal));
+      return true;
+    } catch (e) {
+      console.warn('Error saving RTC signal:', e);
+      return false;
+    }
+  }
+
+  public async deleteRoomRtcSignal(signalId: string): Promise<boolean> {
+    try {
+      await deleteDoc(doc(db, COLLECTIONS.ROOM_RTC_SIGNALS, signalId));
+      return true;
+    } catch {
       return false;
     }
   }

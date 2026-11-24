@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Maximize2, Mic, MicOff, Radio, ShieldAlert, Video, X } from 'lucide-react';
-import { UserProfile, VoiceRoom } from '../../types';
+import { Maximize2, Mic, MicOff, Radio, ShieldAlert, Video, X, Coins, Sparkles } from 'lucide-react';
+import { InAppNotification, SplashBannerConfig, UserProfile, VoiceRoom } from '../../types';
 import { HagoBottomNav, HagoTab } from './HagoBottomNav';
 import { PartyView } from './PartyView';
 import { DiscoverView } from './DiscoverView';
@@ -63,14 +63,37 @@ export const CustomerApp: React.FC<CustomerAppProps> = ({ currentUser }) => {
   const [privacyToast, setPrivacyToast] = useState<string | null>(null);
 
   const [banRefreshTick, setBanRefreshTick] = useState(0);
+  const [activeSplash, setActiveSplash] = useState<SplashBannerConfig | null>(null);
+  const [shownSplashIds, setShownSplashIds] = useState<Set<string>>(() => new Set());
+  const [notifications, setNotifications] = useState<InAppNotification[]>(() => livoStore.getInAppNotifications());
 
   useEffect(() => {
+    const checkSplash = () => {
+      const candidate = livoStore.getActiveSplashBanner();
+      if (candidate && !shownSplashIds.has(candidate.id)) {
+        setShownSplashIds((prev) => new Set(prev).add(candidate.id));
+        setActiveSplash(candidate);
+      }
+    };
+    checkSplash();
     const unsub = livoStore.subscribe(() => {
       setRooms([...livoStore.getRooms()]);
+      setNotifications([...livoStore.getInAppNotifications()]);
       setBanRefreshTick((t) => t + 1);
+      checkSplash();
     });
     return () => unsub();
-  }, []);
+  }, [shownSplashIds]);
+
+  // Auto-dismiss fullscreen Admin splash banner after configured 3 seconds
+  useEffect(() => {
+    if (!activeSplash) return;
+    const ms = activeSplash.durationMs || 3000;
+    const timer = setTimeout(() => {
+      setActiveSplash(null);
+    }, ms);
+    return () => clearTimeout(timer);
+  }, [activeSplash]);
 
   // Sync Firebase Auth sessions & redirect logins cleanly without requiring localStorage pre-flag
   useEffect(() => {
@@ -344,6 +367,85 @@ export const CustomerApp: React.FC<CustomerAppProps> = ({ currentUser }) => {
       {privacyToast && (
         <div className="absolute top-14 left-1/2 -translate-x-1/2 z-[95] bg-gray-950 text-[#FFE600] border border-[#FFE600]/40 px-4 py-2 rounded-full text-[11px] font-black shadow-2xl whitespace-nowrap max-w-[92%] truncate">
           {privacyToast}
+        </div>
+      )}
+
+      {/* Real-time Unread Recharge / Agency Notification Popup Banner */}
+      {(() => {
+        const unreadNotif = notifications.find((n) => !n.isRead);
+        if (!unreadNotif) return null;
+        return (
+          <div className="absolute top-12 left-3 right-3 z-[88] bg-gradient-to-r from-[#170b2c] via-[#2b1250] to-[#170b2c] text-white border-2 border-[#FFE600] rounded-2xl p-3 shadow-[0_14px_35px_rgba(0,0,0,0.5)] animate-in slide-in-from-top-3 duration-300">
+            <div className="flex items-start gap-2.5">
+              <div className="w-10 h-10 rounded-xl bg-[#FFE600] text-black flex items-center justify-center shrink-0 shadow">
+                <Coins className="w-5 h-5" />
+              </div>
+              <div className="flex-1 min-w-0 text-right">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-black text-xs text-[#FFE600] flex items-center gap-1 truncate">
+                    <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                    {unreadNotif.title}
+                  </span>
+                  <button
+                    onClick={() => livoStore.markNotificationRead(unreadNotif.id)}
+                    className="text-gray-300 hover:text-white p-0.5 shrink-0"
+                    title="إغلاق"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                <p className="text-[11px] text-purple-100 mt-0.5 leading-snug">{unreadNotif.body}</p>
+                {unreadNotif.type === 'recharge_approved' && (
+                  <button
+                    onClick={() => {
+                      livoStore.markNotificationRead(unreadNotif.id);
+                      setActiveTab('me');
+                    }}
+                    className="mt-1.5 text-[10px] font-black bg-[#FFE600] text-black px-2.5 py-0.5 rounded-lg"
+                  >
+                    عرض المحفظة ✓
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Fullscreen Admin Splash Greeting / Gift Banner (3 Seconds on Launch) */}
+      {activeSplash && (
+        <div className="absolute inset-0 z-[99] bg-[#140826] flex flex-col items-center justify-center text-white overflow-hidden animate-in fade-in duration-300">
+          <img
+            src={activeSplash.imageUrl}
+            alt={activeSplash.title}
+            className="absolute inset-0 w-full h-full object-cover"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/30 to-black/50" />
+
+          <button
+            onClick={() => setActiveSplash(null)}
+            className="absolute top-10 left-4 z-20 px-3 py-1 rounded-full bg-black/55 backdrop-blur-md border border-white/25 text-white text-[11px] font-black hover:bg-black/80"
+          >
+            تخطي ✕
+          </button>
+
+          <div className="relative z-10 mt-auto w-full p-6 pb-10 text-center space-y-2">
+            <span className="inline-block px-3 py-1 rounded-full bg-[#FFE600] text-black text-[10px] font-black shadow-lg">
+              ✨ إهداء خاص من إدارة LIVO ✨
+            </span>
+            <h2 className="text-xl font-black text-white drop-shadow-lg">{activeSplash.title}</h2>
+            {(activeSplash.senderName || activeSplash.recipientName) && (
+              <p className="text-xs font-black text-[#FFE600]">
+                {activeSplash.senderName ? `من: ${activeSplash.senderName}` : ''}{' '}
+                {activeSplash.recipientName ? `← إلى: ${activeSplash.recipientName}` : ''}
+              </p>
+            )}
+            {activeSplash.dedicationMessage && (
+              <p className="text-xs text-gray-100 bg-black/45 border border-white/15 rounded-2xl px-4 py-2.5 max-w-xs mx-auto leading-relaxed">
+                “{activeSplash.dedicationMessage}”
+              </p>
+            )}
+          </div>
         </div>
       )}
 
