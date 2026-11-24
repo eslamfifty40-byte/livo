@@ -82,25 +82,10 @@ jobs:
           npx cap sync android
           cd android && chmod +x gradlew && ./gradlew assembleDebug --no-daemon --stacktrace
           cp app/build/outputs/apk/debug/app-debug.apk ../livo-${{ matrix.name }}.apk
-      - uses: actions/upload-artifact@v4
-        with:
-          name: livo-${{ matrix.name }}
-          path: livo-${{ matrix.name }}.apk
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: out
-          merge-multiple: true
-      - name: Publish release
+      - name: Publish to release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="build-${{ github.run_number }}"
-          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
-            gh release upload "$TAG" out/*.apk --repo "${{ github.repository }}" --clobber
-          else
-            gh release create "$TAG" out/*.apk --repo "${{ github.repository }}" --title "LIVO Build ${{ github.run_number }}" --notes "Automated Android APK release for LIVO Customer & LIVO Admin"
-          fi
+          gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1 || gh release create "$TAG" --repo "${{ github.repository }}" --title "LIVO Build ${{ github.run_number }}" --notes "Client + Admin APKs" || true
+          gh release upload "$TAG" livo-${{ matrix.name }}.apk --repo "${{ github.repository }}" --clobber
