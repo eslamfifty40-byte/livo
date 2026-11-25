@@ -1708,6 +1708,20 @@ export class FirebaseService {
     }
   }
 
+  public isWebViewOrCapacitor(): boolean {
+    if (typeof window === 'undefined') return false;
+    const cap = (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
+    if (cap?.isNativePlatform?.()) return true;
+    if (window.location.protocol === 'capacitor:' || window.location.protocol === 'ionic:') return true;
+    // Capacitor Android default origin is https://localhost or http://localhost inside Android WebView
+    const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : '';
+    if (/\bwv\b|; wv\)/i.test(ua)) return true;
+    if (/Android/i.test(ua) && /Version\/\d+\.\d+/i.test(ua) && !/Chrome\/\d+.*Mobile Safari/i.test(ua)) {
+      return true;
+    }
+    return false;
+  }
+
   private isBraveOrRestrictedBrowser(): boolean {
     if (typeof navigator === 'undefined') return false;
     const ua = navigator.userAgent || '';
@@ -1721,12 +1735,21 @@ export class FirebaseService {
    * Checks and consumes any completed Google signInWithRedirect result
    */
   public async consumeGoogleRedirectResult(): Promise<{ user?: FirebaseUser; error?: string }> {
+    let hadPendingRedirect = false;
+    const isSameAuthDomain =
+      typeof window !== 'undefined' &&
+      Boolean(firebaseConfig.authDomain) &&
+      window.location.hostname === firebaseConfig.authDomain;
     if (typeof window !== 'undefined') {
       try {
+        hadPendingRedirect = Boolean(window.sessionStorage.getItem('livo_google_redirect_pending'));
         window.sessionStorage.removeItem('livo_google_redirect_pending');
       } catch {
         // ignore storage restrictions
       }
+    }
+    if (!hadPendingRedirect && !isSameAuthDomain) {
+      return {};
     }
     if (!this.redirectResultPromise) {
       this.redirectResultPromise = (async () => {
@@ -1811,7 +1834,16 @@ export class FirebaseService {
 
   private async runGoogleAuthFlow(
     preferRedirect = false
-  ): Promise<{ success: boolean; user?: FirebaseUser; redirectStarted?: boolean; error?: string }> {
+  ): Promise<{ success: boolean; user?: FirebaseUser; redirectStarted?: boolean; webViewBlocked?: boolean; error?: string }> {
+    if (this.isWebViewOrCapacitor()) {
+      return {
+        success: false,
+        webViewBlocked: true,
+        error:
+          'داخل تطبيق الهاتف (Android APK) لا يُسمح بتسجيل الدخول عبر متصفح خارجي لتجنب خطأ المتصفح. سجّل الدخول مباشرة باستخدام البريد الإلكتروني وكلمة المرور (أو رقم الهاتف).'
+      };
+    }
+
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
 
@@ -1885,14 +1917,14 @@ export class FirebaseService {
   /**
    * Direct Google Sign-In for Admin / Owner
    */
-  public async loginAdminWithGoogle(preferRedirect = false): Promise<{ success: boolean; user?: FirebaseUser; redirectStarted?: boolean; error?: string }> {
+  public async loginAdminWithGoogle(preferRedirect = false): Promise<{ success: boolean; user?: FirebaseUser; redirectStarted?: boolean; webViewBlocked?: boolean; error?: string }> {
     return this.runGoogleAuthFlow(preferRedirect);
   }
 
   /**
    * Direct Google Sign-In for Customer with mandatory Account Picker
    */
-  public async loginCustomerWithGoogle(preferRedirect = false): Promise<{ success: boolean; user?: FirebaseUser; redirectStarted?: boolean; error?: string }> {
+  public async loginCustomerWithGoogle(preferRedirect = false): Promise<{ success: boolean; user?: FirebaseUser; redirectStarted?: boolean; webViewBlocked?: boolean; error?: string }> {
     return this.runGoogleAuthFlow(preferRedirect);
   }
 
