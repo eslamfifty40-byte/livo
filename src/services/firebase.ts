@@ -1834,21 +1834,12 @@ export class FirebaseService {
 
   private async runGoogleAuthFlow(
     preferRedirect = false
-  ): Promise<{ success: boolean; user?: FirebaseUser; redirectStarted?: boolean; webViewBlocked?: boolean; error?: string }> {
-    if (this.isWebViewOrCapacitor()) {
-      return {
-        success: false,
-        webViewBlocked: true,
-        error:
-          'داخل تطبيق الهاتف (Android APK) لا يُسمح بتسجيل الدخول عبر متصفح خارجي لتجنب خطأ المتصفح. سجّل الدخول مباشرة باستخدام البريد الإلكتروني وكلمة المرور (أو رقم الهاتف).'
-      };
-    }
-
+  ): Promise<{ success: boolean; user?: FirebaseUser; redirectStarted?: boolean; error?: string }> {
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
 
     // Cross-origin signInWithRedirect (e.g. run.app / localhost APK -> firebaseapp.com/__/auth/handler)
-    // fails in storage-partitioned browsers with "missing initial state" and exits WebViews into system browsers.
+    // fails in storage-partitioned browsers with "missing initial state".
     // Only allow redirect when hosted directly on authDomain outside iframes & restricted browsers.
     const isSameAuthDomain =
       typeof window !== 'undefined' &&
@@ -1917,14 +1908,14 @@ export class FirebaseService {
   /**
    * Direct Google Sign-In for Admin / Owner
    */
-  public async loginAdminWithGoogle(preferRedirect = false): Promise<{ success: boolean; user?: FirebaseUser; redirectStarted?: boolean; webViewBlocked?: boolean; error?: string }> {
+  public async loginAdminWithGoogle(preferRedirect = false): Promise<{ success: boolean; user?: FirebaseUser; redirectStarted?: boolean; error?: string }> {
     return this.runGoogleAuthFlow(preferRedirect);
   }
 
   /**
    * Direct Google Sign-In for Customer with mandatory Account Picker
    */
-  public async loginCustomerWithGoogle(preferRedirect = false): Promise<{ success: boolean; user?: FirebaseUser; redirectStarted?: boolean; webViewBlocked?: boolean; error?: string }> {
+  public async loginCustomerWithGoogle(preferRedirect = false): Promise<{ success: boolean; user?: FirebaseUser; redirectStarted?: boolean; error?: string }> {
     return this.runGoogleAuthFlow(preferRedirect);
   }
 
