@@ -474,7 +474,11 @@ class LivoStore {
           this.purgeFakeRoomsFromFirestore();
         }
         this.notify();
-      } else if (this.isAuthorizedAdminEmail(this.currentAuthEmail) && !this.seededCollections.has('rooms')) {
+      } else if (
+        firebaseService.getCurrentAuthUid() &&
+        this.isAuthorizedAdminEmail(this.currentAuthEmail) &&
+        !this.seededCollections.has('rooms')
+      ) {
         this.seededCollections.add('rooms');
         INITIAL_ROOMS.forEach((r) => firebaseService.saveRoom(r));
       }
@@ -1109,9 +1113,9 @@ class LivoStore {
 
     this.updateUserProfile(currentUid, {
       followingUids: Array.from(currentFollowing),
-      followingCount: Math.max(0, (current.followingCount || 0) + (willFollow ? 1 : -1))
+      followingCount: currentFollowing.size
     });
-    this.updateUserProfile(targetUid, {
+    this.patchRemoteUserFields(targetUid, {
       followersCount: Math.max(0, (target.followersCount || 0) + (willFollow ? 1 : -1))
     });
     return willFollow;
@@ -1230,6 +1234,45 @@ class LivoStore {
       // Persist directly to Firebase Firestore
       firebaseService.saveUserProfile(this.users[index]);
     }
+  }
+
+  /**
+   * Rule-compliant partial field update for another user's document
+   * (avoids touching restricted keys or banDetails on cross-user writes).
+   */
+  public patchRemoteUserFields(uid: string, fields: Partial<UserProfile>): void {
+    const index = this.users.findIndex(u => u.uid === uid);
+    if (index !== -1) {
+      this.recentUserTouchMs.set(uid, Date.now());
+      const merged = this.enforceOwnerAccountDefaults({ ...this.users[index], ...fields });
+      this.users[index] = merged;
+      this.persistUsersCache();
+      if (this.currentUid === uid) {
+        this.saveAccountToDevice(this.users[index]);
+      }
+      this.notify();
+    }
+    const current = this.getCurrentUser();
+    const isAdmin = Boolean(
+      current && (current.role === 'owner' || current.role === 'supervisor' || this.isOwnerEmail(current.email))
+    );
+    if (isAdmin && index !== -1) {
+      firebaseService.saveUserProfile(this.users[index]);
+    } else {
+      firebaseService.patchUserFields(uid, fields);
+    }
+  }
+
+  public getResolvedFrameUrl(
+    user?: Pick<UserProfile, 'equippedFrameUrl' | 'equippedFrame'> | null
+  ): string | undefined {
+    if (!user) return undefined;
+    if (user.equippedFrameUrl) return user.equippedFrameUrl;
+    if (user.equippedFrame) {
+      const storeItem = this.storeItems.find((item) => item.id === user.equippedFrame);
+      if (storeItem?.imageUrl) return storeItem.imageUrl;
+    }
+    return undefined;
   }
 
   public registerUser(user: UserProfile): void {
@@ -1587,11 +1630,18 @@ class LivoStore {
   }
 
   public agencyChargeMember(agentUid: string, targetUid: string, coinsAmount: number): { success: boolean; message: string } {
+    if (coinsAmount <= 0 || isNaN(coinsAmount)) {
+      return { success: false, message: 'يرجى إدخال كمية كوينز صحيحة' };
+    }
     const agent = this.getUserByUid(agentUid);
-    if (!agent || !agent.canChargeUsers) {
+    const isAuthorized = Boolean(
+      agent && (agent.canChargeUsers || agent.role === 'charging_agent' || agent.role === 'owner')
+    );
+    if (!agent || !isAuthorized) {
       return { success: false, message: 'ليس لديك صلاحية شحن المستخدمين' };
     }
-    if (agent.coins < coinsAmount) {
+    const availableBalance = agent.agentBalance !== undefined ? agent.agentBalance : agent.coins;
+    if (availableBalance < coinsAmount) {
       return { success: false, message: 'رصيد الوكالة الحالي غير كافٍ' };
     }
 
@@ -1599,9 +1649,18 @@ class LivoStore {
     if (!targetUser) {
       return { success: false, message: 'المستخدم المستهدف غير موجود' };
     }
+    if (targetUser.uid === agent.uid) {
+      return { success: false, message: 'لا يمكن تحويل الرصيد إلى نفس الحساب' };
+    }
 
-    this.updateUserProfile(agentUid, { coins: agent.coins - coinsAmount });
-    this.updateUserProfile(targetUid, { coins: targetUser.coins + coinsAmount });
+    const agentUpdates: Partial<UserProfile> = {
+      coins: agent.coins >= coinsAmount ? agent.coins - coinsAmount : agent.coins
+    };
+    if (agent.agentBalance !== undefined) {
+      agentUpdates.agentBalance = agent.agentBalance - coinsAmount;
+    }
+    this.updateUserProfile(agentUid, agentUpdates);
+    this.patchRemoteUserFields(targetUid, { coins: targetUser.coins + coinsAmount });
 
     const agIndex = this.agencies.findIndex(a => a.uid === agentUid);
     if (agIndex !== -1) {
@@ -1617,7 +1676,7 @@ class LivoStore {
       coinsChange: coinsAmount,
       balanceBefore: targetUser.coins,
       balanceAfter: targetUser.coins + coinsAmount,
-      reason: `شحن من وكيل الشحن ${agent.displayName} (${agent.agencyName})`,
+      reason: `شحن من وكيل الشحن ${agent.displayName} (${agent.agencyName || 'وكالة معتمدة'})`,
       performedBy: agent.displayName
     });
 
@@ -2445,10 +2504,13 @@ class LivoStore {
         : { seatIndex: i, isMuted: false, isLocked: false, points: 0 }
     );
 
+    const cleanOwnerUid = (owner?.uid || data.ownerUid || '10000').trim().slice(0, 64) || '10000';
+    const cleanTitle = (data.title.trim() || `غرفة ${owner?.displayName || 'LIVO'}`).slice(0, 180);
+
     const newRoom: VoiceRoom = {
       id: `room-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      title: data.title.trim() || `غرفة ${owner?.displayName || 'LIVO'}`,
-      ownerUid: owner?.uid || data.ownerUid,
+      title: cleanTitle,
+      ownerUid: cleanOwnerUid,
       ownerAuthUid: firebaseService.getCurrentAuthUid() || owner?.authUid || '',
       ownerName: owner?.displayName || 'مضيف',
       ownerAvatar: owner?.avatar || '/assets/livo/customer_icon.jpg',
@@ -2498,8 +2560,14 @@ class LivoStore {
 
   public setOfficialRoomStatus(status: 'open' | 'closed' | 'locked_by_admin', announcement?: string): void {
     let officialIndex = this.rooms.findIndex(r => r.isOfficial || r.id === 'room-official-livo');
+    const authUid = firebaseService.getCurrentAuthUid();
     if (officialIndex === -1) {
-      const baseOfficial = { ...INITIAL_ROOMS[0], status, announcement: announcement ?? INITIAL_ROOMS[0].announcement };
+      const baseOfficial: VoiceRoom = {
+        ...INITIAL_ROOMS[0],
+        ownerAuthUid: authUid || INITIAL_ROOMS[0].ownerAuthUid,
+        status,
+        announcement: announcement ?? INITIAL_ROOMS[0].announcement
+      };
       this.markRoomTouched(baseOfficial.id);
       this.rooms.unshift(baseOfficial);
       this.notify();
@@ -2514,6 +2582,9 @@ class LivoStore {
 
     const updated: VoiceRoom = {
       ...current,
+      ownerUid: current.ownerUid || '10000',
+      ownerAuthUid: current.ownerAuthUid || authUid || undefined,
+      isOfficial: true,
       status,
       seats: cleanedSeats,
       announcement: announcement !== undefined ? announcement : current.announcement
@@ -2835,7 +2906,7 @@ class LivoStore {
       const prof = this.getUserByUid(rec.uid);
       if (prof && prof.uid !== sender.uid) {
         const earnedDiamonds = Math.floor(perRecipientCoins * 0.5);
-        this.updateUserProfile(prof.uid, { diamonds: (prof.diamonds || 0) + earnedDiamonds });
+        this.patchRemoteUserFields(prof.uid, { diamonds: (prof.diamonds || 0) + earnedDiamonds });
       }
       const logEntry: GiftSupportLog = {
         id: `glog-${Date.now()}-${Math.floor(Math.random() * 10000)}-${rec.uid.slice(0, 6)}`,
@@ -3282,7 +3353,16 @@ class LivoStore {
     if (!vid) return;
     vid.likesCount = (vid.likesCount || 0) + 1;
     this.notify();
-    firebaseService.saveVideo(vid);
+    firebaseService.patchVideoStats(vid.id, { likesCount: vid.likesCount });
+  }
+
+  public addVideoComment(videoId: string): number {
+    const vid = this.videos.find(v => v.id === videoId);
+    if (!vid) return 0;
+    vid.commentsCount = (vid.commentsCount || 0) + 1;
+    this.notify();
+    firebaseService.patchVideoStats(vid.id, { commentsCount: vid.commentsCount });
+    return vid.commentsCount;
   }
 
   public deleteVideo(videoId: string, requestingUid: string): boolean {
@@ -3621,7 +3701,7 @@ class LivoStore {
 
     // Add to target user (DO NOT increment eligibleRechargedCoins, per rule 11: agent transfers do not count for level upgrade)
     const newTargetCoins = targetUser.coins + coinsAmount;
-    this.updateUserProfile(targetUser.uid, {
+    this.patchRemoteUserFields(targetUser.uid, {
       coins: newTargetCoins
     });
 
@@ -3727,20 +3807,31 @@ class LivoStore {
 
   public savePaymentMethod(method: PaymentMethodConfig): void {
     const index = this.paymentMethods.findIndex(p => p.id === method.id);
-    // If setting as default, unset other defaults
+    const updatedOtherDefaults: PaymentMethodConfig[] = [];
+    // If setting as default, unset other defaults and persist them too
     if (method.isDefault) {
-      this.paymentMethods.forEach(p => {
-        if (p.id !== method.id) p.isDefault = false;
+      this.paymentMethods.forEach((p, idx) => {
+        if (p.id !== method.id && p.isDefault) {
+          const updatedOther = { ...p, isDefault: false, updatedAt: new Date().toISOString() };
+          this.paymentMethods[idx] = updatedOther;
+          updatedOtherDefaults.push(updatedOther);
+        }
       });
     }
 
+    const updatedMethod: PaymentMethodConfig = {
+      ...method,
+      updatedAt: new Date().toISOString()
+    };
+
     if (index !== -1) {
-      this.paymentMethods[index] = { ...method, updatedAt: new Date().toISOString() };
+      this.paymentMethods[index] = updatedMethod;
     } else {
-      this.paymentMethods.push({ ...method, updatedAt: new Date().toISOString() });
+      this.paymentMethods.push(updatedMethod);
     }
     this.notify();
-    firebaseService.savePaymentMethod(method);
+    updatedOtherDefaults.forEach(p => firebaseService.savePaymentMethod(p));
+    firebaseService.savePaymentMethod(updatedMethod);
   }
 
   public deletePaymentMethod(id: string): boolean {
@@ -4322,6 +4413,42 @@ class LivoStore {
   // --- ROOM CUP & DAILY/WEEKLY/MONTHLY SUPPORTERS LEADERBOARD ---
   public getGiftLogs(): GiftSupportLog[] {
     return this.giftLogs;
+  }
+
+  /**
+   * Real-time Firestore-backed gift statistics for a given user UID
+   */
+  public getUserGiftStats(uid: string): {
+    sentGiftsCount: number;
+    sentGiftsCoins: number;
+    receivedGiftsCount: number;
+    receivedGiftsCoins: number;
+  } {
+    let sentGiftsCount = 0;
+    let sentGiftsCoins = 0;
+    let receivedGiftsCount = 0;
+    let receivedGiftsCoins = 0;
+    if (!uid) {
+      return { sentGiftsCount, sentGiftsCoins, receivedGiftsCount, receivedGiftsCoins };
+    }
+    for (const log of this.giftLogs) {
+      const qty = Math.max(1, Number(log.count) || 1);
+      const coins = Number(log.coinsTotal) || 0;
+      if (log.senderUid === uid) {
+        sentGiftsCount += qty;
+        sentGiftsCoins += coins;
+      }
+      if (log.recipientUid === uid) {
+        receivedGiftsCount += qty;
+        receivedGiftsCoins += coins;
+      }
+    }
+    return {
+      sentGiftsCount,
+      sentGiftsCoins,
+      receivedGiftsCount,
+      receivedGiftsCoins
+    };
   }
 
   public getRoomSupporters(roomId: string): SupporterRankEntry[] {

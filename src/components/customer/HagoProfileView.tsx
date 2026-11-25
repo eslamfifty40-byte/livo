@@ -221,17 +221,32 @@ export const HagoProfileView: React.FC<HagoProfileViewProps> = ({
     setTimeout(() => setCopiedUid(false), 2000);
   };
 
-  const handleCopyLink = () => {
-    navigator.clipboard?.writeText(`https://livo.live/u/${user.uid}`);
+  const [shareFeedback, setShareFeedback] = useState<string | null>(null);
+  const handleCopyLink = (channelLabel?: string) => {
+    const shareUrl = `https://livo.live/u/${user.uid}`;
+    if (navigator.share && channelLabel && channelLabel !== 'نسخ الرابط') {
+      navigator.share({ title: `ملف ${user.displayName} في LIVO`, url: shareUrl }).catch(() => undefined);
+    }
+    navigator.clipboard?.writeText(shareUrl).catch(() => undefined);
     setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 2000);
+    setShareFeedback(
+      channelLabel
+        ? `تم نسخ رابط ملفك للمشاركة عبر ${channelLabel} ✓`
+        : 'تم نسخ رابط ملفك بنجاح ✓'
+    );
+    setTimeout(() => {
+      setCopiedLink(false);
+      setShareFeedback(null);
+    }, 2400);
   };
+
+  const hasUnreadNotifs = livoStore.getInAppNotifications().some((n) => !n.isRead);
 
   return (
     <div className="flex flex-col h-full bg-[#FAFAFA] text-black select-none overflow-y-auto pb-8">
       {/* HAGO Dark Cover Header */}
       <div className="relative bg-gradient-to-br from-[#23103b] via-[#180a2a] to-[#0e0717] text-white px-4 pt-3.5 pb-10">
-        {/* Top Action Icons (Menu with dot, Share, Edit, Likes Heart) */}
+        {/* Top Action Icons (Menu with real unread dot, Share, Edit, Likes Heart) */}
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <button
@@ -240,7 +255,9 @@ export const HagoProfileView: React.FC<HagoProfileViewProps> = ({
               title="الإعدادات"
             >
               <Menu className="w-4 h-4" />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-red-500" />
+              {hasUnreadNotifs && (
+                <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-red-500" />
+              )}
             </button>
             <button
               onClick={() => setShowShareModal(true)}
@@ -287,7 +304,7 @@ export const HagoProfileView: React.FC<HagoProfileViewProps> = ({
               sizePx={70}
               avatarUrl={user.avatar}
               displayName={user.displayName}
-              frameUrl={user.equippedFrameUrl}
+              frameUrl={livoStore.getResolvedFrameUrl(user)}
               frameGlowColor={user.frameGlowColor}
               frameAnimated={user.frameAnimated}
               customIconUrl={user.customIconUrl}
@@ -980,10 +997,16 @@ export const HagoProfileView: React.FC<HagoProfileViewProps> = ({
               </div>
             </div>
 
+            {shareFeedback && (
+              <div className="mb-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-black px-3 py-2 rounded-xl animate-in fade-in">
+                {shareFeedback}
+              </div>
+            )}
+
             {/* Share Targets */}
             <div className="grid grid-cols-4 gap-2 text-center text-[10px] font-bold text-gray-700">
               <button
-                onClick={handleCopyLink}
+                onClick={() => handleCopyLink('واتساب')}
                 className="flex flex-col items-center gap-1 group"
               >
                 <div className="w-12 h-12 rounded-full bg-[#25D366] text-white flex items-center justify-center text-xl shadow group-hover:scale-105 transition-transform">
@@ -993,7 +1016,7 @@ export const HagoProfileView: React.FC<HagoProfileViewProps> = ({
               </button>
 
               <button
-                onClick={handleCopyLink}
+                onClick={() => handleCopyLink('فيسبوك')}
                 className="flex flex-col items-center gap-1 group"
               >
                 <div className="w-12 h-12 rounded-full bg-[#1877F2] text-white flex items-center justify-center text-xl shadow group-hover:scale-105 transition-transform">
@@ -1003,7 +1026,7 @@ export const HagoProfileView: React.FC<HagoProfileViewProps> = ({
               </button>
 
               <button
-                onClick={handleCopyLink}
+                onClick={() => handleCopyLink('سناب شات')}
                 className="flex flex-col items-center gap-1 group"
               >
                 <div className="w-12 h-12 rounded-full bg-[#FFFC00] text-black flex items-center justify-center text-xl shadow group-hover:scale-105 transition-transform">
@@ -1013,7 +1036,7 @@ export const HagoProfileView: React.FC<HagoProfileViewProps> = ({
               </button>
 
               <button
-                onClick={handleCopyLink}
+                onClick={() => handleCopyLink('نسخ الرابط')}
                 className="flex flex-col items-center gap-1 group"
               >
                 <div className="w-12 h-12 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-800 flex items-center justify-center shadow group-hover:scale-105 transition-transform">

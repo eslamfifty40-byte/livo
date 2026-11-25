@@ -21,8 +21,13 @@ interface AgencyModalProps {
 }
 
 export const AgencyModal: React.FC<AgencyModalProps> = ({ user, isOpen, onClose }) => {
+  const isApprovedAgent =
+    user.role === 'charging_agent' ||
+    user.role === 'distributor_agent' ||
+    user.role === 'agent' ||
+    Boolean(user.canChargeUsers);
   const [activeTab, setActiveTab] = useState<'info' | 'apply' | 'dashboard'>(
-    user.role === 'agent' ? 'dashboard' : 'info'
+    isApprovedAgent ? 'dashboard' : 'info'
   );
 
   // Application Form State
@@ -134,7 +139,7 @@ export const AgencyModal: React.FC<AgencyModalProps> = ({ user, isOpen, onClose 
             <div>
               <h2 className="font-extrabold text-base text-white">مركز الوكالات المعتمدة</h2>
               <p className="text-xs text-purple-300">
-                {user.role === 'agent' ? `وكيل معتمد: ${user.agencyName || 'LIVO Agency'}` : 'انضم لشبكة وكلاء LIVO الرسميين'}
+                {isApprovedAgent ? `وكيل معتمد: ${user.agencyName || 'LIVO Agency'}` : 'انضم لشبكة وكلاء LIVO الرسميين'}
               </p>
             </div>
           </div>
@@ -148,7 +153,7 @@ export const AgencyModal: React.FC<AgencyModalProps> = ({ user, isOpen, onClose 
 
         {/* Tab Navigation */}
         <div className="flex border-b border-purple-800/40 bg-[#120824]">
-          {user.role === 'agent' ? (
+          {isApprovedAgent ? (
             <button
               onClick={() => setActiveTab('dashboard')}
               className={`flex-1 py-2.5 text-xs font-bold transition-all border-b-2 ${
@@ -188,14 +193,14 @@ export const AgencyModal: React.FC<AgencyModalProps> = ({ user, isOpen, onClose 
         {/* Body Content */}
         <div className="p-4 overflow-y-auto space-y-4">
           {/* Agent Dashboard View */}
-          {activeTab === 'dashboard' && user.role === 'agent' && (
+          {activeTab === 'dashboard' && isApprovedAgent && (
             <div className="space-y-4">
               {/* Agency Stats */}
               <div className="grid grid-cols-3 gap-2">
                 <div className="bg-[#120824] p-3 rounded-2xl border border-purple-800/40 text-center">
                   <span className="text-[10px] text-purple-300 block">رصيد الوكالة</span>
                   <span className="font-digits font-black text-sm text-amber-400">
-                    {user.coins.toLocaleString()}
+                    {(user.agentBalance !== undefined ? user.agentBalance : user.coins).toLocaleString()}
                   </span>
                   <span className="text-[9px] text-purple-400 block">كوينز</span>
                 </div>
@@ -214,6 +219,54 @@ export const AgencyModal: React.FC<AgencyModalProps> = ({ user, isOpen, onClose 
                   <span className="text-[9px] text-purple-400 block">ج.م</span>
                 </div>
               </div>
+
+              {(user.canChargeUsers || user.role === 'charging_agent' || user.role === 'owner') && (
+                <form
+                  onSubmit={handleAgentChargeMember}
+                  className="bg-[#120824] p-3.5 rounded-2xl border border-amber-500/40 space-y-2.5"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black text-amber-300 flex items-center gap-1.5">
+                      <Send className="w-3.5 h-3.5" />
+                      شحن كوينز سريع لمستخدم بالمعرّف (UID)
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <input
+                      type="text"
+                      value={targetUid}
+                      onChange={(e) => setTargetUid(e.target.value)}
+                      placeholder="UID المستلم..."
+                      className="bg-black/40 border border-purple-800/60 rounded-xl px-3 py-2 text-xs text-white font-digits outline-none"
+                    />
+                    <input
+                      type="number"
+                      min={1}
+                      value={chargeCoins}
+                      onChange={(e) => setChargeCoins(e.target.value)}
+                      placeholder="عدد الكوينز..."
+                      className="bg-black/40 border border-purple-800/60 rounded-xl px-3 py-2 text-xs text-white font-digits outline-none"
+                    />
+                  </div>
+                  {chargeResult && (
+                    <div
+                      className={`text-[11px] font-bold px-3 py-1.5 rounded-xl border ${
+                        chargeResult.success
+                          ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                          : 'bg-red-500/15 border-red-500/40 text-red-300'
+                      }`}
+                    >
+                      {chargeResult.message}
+                    </div>
+                  )}
+                  <button
+                    type="submit"
+                    className="w-full py-2 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 text-black font-black text-xs hover:from-amber-400 transition-all"
+                  >
+                    تأكيد تحويل الكوينز
+                  </button>
+                </form>
+              )}
 
               {/* Hosts & Content Creators Table (داتا المضيفين وصناع المحتوى التابعين للوكالة) */}
               <div className="bg-[#120824] p-3.5 rounded-2xl border border-purple-800/60 space-y-3">

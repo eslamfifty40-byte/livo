@@ -572,7 +572,18 @@ export const CustomerApp: React.FC<CustomerAppProps> = ({ currentUser }) => {
           <div className="flex items-center gap-1 shrink-0">
             {myMiniSeat && (
               <button
-                onClick={() => livoStore.toggleSeatMute(activeVoiceRoom.id, myMiniSeat.seatIndex)}
+                onClick={() => {
+                  const isBlocked = Boolean(
+                    myMiniSeat.isMicBlocked ||
+                      (currentUser && activeVoiceRoom.micBlockedUsers?.includes(currentUser.uid))
+                  );
+                  if (isBlocked && currentUser?.role !== 'owner' && currentUser?.role !== 'supervisor') {
+                    setPrivacyToast('🔒 تم قفل المايكروفون الخاص بك بواسطة الإدارة');
+                    setTimeout(() => setPrivacyToast(null), 2400);
+                    return;
+                  }
+                  livoStore.toggleSeatMute(activeVoiceRoom.id, myMiniSeat.seatIndex, undefined, currentUser?.uid);
+                }}
                 className={`w-8 h-8 rounded-full flex items-center justify-center ${
                   myMiniSeat.isMuted ? 'bg-red-600/80 text-white' : 'bg-emerald-600 text-white'
                 }`}
@@ -679,6 +690,10 @@ export const CustomerApp: React.FC<CustomerAppProps> = ({ currentUser }) => {
           }}
           onOpenRecharge={() => requireAuthThen(() => setIsRechargeOpen(true))}
           onRequireAuth={() => handleOpenAuth('login')}
+          onStartChat={(uid) => {
+            setVoiceRoomMinimized(true);
+            handleStartChatWithUser(uid);
+          }}
           onAdminLeaveRoom={() => {
             livoStore.closeAndRemoveRoom(activeVoiceRoom.id);
             setActiveVoiceRoomId(null);

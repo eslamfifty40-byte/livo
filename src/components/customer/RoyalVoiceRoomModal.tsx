@@ -41,7 +41,8 @@ import {
   UserPlus,
   Crown,
   Sparkles,
-  Star
+  Star,
+  MessageCircle
 } from 'lucide-react';
 import { UserProfile, GiftItem, VoiceRoom, RoomSeat, RoomGameEvent } from '../../types';
 import { livoStore } from '../../services/livoStore';
@@ -130,6 +131,7 @@ interface RoyalVoiceRoomModalProps {
   onOpenRecharge: () => void;
   onRequireAuth?: () => void;
   onAdminLeaveRoom?: () => void;
+  onStartChat?: (uid: string) => void;
 }
 
 export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
@@ -141,8 +143,10 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
   onClose,
   onOpenRecharge,
   onRequireAuth,
-  onAdminLeaveRoom
+  onAdminLeaveRoom,
+  onStartChat
 }) => {
+  const [, setStoreRevision] = useState(0);
   const [liveRoom, setLiveRoom] = useState<VoiceRoom>(room);
   const [gifts, setGifts] = useState<GiftItem[]>(livoStore.getActiveGifts());
   const [showGiftsTray, setShowGiftsTray] = useState(false);
@@ -202,13 +206,19 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
   const [bgPreviewValue, setBgPreviewValue] = useState<string>(ROOM_BG_PRESETS[0].value);
   const [bgScope, setBgScope] = useState<'personal' | 'room'>('personal');
 
-  // Selected Seat for Moderation & HAGO Seat Profile Card
+  // Selected Seat for Moderation & Live Mini Profile Card
   const [moderationSeat, setModerationSeat] = useState<RoomSeat | null>(null);
-  const [selectedProfileSeat, setSelectedProfileSeat] = useState<RoomSeat | null>(null);
+  const [selectedProfileTarget, setSelectedProfileTarget] = useState<{ uid: string; seatIndex?: number } | null>(null);
   const [selectedGiftItem, setSelectedGiftItem] = useState<GiftItem | null>(null);
+
+  const openUserMiniCard = (uid?: string, seatIndex?: number) => {
+    if (!uid) return;
+    setSelectedProfileTarget({ uid, seatIndex });
+  };
 
   useEffect(() => {
     const sync = () => {
+      setStoreRevision((rev) => rev + 1);
       const latest = livoStore.getRoomById(room.id);
       if (latest) {
         setLiveRoom(latest);
@@ -499,7 +509,7 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
     }
 
     if (targetSeat.occupiedByUid) {
-      setSelectedProfileSeat(targetSeat);
+      openUserMiniCard(targetSeat.occupiedByUid, index);
       return;
     }
 
@@ -859,8 +869,14 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
                 </div>
                 {(() => {
                   const roomOwner = livoStore.getUserByUid(liveRoom.ownerUid);
+                  const ownerSeat = seats.find((s) => s.occupiedByUid === liveRoom.ownerUid);
                   return (
-                    <div className="text-[10px] text-purple-200 flex items-center gap-1 mt-0.5 max-w-[135px]">
+                    <button
+                      type="button"
+                      onClick={() => openUserMiniCard(liveRoom.ownerUid, ownerSeat?.seatIndex)}
+                      className="text-[10px] text-purple-200 flex items-center gap-1 mt-0.5 max-w-[135px] hover:opacity-85 transition-opacity text-right"
+                      title="عرض بطاقة المضيف"
+                    >
                       <UserNameWithBadges
                         displayName={roomOwner?.displayName || liveRoom.ownerName}
                         nameGlowColor={roomOwner?.nameGlowColor}
@@ -875,7 +891,7 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
                         iconSize={14}
                         nameClassName="text-amber-300 font-bold text-[10px]"
                       />
-                    </div>
+                    </button>
                   );
                 })()}
               </div>
@@ -1114,7 +1130,10 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
                   speakingUids[seat.occupiedByUid]
               );
               const seatUserProf = seat.occupiedByUid ? livoStore.getUserByUid(seat.occupiedByUid) : undefined;
-              const seatAgencyLabel = seat.agencyBadgeLabel || livoStore.getAgencyDisplayLabel(seatUserProf);
+              const seatAgencyLabel = livoStore.getAgencyDisplayLabel(seatUserProf) || seat.agencyBadgeLabel;
+              const seatAvatarUrl = seatUserProf?.avatar || seat.occupiedByAvatar;
+              const seatDisplayName = seatUserProf?.displayName || seat.occupiedByName || '';
+              const seatFrameUrl = livoStore.getResolvedFrameUrl(seatUserProf) || seat.equippedFrameUrl;
 
               return (
                 <div
@@ -1131,14 +1150,14 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
                       >
                         <AvatarWithFrame
                           sizePx={avatarFrameSize}
-                          avatarUrl={seat.occupiedByAvatar}
-                          displayName={seat.occupiedByName}
-                          frameUrl={seat.equippedFrameUrl}
-                          frameGlowColor={seat.frameGlowColor || (index === 0 ? '#F59E0B' : isMe ? '#10B981' : undefined)}
-                          frameAnimated={seat.frameAnimated}
-                          customIconUrl={seat.customIconUrl}
-                          customIconGlow={seat.customIconGlow}
-                          customIconAnimated={seat.customIconAnimated}
+                          avatarUrl={seatAvatarUrl}
+                          displayName={seatDisplayName}
+                          frameUrl={seatFrameUrl}
+                          frameGlowColor={seatUserProf?.frameGlowColor || seat.frameGlowColor || (index === 0 ? '#F59E0B' : isMe ? '#10B981' : undefined)}
+                          frameAnimated={seatUserProf?.frameAnimated ?? seat.frameAnimated}
+                          customIconUrl={seatUserProf?.customIconUrl || seat.customIconUrl}
+                          customIconGlow={seatUserProf?.customIconGlow || seat.customIconGlow}
+                          customIconAnimated={seatUserProf?.customIconAnimated ?? seat.customIconAnimated}
                         />
 
                         {index === 0 && (
@@ -1195,19 +1214,27 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
                     )}
                   </div>
 
-                  <div className="flex flex-col items-center justify-center mt-1 max-w-[88px]">
+                  <div
+                    onClick={(e) => {
+                      if (isOccupied && seat.occupiedByUid) {
+                        e.stopPropagation();
+                        openUserMiniCard(seat.occupiedByUid, index);
+                      }
+                    }}
+                    className="flex flex-col items-center justify-center mt-1 max-w-[88px]"
+                  >
                     {isOccupied ? (
                       <>
                         <UserNameWithBadges
-                          displayName={seat.occupiedByName || ''}
-                          nameGlowColor={seat.nameGlowColor}
-                          isVerified={seat.isVerified}
-                          verifiedBadgeColor={seat.verifiedBadgeColor}
-                          verifiedBadgeShape={seat.verifiedBadgeShape}
-                          verifiedBadgeGlow={seat.verifiedBadgeGlow}
-                          customIconUrl={seat.customIconUrl}
-                          customIconGlow={seat.customIconGlow}
-                          customIconAnimated={seat.customIconAnimated}
+                          displayName={seatDisplayName}
+                          nameGlowColor={seatUserProf?.nameGlowColor ?? seat.nameGlowColor}
+                          isVerified={seatUserProf?.isVerified ?? seat.isVerified}
+                          verifiedBadgeColor={seatUserProf?.verifiedBadgeColor ?? seat.verifiedBadgeColor}
+                          verifiedBadgeShape={seatUserProf?.verifiedBadgeShape ?? seat.verifiedBadgeShape}
+                          verifiedBadgeGlow={seatUserProf?.verifiedBadgeGlow ?? seat.verifiedBadgeGlow}
+                          customIconUrl={seatUserProf?.customIconUrl ?? seat.customIconUrl}
+                          customIconGlow={seatUserProf?.customIconGlow ?? seat.customIconGlow}
+                          customIconAnimated={seatUserProf?.customIconAnimated ?? seat.customIconAnimated}
                           badgeSize={10}
                           iconSize={13}
                           nameClassName="text-[10px] font-bold text-purple-100"
@@ -1250,22 +1277,34 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
                       : 'bg-black/55 text-white border border-purple-900/40'
                   }`}
                 >
-                  <UserNameWithBadges
-                    displayName={`${m.user}:`}
-                    nameGlowColor={senderUser?.nameGlowColor ?? m.nameGlowColor}
-                    isVerified={senderUser?.isVerified ?? m.isVerified}
-                    verifiedBadgeColor={senderUser?.verifiedBadgeColor ?? m.verifiedBadgeColor}
-                    verifiedBadgeShape={senderUser?.verifiedBadgeShape ?? m.verifiedBadgeShape}
-                    verifiedBadgeGlow={senderUser?.verifiedBadgeGlow ?? m.verifiedBadgeGlow}
-                    customIconUrl={senderUser?.customIconUrl ?? m.customIconUrl}
-                    customIconGlow={senderUser?.customIconGlow ?? m.customIconGlow}
-                    customIconAnimated={senderUser?.customIconAnimated ?? m.customIconAnimated}
-                    badgeSize={11}
-                    iconSize={14}
-                    nameClassName="font-bold text-amber-400"
-                    className="shrink-0"
-                    truncate={false}
-                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (m.uid && m.uid !== 'system') {
+                        const seatMatch = seats.find((s) => s.occupiedByUid === m.uid);
+                        openUserMiniCard(m.uid, seatMatch?.seatIndex);
+                      }
+                    }}
+                    className={`shrink-0 ${m.uid && m.uid !== 'system' ? 'cursor-pointer hover:underline' : 'cursor-default'}`}
+                    title={m.uid && m.uid !== 'system' ? 'عرض بطاقة المستخدم' : undefined}
+                  >
+                    <UserNameWithBadges
+                      displayName={`${senderUser?.displayName || m.user}:`}
+                      nameGlowColor={senderUser?.nameGlowColor ?? m.nameGlowColor}
+                      isVerified={senderUser?.isVerified ?? m.isVerified}
+                      verifiedBadgeColor={senderUser?.verifiedBadgeColor ?? m.verifiedBadgeColor}
+                      verifiedBadgeShape={senderUser?.verifiedBadgeShape ?? m.verifiedBadgeShape}
+                      verifiedBadgeGlow={senderUser?.verifiedBadgeGlow ?? m.verifiedBadgeGlow}
+                      customIconUrl={senderUser?.customIconUrl ?? m.customIconUrl}
+                      customIconGlow={senderUser?.customIconGlow ?? m.customIconGlow}
+                      customIconAnimated={senderUser?.customIconAnimated ?? m.customIconAnimated}
+                      badgeSize={11}
+                      iconSize={14}
+                      nameClassName="font-bold text-amber-400"
+                      className="shrink-0"
+                      truncate={false}
+                    />
+                  </button>
                   <span
                     className={`break-words ${
                       m.emojiSize === 'large' ? 'text-3xl leading-none py-0.5 drop-shadow-md animate-bounce' : ''
@@ -1825,12 +1864,18 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
                 return (
                   <div className="space-y-2">
                     {list.map((entry, idx) => (
-                      <div
+                      <button
+                        type="button"
                         key={entry.uid}
-                        className={`flex items-center justify-between p-2.5 rounded-2xl border ${
+                        onClick={() => {
+                          const seatMatch = seats.find((s) => s.occupiedByUid === entry.uid);
+                          setShowSupportersModal(false);
+                          openUserMiniCard(entry.uid, seatMatch?.seatIndex);
+                        }}
+                        className={`w-full text-right flex items-center justify-between p-2.5 rounded-2xl border transition-transform active:scale-[0.99] ${
                           idx === 0
                             ? 'bg-gradient-to-r from-amber-500/20 to-yellow-500/10 border-amber-400/70'
-                            : 'bg-black/40 border-purple-800/50'
+                            : 'bg-black/40 border-purple-800/50 hover:border-purple-500/60'
                         }`}
                       >
                         <div className="flex items-center gap-2.5 min-w-0">
@@ -1869,7 +1914,7 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
                         <span className="text-xs font-digits font-black text-[#FFE600] shrink-0">
                           {entry.totalCoins.toLocaleString()} 🪙
                         </span>
-                      </div>
+                      </button>
                     ))}
                   </div>
                 );
@@ -1878,20 +1923,39 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
           </div>
         )}
 
-        {/* HAGO Occupied Seat Profile Popup Sheet */}
-        {selectedProfileSeat && selectedProfileSeat.occupiedByUid && (() => {
-          const targetUid = selectedProfileSeat.occupiedByUid!;
+        {/* Live Firestore-Backed Mini User Profile Bottom Sheet */}
+        {selectedProfileTarget && selectedProfileTarget.uid && (() => {
+          const targetUid = selectedProfileTarget.uid;
           const targetUser = livoStore.getUserByUid(targetUid);
-          const displayName = targetUser?.displayName || selectedProfileSeat.occupiedByName || 'عضو';
+          const liveSeat =
+            seats.find((s) => s.occupiedByUid === targetUid) ??
+            (selectedProfileTarget.seatIndex !== undefined ? seats[selectedProfileTarget.seatIndex] : undefined);
+          const isSelfCard = currentUser?.uid === targetUid;
+          const displayName =
+            targetUser?.displayName ||
+            liveSeat?.occupiedByName ||
+            (targetUid === liveRoom.ownerUid ? liveRoom.ownerName : 'عضو');
+          const resolvedAvatar =
+            targetUser?.avatar ||
+            liveSeat?.occupiedByAvatar ||
+            (targetUid === liveRoom.ownerUid ? liveRoom.ownerAvatar : undefined) ||
+            '/assets/livo/customer_icon.jpg';
+          const resolvedFrameUrl =
+            livoStore.getResolvedFrameUrl(targetUser) || liveSeat?.equippedFrameUrl;
           const isTargetFollowed = Boolean(currentUser?.followingUids?.includes(targetUid));
           const targetLevel = targetUser?.level ?? 0;
-          const charismaPts = (selectedProfileSeat.points || 0) + (targetUser?.diamonds || 0);
-          const likesPts = (targetUser?.followersCount || 0) * 12 + (selectedProfileSeat.giftsCount || 0) * 3;
-          const contribPts = targetUser?.eligibleRechargedCoins || 0;
+
+          // Real Firestore user & gift_logs metrics (zero synthetic formulas)
+          const followersCount = targetUser?.followersCount ?? 0;
+          const followingCount = targetUser?.followingUids
+            ? targetUser.followingUids.length
+            : (targetUser?.followingCount ?? 0);
+          const giftStats = livoStore.getUserGiftStats(targetUid);
+          const agencyLabel = livoStore.getAgencyDisplayLabel(targetUser) || liveSeat?.agencyBadgeLabel;
 
           return (
             <div
-              onClick={() => setSelectedProfileSeat(null)}
+              onClick={() => setSelectedProfileTarget(null)}
               className="absolute inset-0 z-50 bg-black/70 backdrop-blur-xs flex flex-col justify-end animate-in fade-in"
             >
               <div
@@ -1902,42 +1966,72 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
                 <div className="absolute -top-10 left-1/2 -translate-x-1/2">
                   <AvatarWithFrame
                     sizePx={78}
-                    avatarUrl={targetUser?.avatar || selectedProfileSeat.occupiedByAvatar}
+                    avatarUrl={resolvedAvatar}
                     displayName={displayName}
-                    frameUrl={targetUser?.equippedFrameUrl || selectedProfileSeat.equippedFrameUrl}
-                    frameGlowColor={targetUser?.frameGlowColor || selectedProfileSeat.frameGlowColor}
-                    frameAnimated={targetUser?.frameAnimated ?? selectedProfileSeat.frameAnimated}
-                    customIconUrl={targetUser?.customIconUrl || selectedProfileSeat.customIconUrl}
-                    customIconGlow={targetUser?.customIconGlow || selectedProfileSeat.customIconGlow}
-                    customIconAnimated={targetUser?.customIconAnimated ?? selectedProfileSeat.customIconAnimated}
+                    frameUrl={resolvedFrameUrl}
+                    frameGlowColor={targetUser?.frameGlowColor || liveSeat?.frameGlowColor}
+                    frameAnimated={targetUser?.frameAnimated ?? liveSeat?.frameAnimated}
+                    customIconUrl={targetUser?.customIconUrl || liveSeat?.customIconUrl}
+                    customIconGlow={targetUser?.customIconGlow || liveSeat?.customIconGlow}
+                    customIconAnimated={targetUser?.customIconAnimated ?? liveSeat?.customIconAnimated}
                   />
                 </div>
 
-                {/* Top Left/Right Quick Controls (@ Mention + Report/Mod) */}
+                {/* Top Left/Right Quick Controls (@ Mention + Mod/Report + Close) */}
                 <div className="flex items-center justify-between -mt-7 mb-1">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (isOwnerOrMod) {
-                        const seatToMod = selectedProfileSeat;
-                        setSelectedProfileSeat(null);
-                        setModerationSeat(seatToMod);
-                      } else {
-                        setSelectedProfileSeat(null);
-                        showToast('تم إرسال البلاغ للإدارة للمراجعة ✓');
-                      }
-                    }}
-                    className="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600 flex items-center justify-center"
-                    title={isOwnerOrMod ? 'إدارة المقعد والصلاحيات' : 'إبلاغ'}
-                  >
-                    {isOwnerOrMod ? <ShieldAlert className="w-4 h-4 text-amber-600" /> : <AlertTriangle className="w-4 h-4" />}
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    {!isSelfCard && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (isOwnerOrMod && liveSeat && liveSeat.occupiedByUid === targetUid) {
+                            setSelectedProfileTarget(null);
+                            setModerationSeat(liveSeat);
+                          } else {
+                            if (!currentUser) {
+                              setSelectedProfileTarget(null);
+                              onRequireAuth?.();
+                              return;
+                            }
+                            livoStore.submitSupportTicket({
+                              uid: currentUser.uid,
+                              category: 'report',
+                              subject: `بلاغ غرفة (${liveRoom.title}) ضد ${displayName}`,
+                              message: `تم الإبلاغ عن المستخدم ${displayName} (UID: ${targetUid}) داخل الغرفة ${liveRoom.title} (ID: ${liveRoom.id}).`
+                            });
+                            setSelectedProfileTarget(null);
+                            showToast('تم إرسال البلاغ وحفظه للإدارة ✓');
+                          }
+                        }}
+                        className="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600 flex items-center justify-center"
+                        title={
+                          isOwnerOrMod && liveSeat && liveSeat.occupiedByUid === targetUid
+                            ? 'إدارة المقعد والصلاحيات'
+                            : 'إبلاغ للإدارة'
+                        }
+                      >
+                        {isOwnerOrMod && liveSeat && liveSeat.occupiedByUid === targetUid ? (
+                          <ShieldAlert className="w-4 h-4 text-amber-600" />
+                        ) : (
+                          <AlertTriangle className="w-4 h-4 text-red-500" />
+                        )}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setSelectedProfileTarget(null)}
+                      className="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600 flex items-center justify-center"
+                      title="إغلاق"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
 
                   <button
                     type="button"
                     onClick={() => {
                       setChatInput((prev) => `@${displayName} ${prev}`.trim() + ' ');
-                      setSelectedProfileSeat(null);
+                      setSelectedProfileTarget(null);
                     }}
                     className="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700 flex items-center justify-center"
                     title="منشن في الدردشة @"
@@ -1951,14 +2045,14 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
                   <div className="flex items-center justify-center gap-1.5 flex-wrap">
                     <UserNameWithBadges
                       displayName={displayName}
-                      nameGlowColor={targetUser?.nameGlowColor ?? selectedProfileSeat.nameGlowColor}
-                      isVerified={targetUser?.isVerified ?? selectedProfileSeat.isVerified}
-                      verifiedBadgeColor={targetUser?.verifiedBadgeColor ?? selectedProfileSeat.verifiedBadgeColor}
-                      verifiedBadgeShape={targetUser?.verifiedBadgeShape ?? selectedProfileSeat.verifiedBadgeShape}
-                      verifiedBadgeGlow={targetUser?.verifiedBadgeGlow ?? selectedProfileSeat.verifiedBadgeGlow}
-                      customIconUrl={targetUser?.customIconUrl ?? selectedProfileSeat.customIconUrl}
-                      customIconGlow={targetUser?.customIconGlow ?? selectedProfileSeat.customIconGlow}
-                      customIconAnimated={targetUser?.customIconAnimated ?? selectedProfileSeat.customIconAnimated}
+                      nameGlowColor={targetUser?.nameGlowColor ?? liveSeat?.nameGlowColor}
+                      isVerified={targetUser?.isVerified ?? liveSeat?.isVerified}
+                      verifiedBadgeColor={targetUser?.verifiedBadgeColor ?? liveSeat?.verifiedBadgeColor}
+                      verifiedBadgeShape={targetUser?.verifiedBadgeShape ?? liveSeat?.verifiedBadgeShape}
+                      verifiedBadgeGlow={targetUser?.verifiedBadgeGlow ?? liveSeat?.verifiedBadgeGlow}
+                      customIconUrl={targetUser?.customIconUrl ?? liveSeat?.customIconUrl}
+                      customIconGlow={targetUser?.customIconGlow ?? liveSeat?.customIconGlow}
+                      customIconAnimated={targetUser?.customIconAnimated ?? liveSeat?.customIconAnimated}
                       badgeSize={15}
                       iconSize={18}
                       nameClassName="font-black text-base text-gray-900"
@@ -1970,100 +2064,130 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
                       Lv.{targetLevel}
                     </span>
                     <span className="px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 font-bold">
-                      {targetUid === liveRoom.ownerUid ? 'مضيف القناة' : `المقعد #${selectedProfileSeat.seatIndex + 1}`}
+                      {targetUid === liveRoom.ownerUid
+                        ? 'مضيف الغرفة'
+                        : liveSeat && liveSeat.occupiedByUid === targetUid
+                        ? `المقعد #${liveSeat.seatIndex + 1}`
+                        : 'متواجد بالغرفة'}
                     </span>
                     <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-digits font-bold">
                       ID: {targetUid}
                     </span>
                   </div>
+                  {targetUser?.bio && (
+                    <p className="text-[11px] text-gray-500 line-clamp-2 max-w-xs mx-auto pt-0.5">
+                      {targetUser.bio}
+                    </p>
+                  )}
                 </div>
 
-                {/* 4 Pastel Stat Cards */}
+                {/* 4 Real Firestore Stat Cards (Followers, Following, Gifts Sent, Gifts Received) */}
                 <div className="grid grid-cols-4 gap-1.5 text-center">
                   <div className="bg-blue-50/90 rounded-2xl p-2 border border-blue-100">
-                    <span className="text-[9px] text-blue-700 font-bold block">نقاط الإعجاب</span>
-                    <span className="text-xs font-digits font-black text-blue-950">{likesPts.toLocaleString('en-US')}</span>
+                    <span className="text-[9px] text-blue-700 font-bold block">المتابعون</span>
+                    <span className="text-xs font-digits font-black text-blue-950 block">
+                      {followersCount.toLocaleString('en-US')}
+                    </span>
+                    <span className="text-[8px] text-blue-500 font-bold block">حقيقي</span>
+                  </div>
+                  <div className="bg-purple-50/90 rounded-2xl p-2 border border-purple-100">
+                    <span className="text-[9px] text-purple-700 font-bold block">المتابَعون</span>
+                    <span className="text-xs font-digits font-black text-purple-950 block">
+                      {followingCount.toLocaleString('en-US')}
+                    </span>
+                    <span className="text-[8px] text-purple-500 font-bold block">حساب</span>
                   </div>
                   <div className="bg-amber-50/90 rounded-2xl p-2 border border-amber-100">
-                    <span className="text-[9px] text-amber-700 font-bold block">الكاريزما</span>
-                    <span className="text-xs font-digits font-black text-amber-950">{charismaPts.toLocaleString('en-US')}</span>
+                    <span className="text-[9px] text-amber-700 font-bold block">الهدايا المرسلة</span>
+                    <span className="text-xs font-digits font-black text-amber-950 block">
+                      {giftStats.sentGiftsCount.toLocaleString('en-US')}
+                    </span>
+                    <span className="text-[8px] text-amber-600 font-digits font-bold block">
+                      {giftStats.sentGiftsCoins.toLocaleString('en-US')} 🪙
+                    </span>
                   </div>
                   <div className="bg-emerald-50/90 rounded-2xl p-2 border border-emerald-100">
-                    <span className="text-[9px] text-emerald-700 font-bold block">المساهمة</span>
-                    <span className="text-xs font-digits font-black text-emerald-950">{contribPts.toLocaleString('en-US')}</span>
-                  </div>
-                  <div className="bg-rose-50/90 rounded-2xl p-2 border border-rose-100">
-                    <span className="text-[9px] text-rose-700 font-bold block">المستوى</span>
-                    <span className="text-xs font-digits font-black text-rose-950">Lv.{targetLevel}</span>
+                    <span className="text-[9px] text-emerald-700 font-bold block">الهدايا المستلمة</span>
+                    <span className="text-xs font-digits font-black text-emerald-950 block">
+                      {giftStats.receivedGiftsCount.toLocaleString('en-US')}
+                    </span>
+                    <span className="text-[8px] text-emerald-600 font-digits font-bold block">
+                      {giftStats.receivedGiftsCoins.toLocaleString('en-US')} 🪙
+                    </span>
                   </div>
                 </div>
 
-                {/* Agency / Gift Wall Preview Strip */}
-                {(targetUser?.agencyName || selectedProfileSeat.agencyBadgeLabel) && (
+                {/* Agency Strip */}
+                {(targetUser?.agencyName || agencyLabel) && (
                   <div className="bg-gradient-to-r from-amber-50 via-yellow-50 to-amber-50 border border-amber-200 rounded-2xl px-3 py-2 flex items-center justify-between text-xs">
                     <span className="font-black text-amber-900">
-                      👑 {targetUser?.agencyName || selectedProfileSeat.agencyBadgeLabel}
+                      👑 {targetUser?.agencyName || agencyLabel}
                     </span>
                     <span className="text-[10px] font-bold text-amber-700">وكالة معتمدة</span>
                   </div>
                 )}
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    setGiftTargetAll(false);
-                    setGiftRecipientUids([targetUid]);
-                    setSelectedProfileSeat(null);
-                    setShowGiftsTray(true);
-                  }}
-                  className="w-full bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-2xl px-3 py-2 flex items-center justify-between text-xs"
-                >
-                  <span className="font-black text-gray-800">لوحة الهدايا 🎁</span>
-                  <span className="text-[11px] font-digits font-bold text-amber-600">
-                    {(selectedProfileSeat.giftsCount || 0).toLocaleString()} هدية مستلمة
-                  </span>
-                </button>
+                {/* Bottom Action Buttons */}
+                {isSelfCard ? (
+                  <div className="bg-gray-50 border border-gray-200 rounded-2xl p-2.5 text-center text-[11px] font-bold text-gray-600">
+                    هذا ملفك الشخصي المباشر — جميع الأرقام محدثة لحظياً من Firestore
+                  </div>
+                ) : (
+                  <div className={`grid gap-2 pt-1 ${onStartChat ? 'grid-cols-3' : 'grid-cols-2'}`}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setGiftTargetAll(false);
+                        setGiftRecipientUids([targetUid]);
+                        setSelectedProfileTarget(null);
+                        setShowGiftsTray(true);
+                      }}
+                      className="py-2.5 rounded-full bg-gradient-to-r from-orange-500 to-amber-500 text-white font-black text-xs flex items-center justify-center gap-1 shadow-md active:scale-95 transition-transform"
+                    >
+                      <Gift className="w-3.5 h-3.5 shrink-0" />
+                      <span>إرسال هدية</span>
+                    </button>
 
-                {/* Bottom Action Buttons (إرسال هدية + تابع) */}
-                <div className="grid grid-cols-2 gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setGiftTargetAll(false);
-                      setGiftRecipientUids([targetUid]);
-                      setSelectedProfileSeat(null);
-                      setShowGiftsTray(true);
-                    }}
-                    className="py-2.5 rounded-full bg-gradient-to-r from-orange-500 to-amber-500 text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-md active:scale-95 transition-transform"
-                  >
-                    <Gift className="w-4 h-4" />
-                    <span>إرسال هدية</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!currentUser) {
-                        onRequireAuth?.();
-                        return;
-                      }
-                      const followed = livoStore.toggleFollowUser(currentUser.uid, targetUid);
-                      showToast(followed ? `تمت متابعة ${displayName} ✓` : 'تم إلغاء المتابعة');
-                    }}
-                    className={`py-2.5 rounded-full font-black text-xs flex items-center justify-center gap-1.5 shadow-md active:scale-95 transition-transform ${
-                      isTargetFollowed ? 'bg-gray-200 text-gray-800' : 'bg-[#FFE600] text-black'
-                    }`}
-                  >
-                    <UserPlus className="w-4 h-4" />
-                    <span>{isTargetFollowed ? 'متابَع ✓' : 'تابع'}</span>
-                  </button>
-                </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!currentUser) {
+                          onRequireAuth?.();
+                          return;
+                        }
+                        const followed = livoStore.toggleFollowUser(currentUser.uid, targetUid);
+                        showToast(followed ? `تمت متابعة ${displayName} ✓` : 'تم إلغاء المتابعة');
+                      }}
+                      className={`py-2.5 rounded-full font-black text-xs flex items-center justify-center gap-1 shadow-md active:scale-95 transition-transform ${
+                        isTargetFollowed ? 'bg-gray-200 text-gray-800' : 'bg-[#FFE600] text-black'
+                      }`}
+                    >
+                      <UserPlus className="w-3.5 h-3.5 shrink-0" />
+                      <span>{isTargetFollowed ? 'متابَع ✓' : 'متابعة'}</span>
+                    </button>
 
-                {isOwnerOrMod && (
+                    {onStartChat && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedProfileTarget(null);
+                          onStartChat(targetUid);
+                        }}
+                        className="py-2.5 rounded-full bg-purple-600 hover:bg-purple-700 text-white font-black text-xs flex items-center justify-center gap-1 shadow-md active:scale-95 transition-transform"
+                      >
+                        <MessageCircle className="w-3.5 h-3.5 shrink-0" />
+                        <span>محادثة</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {isOwnerOrMod && !isSelfCard && liveSeat && liveSeat.occupiedByUid === targetUid && (
                   <button
                     type="button"
                     onClick={() => {
-                      const seatToMod = selectedProfileSeat;
-                      setSelectedProfileSeat(null);
+                      const seatToMod = liveSeat;
+                      setSelectedProfileTarget(null);
                       setModerationSeat(seatToMod);
                     }}
                     className="w-full py-2 rounded-xl bg-purple-950 text-[#FFE600] font-black text-xs flex items-center justify-center gap-1.5"

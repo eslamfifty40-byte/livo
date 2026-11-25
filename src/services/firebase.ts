@@ -11,6 +11,7 @@ import {
   getDoc,
   getDocs,
   setDoc,
+  updateDoc,
   deleteDoc,
   collection,
   query,
@@ -714,6 +715,22 @@ export class FirebaseService {
     }
   }
 
+  /**
+   * Rule-compliant partial field update (e.g. cross-user followersCount / diamonds / coins)
+   */
+  public async patchUserFields(uid: string, fields: Partial<UserProfile>): Promise<boolean> {
+    if (!uid?.trim()) return false;
+    try {
+      const payload = stripUndefined(fields) as unknown as Record<string, unknown>;
+      if (Object.keys(payload).length === 0) return true;
+      await updateDoc(doc(db, COLLECTIONS.USERS, uid.trim()), payload);
+      return true;
+    } catch (e) {
+      console.error('Error patching user fields in Firestore:', e);
+      return false;
+    }
+  }
+
   public async deleteUserByUid(uid: string): Promise<boolean> {
     if (!auth.currentUser || !uid?.trim()) return false;
     try {
@@ -791,11 +808,39 @@ export class FirebaseService {
    * Write or update room
    */
   public async saveRoom(room: VoiceRoom): Promise<boolean> {
+    if (!auth.currentUser) {
+      return false;
+    }
+    const cleanId = (room.id || '').trim().slice(0, 64);
+    if (!cleanId || !/^[a-zA-Z0-9_\-.@]+$/.test(cleanId)) {
+      return false;
+    }
+    const cleanTitle = (room.title || 'غرفة LIVO').trim().slice(0, 180) || 'غرفة LIVO';
+    const cleanOwnerUid = (room.ownerUid || '10000').trim().slice(0, 64) || '10000';
+    const validStatuses: Array<VoiceRoom['status']> = ['open', 'closed', 'locked_by_admin'];
+    const cleanStatus: VoiceRoom['status'] = validStatuses.includes(room.status) ? room.status : 'open';
+    const normalizedRoom: VoiceRoom = {
+      ...room,
+      id: cleanId,
+      title: cleanTitle,
+      ownerUid: cleanOwnerUid,
+      isOfficial: Boolean(room.isOfficial || cleanId === 'room-official-livo'),
+      status: cleanStatus
+    };
     try {
-      await setDoc(doc(db, COLLECTIONS.ROOMS, room.id), stripUndefined(room), { merge: true });
+      await setDoc(doc(db, COLLECTIONS.ROOMS, cleanId), stripUndefined(normalizedRoom), { merge: true });
       return true;
-    } catch (e) {
-      console.error('Error saving room to Firestore:', e);
+    } catch (e: any) {
+      if (e?.code === 'permission-denied') {
+        console.warn('Firestore saveRoom permission-denied:', {
+          roomId: cleanId,
+          authUid: auth.currentUser?.uid,
+          ownerUid: cleanOwnerUid,
+          isOfficial: normalizedRoom.isOfficial
+        });
+      } else {
+        console.error('Error saving room to Firestore:', e);
+      }
       return false;
     }
   }
@@ -1378,6 +1423,20 @@ export class FirebaseService {
       return true;
     } catch (e) {
       console.error('Error saving video to Firestore:', e);
+      return false;
+    }
+  }
+
+  public async patchVideoStats(
+    videoId: string,
+    stats: Partial<Pick<VideoPost, 'likesCount' | 'commentsCount'>>
+  ): Promise<boolean> {
+    if (!videoId?.trim()) return false;
+    try {
+      await updateDoc(doc(db, COLLECTIONS.VIDEOS, videoId.trim()), stripUndefined(stats));
+      return true;
+    } catch (e) {
+      console.error('Error patching video stats in Firestore:', e);
       return false;
     }
   }

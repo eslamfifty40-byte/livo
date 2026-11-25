@@ -1,6 +1,7 @@
-import React from 'react';
-import { X, Bell, CheckCircle2, ShieldAlert, Coins, Radio } from 'lucide-react';
-import { UserProfile } from '../../types';
+import React, { useEffect, useState } from 'react';
+import { X, Bell, CheckCircle2, Coins, Radio } from 'lucide-react';
+import { InAppNotification, UserProfile } from '../../types';
+import { livoStore } from '../../services/livoStore';
 
 interface NotificationsModalProps {
   user: UserProfile;
@@ -9,34 +10,17 @@ interface NotificationsModalProps {
 }
 
 export const NotificationsModal: React.FC<NotificationsModalProps> = ({ user, isOpen, onClose }) => {
-  if (!isOpen) return null;
+  const [notifications, setNotifications] = useState<InAppNotification[]>(() =>
+    livoStore.getInAppNotifications()
+  );
 
-  const notifications = [
-    {
-      id: 'n-1',
-      title: 'إشعار رسمي من إدارة LIVO',
-      body: 'مرحباً بك في LIVO! تم تفعيل ميزات الحماية والتحديثات الأمنية لمنظومة البث والغرف.',
-      time: 'منذ ساعتين',
-      type: 'official',
-      icon: <Radio className="w-4 h-4 text-amber-400" />
-    },
-    {
-      id: 'n-2',
-      title: 'حالة محفظة الكوينز',
-      body: `رصيدك الحالي هو ${user.coins.toLocaleString()} كوينز. يمكنك الشحن بأمان عبر باقات الكوينز المعتمدة.`,
-      time: 'اليوم 10:30 ص',
-      type: 'coins',
-      icon: <Coins className="w-4 h-4 text-green-400" />
-    },
-    {
-      id: 'n-3',
-      title: 'أمان الحساب ومعرف UID',
-      body: `معرفك الثابت هو ${user.uid}. تم فحص سلامة الجلسة وتوثيق الاتصال المشفر.`,
-      time: 'أمس',
-      type: 'security',
-      icon: <CheckCircle2 className="w-4 h-4 text-blue-400" />
-    }
-  ];
+  useEffect(() => {
+    const sync = () => setNotifications([...livoStore.getInAppNotifications()]);
+    sync();
+    return livoStore.subscribe(sync);
+  }, [user.uid]);
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in">
@@ -48,7 +32,7 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({ user, is
             </div>
             <div>
               <h3 className="font-extrabold text-sm text-white">مركز الإشعارات والتنبيهات</h3>
-              <p className="text-[11px] text-purple-300">أحدث مستجدات الحساب والعمليات</p>
+              <p className="text-[11px] text-purple-300">إشعارات الحساب المباشرة ({notifications.length})</p>
             </div>
           </div>
           <button onClick={onClose} className="text-purple-400 hover:text-white">
@@ -57,23 +41,40 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({ user, is
         </div>
 
         <div className="p-4 overflow-y-auto space-y-2.5">
-          {notifications.map(n => (
-            <div
-              key={n.id}
-              className="bg-[#120824] p-3 rounded-2xl border border-purple-800/40 space-y-1"
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  {n.icon}
-                  <span className="font-bold text-xs text-white">{n.title}</span>
-                </div>
-                <span className="text-[10px] text-purple-400 font-digits">{n.time}</span>
-              </div>
-              <p className="text-xs text-purple-200/90 leading-relaxed pr-6">
-                {n.body}
-              </p>
+          {notifications.length === 0 ? (
+            <div className="py-10 text-center text-xs text-purple-300">
+              لا توجد إشعارات جديدة لحسابك ({user.uid}) حالياً.
             </div>
-          ))}
+          ) : (
+            notifications.map((n) => (
+              <div
+                key={n.id}
+                onClick={() => !n.isRead && livoStore.markNotificationRead(n.id)}
+                className={`p-3 rounded-2xl border space-y-1 cursor-pointer transition-colors ${
+                  n.isRead
+                    ? 'bg-[#120824] border-purple-800/40 opacity-80'
+                    : 'bg-purple-950/60 border-amber-400/50'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    {n.type === 'recharge_approved' ? (
+                      <Coins className="w-4 h-4 text-green-400 shrink-0" />
+                    ) : n.type === 'agency_approved' ? (
+                      <CheckCircle2 className="w-4 h-4 text-blue-400 shrink-0" />
+                    ) : (
+                      <Radio className="w-4 h-4 text-amber-400 shrink-0" />
+                    )}
+                    <span className="font-bold text-xs text-white truncate">{n.title}</span>
+                  </div>
+                  <span className="text-[10px] text-purple-400 font-digits shrink-0">
+                    {new Date(n.createdAt).toLocaleDateString('ar-EG')}
+                  </span>
+                </div>
+                <p className="text-xs text-purple-200/90 leading-relaxed pr-6">{n.body}</p>
+              </div>
+            ))
+          )}
         </div>
       </div>
     </div>

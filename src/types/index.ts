@@ -73,6 +73,8 @@ export interface UserProfile {
   followingUids?: string[];
   blockedUids?: string[];
   notificationsEnabled?: boolean;
+  publicBroadcast?: boolean;
+  privateProfileOnly?: boolean;
   locationEnabled?: boolean;
   locationCoords?: {
     lat: number;

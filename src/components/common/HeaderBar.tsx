@@ -95,11 +95,25 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
             onChange={(e) => handleQuickSwitchUser(e.target.value)}
             className="bg-transparent text-xs text-amber-300 font-bold outline-none cursor-pointer"
           >
-            {users.map(u => (
-              <option key={u.uid} value={u.uid} className="bg-[#170b2c] text-white">
-                {u.displayName} ({u.role === 'owner' ? 'المالك' : u.role === 'agent' ? 'وكيل' : 'مستخدم'} - UID: {u.uid})
-              </option>
-            ))}
+            {users.map(u => {
+              const roleLabel =
+                u.role === 'owner'
+                  ? 'المالك'
+                  : u.role === 'supervisor'
+                  ? 'مشرف'
+                  : u.role === 'charging_agent'
+                  ? 'وكيل شحن'
+                  : u.role === 'distributor_agent'
+                  ? 'وكيل موزعين'
+                  : u.role === 'agent'
+                  ? 'وكيل'
+                  : 'مستخدم';
+              return (
+                <option key={u.uid} value={u.uid} className="bg-[#170b2c] text-white">
+                  {u.displayName} ({roleLabel} - UID: {u.uid})
+                </option>
+              );
+            })}
           </select>
         </div>
 

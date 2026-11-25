@@ -26,6 +26,8 @@ export const VideosView: React.FC<VideosViewProps> = ({ currentUser }) => {
   const [uploadError, setUploadError] = useState('');
   const [likedVideoIds, setLikedVideoIds] = useState<Set<string>>(new Set());
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+  const [commentVideoId, setCommentVideoId] = useState<string | null>(null);
+  const [commentText, setCommentText] = useState('');
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
   useEffect(() => {
@@ -205,10 +207,17 @@ export const VideosView: React.FC<VideosViewProps> = ({ currentUser }) => {
                       <span className="font-digits">{video.likesCount}</span>
                     </button>
 
-                    <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCommentVideoId((prev) => (prev === video.id ? null : video.id));
+                        setCommentText('');
+                      }}
+                      className="flex items-center gap-1.5 hover:text-[#FFE600] transition-colors"
+                    >
                       <MessageCircle className="w-4 h-4" />
                       <span className="font-digits">{video.commentsCount}</span>
-                    </div>
+                    </button>
 
                     <button
                       onClick={() => {
@@ -221,6 +230,34 @@ export const VideosView: React.FC<VideosViewProps> = ({ currentUser }) => {
                       <span>مشاركة</span>
                     </button>
                   </div>
+
+                  {commentVideoId === video.id && (
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        if (!commentText.trim()) return;
+                        livoStore.addVideoComment(video.id);
+                        setCommentText('');
+                        setCommentVideoId(null);
+                        showToast('تم إضافة تعليقك ✓');
+                      }}
+                      className="flex items-center gap-1.5 pt-2"
+                    >
+                      <input
+                        type="text"
+                        value={commentText}
+                        onChange={(e) => setCommentText(e.target.value)}
+                        placeholder="اكتب تعليقاً سريعاً..."
+                        className="flex-1 bg-[#120824] border border-purple-800/60 rounded-xl px-2.5 py-1.5 text-xs text-white placeholder-purple-400/60 outline-none"
+                      />
+                      <button
+                        type="submit"
+                        className="px-3 py-1.5 rounded-xl bg-[#FFE600] text-black text-xs font-black"
+                      >
+                        نشر
+                      </button>
+                    </form>
+                  )}
                 </div>
               </div>
             );

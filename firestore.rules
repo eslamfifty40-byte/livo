@@ -153,10 +153,10 @@ service cloud.firestore {
     }
 
     function isValidRoom(data) {
-      return isNonEmptyStrMax(data.id, 64) &&
-        isNonEmptyStrMax(data.title, 120) &&
-        isNonEmptyStrMax(data.ownerUid, 32) &&
-        data.status in ['open', 'closed', 'locked_by_admin'] &&
+      return isNonEmptyStrMax(data.get('id', ''), 64) &&
+        isNonEmptyStrMax(data.get('title', ''), 200) &&
+        isNonEmptyStrMax(data.get('ownerUid', ''), 64) &&
+        data.get('status', '') in ['open', 'closed', 'locked_by_admin'] &&
         data.get('isOfficial', false) is bool;
     }
 
@@ -297,23 +297,34 @@ service cloud.firestore {
       allow create: if isValidDocId(roomId) &&
         isAuthenticated() &&
         isValidRoom(request.resource.data) &&
+        request.resource.data.get('id', '') == roomId &&
         (
           isAdminOrSupervisor() ||
-          request.resource.data.isOfficial == false ||
+          request.resource.data.get('isOfficial', false) == false ||
           (
             roomId == 'room-official-livo' &&
-            request.resource.data.ownerUid == '10000' &&
-            request.resource.data.isOfficial == true
+            request.resource.data.get('ownerUid', '') == '10000' &&
+            request.resource.data.get('isOfficial', false) == true
           )
         );
 
       allow update: if isValidDocId(roomId) &&
         isAuthenticated() &&
         isValidRoom(request.resource.data) &&
+        request.resource.data.get('id', '') == roomId &&
         (
           isAdminOrSupervisor() ||
           (
-            request.resource.data.ownerUid == resource.data.ownerUid &&
+            roomId == 'room-official-livo' &&
+            request.resource.data.get('ownerUid', '') == '10000' &&
+            request.resource.data.get('isOfficial', false) == true &&
+            resource.data.get('ownerUid', '10000') in ['', '10000']
+          ) ||
+          (
+            (
+              resource.data.get('ownerUid', '') == '' ||
+              request.resource.data.get('ownerUid', '') == resource.data.get('ownerUid', '')
+            ) &&
             request.resource.data.get('isOfficial', false) == resource.data.get('isOfficial', false)
           )
         );
