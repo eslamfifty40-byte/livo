@@ -943,9 +943,14 @@ class LivoStore {
     this.notify();
   }
 
+  public normalizeEmail(email?: string | null): string {
+    return firebaseService.sanitizeEmail(email);
+  }
+
   public isOwnerEmail(email?: string | null): boolean {
-    if (!email) return false;
-    return OWNER_EMAILS.includes(email.trim().toLowerCase());
+    const clean = this.normalizeEmail(email);
+    if (!clean) return false;
+    return OWNER_EMAILS.includes(clean);
   }
 
   /**
@@ -1069,7 +1074,7 @@ class LivoStore {
       diamonds: 0,
       level: isOwner ? 50 : 0,
       eligibleRechargedCoins: 0,
-      unlockedLevelRewards: [],
+      unlockedLevelRewards: isOwner ? Array.from({ length: 51 }, (_, i) => i) : [],
       isVerified: isOwner,
       followingCount: 0,
       followersCount: 0,
@@ -4113,10 +4118,18 @@ class LivoStore {
   }
 
   public isAuthorizedAdminEmail(email?: string | null): boolean {
-    if (!email) return false;
-    const clean = email.trim().toLowerCase();
+    const clean = this.normalizeEmail(email);
+    if (!clean) return false;
     if (this.isOwnerEmail(clean)) return true;
-    return this.supervisors.some(s => s.isActive && s.email.trim().toLowerCase() === clean);
+    return this.supervisors.some(s => s.isActive && this.normalizeEmail(s.email) === clean);
+  }
+
+  public async verifyAdminAuthorizationAsync(email?: string | null, authUid?: string | null): Promise<boolean> {
+    const clean = this.normalizeEmail(email);
+    if (!clean && !authUid) return false;
+    if (this.isAuthorizedAdminEmail(clean)) return true;
+    const res = await firebaseService.checkStaffAuthorization(clean, authUid);
+    return res.isAuthorized;
   }
 
   public addSupervisor(data: { uid?: string; name: string; email: string; permissions: string[] }): SupervisorRecord {

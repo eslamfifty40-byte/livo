@@ -1394,6 +1394,55 @@ export class FirebaseService {
     }
   }
 
+  public sanitizeEmail(email?: string | null): string {
+    if (!email) return '';
+    return email
+      .replace(/[\s\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF\u00A0]/g, '')
+      .toLowerCase();
+  }
+
+  public async checkStaffAuthorization(
+    email?: string | null,
+    authUid?: string | null
+  ): Promise<{ isAuthorized: boolean; role?: 'owner' | 'supervisor' }> {
+    const cleanEmail = this.sanitizeEmail(email);
+    try {
+      if (authUid) {
+        const uidSnap = await getDoc(doc(db, COLLECTIONS.STAFF_AUTH, authUid));
+        if (uidSnap.exists()) {
+          const d = uidSnap.data() as { role?: string; isActive?: boolean };
+          if (d?.isActive && (d.role === 'owner' || d.role === 'supervisor')) {
+            return { isAuthorized: true, role: d.role };
+          }
+        }
+      }
+      if (cleanEmail) {
+        const emailSnap = await getDoc(doc(db, COLLECTIONS.STAFF_AUTH, cleanEmail));
+        if (emailSnap.exists()) {
+          const d = emailSnap.data() as { role?: string; isActive?: boolean };
+          if (d?.isActive && (d.role === 'owner' || d.role === 'supervisor')) {
+            return { isAuthorized: true, role: d.role };
+          }
+        }
+        const supQ = query(
+          collection(db, COLLECTIONS.SUPERVISORS),
+          where('email', '==', cleanEmail),
+          limit(5)
+        );
+        const supDocs = await getDocs(supQ);
+        for (const sDoc of supDocs.docs) {
+          const sup = sDoc.data() as SupervisorRecord;
+          if (sup?.isActive && this.sanitizeEmail(sup.email) === cleanEmail) {
+            return { isAuthorized: true, role: 'supervisor' };
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Staff authorization check fallback:', e);
+    }
+    return { isAuthorized: false };
+  }
+
   /**
    * Real-time subscription to genuine User Videos
    */
@@ -1702,25 +1751,33 @@ export class FirebaseService {
   private formatFirebaseAuthError(err: any, fallback: string): string {
     const code = err?.code || '';
     const msg = String(err?.message || '');
+    const lowerMsg = msg.toLowerCase();
     const host = typeof window !== 'undefined' ? window.location.hostname : '';
     if (code === 'auth/unauthorized-domain' || msg.includes('unauthorized-domain')) {
       return `النطاق الحالي (${host || 'هذا الرابط'}) غير مضاف في Authorized Domains داخل Firebase Authentication. أضف "${host}" من Firebase Console > Authentication > Settings > Authorized domains، أو سجّل الدخول الآن بالبريد الإلكتروني / رقم الهاتف.`;
     }
     if (
+      code === 'auth/missing-initial-state' ||
+      lowerMsg.includes('missing initial state') ||
       code === 'auth/invalid-action-code' ||
-      msg.toLowerCase().includes('requested action is invalid') ||
+      lowerMsg.includes('requested action is invalid') ||
       code === 'auth/missing-continue-uri' ||
       code === 'auth/invalid-continue-uri'
     ) {
-      return `تعذر إكمال جلسة التحويل في المتصفح (بسبب حجب ملفات الارتباط/Brave Shields أو انتهاء صلاحية التحويل). استخدم زر "تسجيل الدخول عبر Google" المباشر (النافذة المنبثقة)، أو أوقف Brave Shields للنطاق (${host || 'الحالي'})، أو سجّل بالبريد/الهاتف.`;
+      return 'تعذر إكمال التحويل التلقائي بسبب قيود تخزين المتصفح. استخدم زر تسجيل الدخول السريع عبر Google (النافذة المنبثقة) مع السماح بالنوافذ المنبثقة، أو سجّل الدخول بالبريد الإلكتروني وكلمة المرور.';
     }
     if (code === 'auth/web-storage-unsupported') {
       return 'المتصفح يمنع تخزين الجلسة (Cookies / IndexedDB). فعّل الكوكيز أو أوقف حظر التخزين في المتصفح، أو استخدم البريد الإلكتروني / رقم الهاتف.';
     }
-    if (code === 'auth/popup-blocked' || code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+    if (
+      code === 'auth/popup-blocked' ||
+      code === 'auth/popup-closed-by-user' ||
+      code === 'auth/cancelled-popup-request' ||
+      code === 'auth/operation-not-supported-in-this-environment'
+    ) {
       return this.isBraveOrRestrictedBrowser()
-        ? 'تم حجب أو إغلاق نافذة Google في متصفح Brave/الجوال. فعّل النوافذ المنبثقة (Popups) أو أوقف Brave Shields لهذا الموقع ثم أعد المحاولة، أو استخدم البريد الإلكتروني / رقم الهاتف.'
-        : 'تم إغلاق أو حجب نافذة Google. اسمح بالنوافذ المنبثقة أو استخدم زر "تسجيل الدخول بصفحة Google كاملة" أو سجّل بالبريد / رقم الهاتف.';
+        ? 'تم حجب أو إغلاق نافذة Google في هذا المتصفح/التطبيق. اسمح بالنوافذ المنبثقة (Popups) وأعد المحاولة، أو سجّل الدخول بالبريد الإلكتروني وكلمة المرور.'
+        : 'تم إغلاق أو حجب نافذة تسجيل الدخول عبر Google. اسمح بالنوافذ المنبثقة لهذا الموقع وأعد المحاولة، أو سجّل الدخول بالبريد الإلكتروني وكلمة المرور.';
     }
     if (code === 'auth/account-exists-with-different-credential') {
       return 'هذا البريد مسجل بالفعل بطريقة دخول أخرى. سجّل الدخول بالبريد الإلكتروني وكلمة المرور.';
@@ -1732,10 +1789,10 @@ export class FirebaseService {
       return 'حدث خطأ مؤقت أثناء المصادقة مع Google. يرجى المحاولة بالنافذة المنبثقة أو البريد الإلكتروني.';
     }
     if (code === 'auth/operation-not-allowed') {
-      return 'طريقة الدخول هذه غير مفعّلة في إعدادات مشروع Firebase Authentication.';
+      return 'طريقة الدخول بالبريد وكلمة المرور غير مفعّلة في Firebase Console حالياً. استخدم زر "تسجيل الدخول السريع بحساب Google" أو فعّل Email/Password في Firebase Authentication.';
     }
     if (code === 'auth/user-not-found' || code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
-      return 'البريد الإلكتروني أو كلمة المرور غير صحيحة.';
+      return 'البريد الإلكتروني أو كلمة المرور غير صحيحة، أو أن الحساب مسجل عبر Google فقط (جرّب الدخول بحساب Google أو اضغط نسيت كلمة المرور لتعيين كلمة مرور).';
     }
     if (code === 'auth/email-already-in-use') {
       return 'هذا البريد الإلكتروني مسجل بالفعل. يرجى تسجيل الدخول.';
@@ -1758,9 +1815,14 @@ export class FirebaseService {
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
 
-    // In Brave / WebViews, /__/auth/handler redirect often hangs on a dark blank screen due to cross-site cookie blocking.
-    // Always prefer safe user-gesture Popup in Brave/WebViews or inside iframes.
-    const canUseRedirect = !this.isInsideIframe() && !this.isBraveOrRestrictedBrowser();
+    // Cross-origin signInWithRedirect (e.g. run.app / localhost APK -> firebaseapp.com/__/auth/handler)
+    // fails in storage-partitioned browsers with "missing initial state" and exits WebViews into system browsers.
+    // Only allow redirect when hosted directly on authDomain outside iframes & restricted browsers.
+    const isSameAuthDomain =
+      typeof window !== 'undefined' &&
+      Boolean(firebaseConfig.authDomain) &&
+      window.location.hostname === firebaseConfig.authDomain;
+    const canUseRedirect = isSameAuthDomain && !this.isInsideIframe() && !this.isBraveOrRestrictedBrowser();
 
     if (preferRedirect && canUseRedirect) {
       try {
@@ -1808,7 +1870,7 @@ export class FirebaseService {
    * Admin Authentication with Firebase Auth
    */
   public async loginAdmin(email: string, pass: string): Promise<{ success: boolean; user?: FirebaseUser; error?: string }> {
-    const cleanEmail = email.trim().toLowerCase();
+    const cleanEmail = this.sanitizeEmail(email);
     const cleanPass = pass.trim();
 
     try {
@@ -1838,7 +1900,7 @@ export class FirebaseService {
    * Customer Sign-In via Email/Password in Firebase Auth
    */
   public async loginCustomerWithEmail(email: string, pass: string): Promise<{ success: boolean; user?: FirebaseUser; error?: string }> {
-    const cleanEmail = email.trim().toLowerCase();
+    const cleanEmail = this.sanitizeEmail(email);
     const cleanPass = pass.trim();
     try {
       const cred = await signInWithEmailAndPassword(auth, cleanEmail, cleanPass);
@@ -1852,7 +1914,7 @@ export class FirebaseService {
    * Customer Registration via Email/Password in Firebase Auth
    */
   public async registerCustomerWithEmail(email: string, pass: string, displayName?: string): Promise<{ success: boolean; user?: FirebaseUser; error?: string }> {
-    const cleanEmail = email.trim().toLowerCase();
+    const cleanEmail = this.sanitizeEmail(email);
     const cleanPass = pass.trim();
     try {
       const cred = await createUserWithEmailAndPassword(auth, cleanEmail, cleanPass);

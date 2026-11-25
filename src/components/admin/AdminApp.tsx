@@ -320,10 +320,13 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
         localStorage.removeItem('livo_admin_session');
         return;
       }
-      const email = fbUser.email?.trim().toLowerCase() || '';
-      if (livoStore.isAuthorizedAdminEmail(email)) {
+      const email = livoStore.normalizeEmail(fbUser.email);
+      const authorized = await livoStore.verifyAdminAuthorizationAsync(email, fbUser.uid);
+      if (!isMounted) return;
+      if (authorized) {
         setIsAdminLoggedIn(true);
         setActiveAdminEmail(email);
+        setAuthError('');
         localStorage.setItem('livo_admin_session', 'true');
         await livoStore.syncFirebaseUserAsync(fbUser);
       } else {
@@ -340,8 +343,10 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
         return;
       }
       if (res.user) {
-        const email = res.user.email?.trim().toLowerCase() || '';
-        if (!livoStore.isAuthorizedAdminEmail(email)) {
+        const email = livoStore.normalizeEmail(res.user.email);
+        const authorized = await livoStore.verifyAdminAuthorizationAsync(email, res.user.uid);
+        if (!isMounted) return;
+        if (!authorized) {
           await firebaseService.logout();
           setAuthError('هذا البريد غير مصرح له بدخول لوحة الإدارة (مقصور على المالك والمشرفين المعتمدين).');
           return;
@@ -376,13 +381,20 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
       setAllMessages([...livoStore.getMessages()]);
       setSplashBanners([...livoStore.getSplashBanners()]);
       if (latestFbUser) {
-        const em = latestFbUser.email?.trim().toLowerCase() || '';
-        const authorized = livoStore.isAuthorizedAdminEmail(em);
-        setIsAdminLoggedIn((prev) => (prev === authorized ? prev : authorized));
-        setActiveAdminEmail((prev) => {
-          const next = authorized ? em : '';
-          return prev === next ? prev : next;
-        });
+        const em = livoStore.normalizeEmail(latestFbUser.email);
+        if (livoStore.isAuthorizedAdminEmail(em)) {
+          setIsAdminLoggedIn(true);
+          setActiveAdminEmail((prev) => (prev === em ? prev : em));
+        } else {
+          livoStore.verifyAdminAuthorizationAsync(em, latestFbUser.uid).then((authorized) => {
+            if (!isMounted) return;
+            setIsAdminLoggedIn((prev) => (prev === authorized ? prev : authorized));
+            setActiveAdminEmail((prev) => {
+              const next = authorized ? em : '';
+              return prev === next ? prev : next;
+            });
+          });
+        }
       }
     });
 
@@ -475,10 +487,9 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
     setAuthInfo('');
     setIsLoggingIn(true);
 
-    const cleanEmail = adminUsername.trim().toLowerCase();
-
-    if (!livoStore.isAuthorizedAdminEmail(cleanEmail)) {
-      setAuthError('حساب الإدارة غير معتمد. يرجى الدخول بحساب المالك الرسمي أو مشرف مفعّل في المنظومة.');
+    const cleanEmail = livoStore.normalizeEmail(adminUsername);
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      setAuthError('يرجى إدخال البريد الإلكتروني بشكل صحيح.');
       setIsLoggingIn(false);
       return;
     }
@@ -486,8 +497,18 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
     try {
       const res = await firebaseService.loginAdmin(cleanEmail, adminPassword);
       if (res.success && res.user) {
+        const verifiedEmail = livoStore.normalizeEmail(res.user.email || cleanEmail);
+        const authorized = await livoStore.verifyAdminAuthorizationAsync(verifiedEmail, res.user.uid);
+        if (!authorized) {
+          await firebaseService.logout();
+          setIsAdminLoggedIn(false);
+          setActiveAdminEmail('');
+          localStorage.removeItem('livo_admin_session');
+          setAuthError('حساب الإدارة غير معتمد. يرجى الدخول بحساب المالك الرسمي أو مشرف مفعّل في المنظومة.');
+          return;
+        }
         setIsAdminLoggedIn(true);
-        setActiveAdminEmail(cleanEmail);
+        setActiveAdminEmail(verifiedEmail);
         localStorage.setItem('livo_admin_session', 'true');
         await livoStore.syncFirebaseUserAsync(res.user);
         showToast('تم تسجيل الدخول بنجاح عبر Firebase Authentication 🛡️');
@@ -501,7 +522,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
     }
   };
 
-  // Google Login for Admin (Supports Popup + Redirect fallback for Mobile/Brave)
+  // Google Login for Admin (Safe Popup flow — avoids storage-partitioned redirect errors)
   const adminRedirectTimerRef = useRef<number | null>(null);
   useEffect(() => {
     return () => {
@@ -511,13 +532,13 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
     };
   }, []);
 
-  const handleGoogleLogin = async (preferRedirect: boolean = false) => {
+  const handleGoogleLogin = async () => {
     setAuthError('');
     setAuthInfo('');
     setIsLoggingIn(true);
     let redirectInitiated = false;
     try {
-      const res = await firebaseService.loginAdminWithGoogle(preferRedirect);
+      const res = await firebaseService.loginAdminWithGoogle(false);
       if (res.redirectStarted) {
         redirectInitiated = true;
         setAuthInfo('جاري التوجيه إلى صفحة Google الآمنة لتأكيد دخول الإدارة...');
@@ -530,8 +551,9 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
         return;
       }
       if (res.success && res.user) {
-        const email = res.user.email?.trim().toLowerCase() || '';
-        if (!livoStore.isAuthorizedAdminEmail(email)) {
+        const email = livoStore.normalizeEmail(res.user.email);
+        const authorized = await livoStore.verifyAdminAuthorizationAsync(email, res.user.uid);
+        if (!authorized) {
           await firebaseService.logout();
           setIsAdminLoggedIn(false);
           localStorage.removeItem('livo_admin_session');
@@ -1063,10 +1085,17 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
             <label className="block text-xs font-bold text-gray-700 mb-1">البريد الإلكتروني للإدارة:</label>
             <input
               type="email"
+              dir="ltr"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               value={adminUsername}
-              onChange={(e) => setAdminUsername(e.target.value)}
+              onChange={(e) => {
+                setAdminUsername(e.target.value);
+                if (authError) setAuthError('');
+              }}
               placeholder="livo.admin@gmail.com أو eslamfifty11@gmail.com"
-              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs text-gray-900 placeholder-gray-400 outline-none focus:border-[#FFE600] focus:ring-2 focus:ring-yellow-200 font-digits"
+              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs text-gray-900 placeholder-gray-400 outline-none focus:border-[#FFE600] focus:ring-2 focus:ring-yellow-200 font-digits text-left"
               required
             />
           </div>
@@ -1085,10 +1114,17 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
             </div>
             <input
               type="password"
+              dir="ltr"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               value={adminPassword}
-              onChange={(e) => setAdminPassword(e.target.value)}
+              onChange={(e) => {
+                setAdminPassword(e.target.value);
+                if (authError) setAuthError('');
+              }}
               placeholder="اكتب كلمة المرور"
-              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs text-gray-900 placeholder-gray-400 outline-none focus:border-[#FFE600] focus:ring-2 focus:ring-yellow-200 font-digits"
+              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs text-gray-900 placeholder-gray-400 outline-none focus:border-[#FFE600] focus:ring-2 focus:ring-yellow-200 font-digits text-left"
               required
             />
           </div>
@@ -1119,7 +1155,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
           <div className="pt-3 border-t border-gray-100 space-y-2">
             <button
               type="button"
-              onClick={() => handleGoogleLogin(false)}
+              onClick={handleGoogleLogin}
               disabled={isLoggingIn}
               className="w-full py-2.5 bg-gray-900 hover:bg-black text-white font-bold text-xs rounded-xl shadow transition-all flex items-center justify-center gap-2"
             >
@@ -1131,14 +1167,9 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
               </svg>
               <span>تسجيل الدخول السريع بحساب Google للمالك</span>
             </button>
-            <button
-              type="button"
-              onClick={() => handleGoogleLogin(true)}
-              disabled={isLoggingIn}
-              className="w-full py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 border border-gray-200 font-bold text-[11px] rounded-xl transition-all flex items-center justify-center gap-1.5"
-            >
-              <span>تسجيل الدخول بصفحة Google كاملة (للموبايل ومتصفح Brave)</span>
-            </button>
+            <p className="text-[10px] text-center text-gray-500 font-medium">
+              يفتح نافذة اختيار حساب Google الموثق دون مغادرة التطبيق (تأكد من السماح بالنوافذ المنبثقة)
+            </p>
           </div>
         </form>
       </div>
