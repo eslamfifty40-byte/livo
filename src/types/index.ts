@@ -83,6 +83,14 @@ export interface UserProfile {
   };
   canStealthRooms?: boolean; // Admin-granted permission for stealth room entry
   agencyBadgeLabel?: string; // e.g. 'وكيل شحن' or 'وكيل مذيعين'
+  coverUrl?: string; // Profile cover banner image URL or preset
+  accountPrivacy?: 'public' | 'private' | 'friends_only';
+  photosVisibility?: 'public' | 'friends_only' | 'private';
+  videosVisibility?: 'public' | 'friends_only' | 'private';
+  postsVisibility?: 'public' | 'friends_only' | 'private';
+  lastGiftSenderUid?: string;
+  lastVoucherCodeId?: string;
+  lastAgentUid?: string;
   createdAt: string;
 }
 
@@ -622,7 +630,10 @@ export interface RoomRtcSignal {
   fromUid: string;
   fromAuthUid?: string;
   toUid: string;
-  type: 'offer' | 'answer' | 'candidate' | 'presence';
+  type: 'offer' | 'answer' | 'candidate' | 'presence' | 'ring' | 'accept' | 'decline' | 'hangup';
+  callMode?: 'audio' | 'video';
+  callerName?: string;
+  callerAvatar?: string;
   sdp?: string;
   sdpType?: 'offer' | 'answer';
   candidate?: {

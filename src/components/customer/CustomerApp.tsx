@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Maximize2, Mic, MicOff, Radio, ShieldAlert, Video, X, Coins, Sparkles } from 'lucide-react';
+import { Maximize2, Mic, MicOff, Radio, ShieldAlert, Video, X, Coins, Sparkles, PhoneCall, PhoneOff } from 'lucide-react';
 import { InAppNotification, SplashBannerConfig, UserProfile, VoiceRoom } from '../../types';
 import { HagoBottomNav, HagoTab } from './HagoBottomNav';
 import { PartyView } from './PartyView';
@@ -23,6 +23,7 @@ import { RoyalVoiceRoomModal } from './RoyalVoiceRoomModal';
 import { LiveStreamView } from './LiveStreamView';
 import { livoStore } from '../../services/livoStore';
 import { firebaseService } from '../../services/firebase';
+import { directCallAudio, DirectCallSnapshot } from '../../services/directCallAudio';
 
 interface CustomerAppProps {
   currentUser: UserProfile | null;
@@ -66,6 +67,8 @@ export const CustomerApp: React.FC<CustomerAppProps> = ({ currentUser }) => {
   const [activeSplash, setActiveSplash] = useState<SplashBannerConfig | null>(null);
   const [shownSplashIds, setShownSplashIds] = useState<Set<string>>(() => new Set());
   const [notifications, setNotifications] = useState<InAppNotification[]>(() => livoStore.getInAppNotifications());
+  const [directCallSnap, setDirectCallSnap] = useState<DirectCallSnapshot>(() => directCallAudio.getSnapshot());
+  const [callSeconds, setCallSeconds] = useState(0);
 
   useEffect(() => {
     const checkSplash = () => {
@@ -120,6 +123,32 @@ export const CustomerApp: React.FC<CustomerAppProps> = ({ currentUser }) => {
       unsubAuth();
     };
   }, []);
+
+  // Bind Global 1-on-1 Direct Voice Call WebRTC Signaling Manager
+  useEffect(() => {
+    const unsubCall = directCallAudio.subscribe((snap) => setDirectCallSnap(snap));
+    if (currentUser) {
+      directCallAudio.bindUser(currentUser.uid, currentUser.displayName, currentUser.avatar);
+    } else {
+      directCallAudio.unbindUser();
+    }
+    return () => {
+      unsubCall();
+    };
+  }, [currentUser?.uid, currentUser?.displayName, currentUser?.avatar]);
+
+  useEffect(() => {
+    if (directCallSnap.status !== 'connected' || !directCallSnap.connectedAt) {
+      setCallSeconds(0);
+      return;
+    }
+    const updateElapsed = () => {
+      setCallSeconds(Math.max(0, Math.floor((Date.now() - (directCallSnap.connectedAt || Date.now())) / 1000)));
+    };
+    updateElapsed();
+    const timer = setInterval(updateElapsed, 1000);
+    return () => clearInterval(timer);
+  }, [directCallSnap.status, directCallSnap.connectedAt]);
 
   // Anti-Screenshot shield is OFF only when viewing user's own personal profile ("me") with no active room/live/modals
   const isOwnProfileOnly =
@@ -825,6 +854,82 @@ export const CustomerApp: React.FC<CustomerAppProps> = ({ currentUser }) => {
         onClose={() => setIsSupportOpen(false)}
         currentUser={currentUser}
       />
+
+      {/* Global Real-Time 1-on-1 WebRTC Voice Call Overlay */}
+      {directCallSnap.status !== 'idle' && (
+        <div className="absolute inset-0 z-[92] bg-[#140826]/95 backdrop-blur-xl text-white flex flex-col items-center justify-center p-6 text-center space-y-6 animate-in fade-in">
+          <div className="relative">
+            <div className="absolute -inset-4 rounded-full bg-[#FFE600]/25 blur-xl animate-pulse" />
+            <img
+              src={directCallSnap.peerAvatar || '/assets/livo/customer_icon.jpg'}
+              alt={directCallSnap.peerName}
+              className="w-28 h-28 rounded-full object-cover border-4 border-[#FFE600] shadow-2xl relative z-10"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <h3 className="text-xl font-black text-white">{directCallSnap.peerName || `UID ${directCallSnap.peerUid}`}</h3>
+            <p className="text-xs font-bold text-amber-300 font-digits">
+              {directCallSnap.status === 'ringing_in'
+                ? '📞 مكالمة صوتية واردة...'
+                : directCallSnap.status === 'ringing_out'
+                ? 'جاري الاتصال والرن...'
+                : directCallSnap.status === 'connecting'
+                ? 'جاري تأمين الصوت المباشر...'
+                : directCallSnap.status === 'connected'
+                ? `متصل صوتياً الآن • ${String(Math.floor(callSeconds / 60)).padStart(2, '0')}:${String(callSeconds % 60).padStart(2, '0')}`
+                : 'تم إنهاء المكالمة'}
+            </p>
+            {directCallSnap.error && (
+              <p className="text-xs text-red-400 font-bold mt-2">{directCallSnap.error}</p>
+            )}
+          </div>
+
+          {directCallSnap.status === 'ringing_in' ? (
+            <div className="flex items-center gap-6 pt-4">
+              <button
+                type="button"
+                onClick={() => void directCallAudio.declineIncomingCall()}
+                className="w-16 h-16 rounded-full bg-red-600 hover:bg-red-700 text-white flex items-center justify-center shadow-xl"
+                title="رفض المكالمة"
+              >
+                <PhoneOff className="w-7 h-7" />
+              </button>
+              <button
+                type="button"
+                onClick={() => void directCallAudio.acceptIncomingCall()}
+                className="w-16 h-16 rounded-full bg-emerald-500 hover:bg-emerald-400 text-black flex items-center justify-center shadow-xl animate-bounce"
+                title="قبول المكالمة"
+              >
+                <PhoneCall className="w-7 h-7" />
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-5 pt-4">
+              <button
+                type="button"
+                onClick={() => directCallAudio.toggleMute()}
+                className={`w-14 h-14 rounded-full flex items-center justify-center border shadow-lg ${
+                  directCallSnap.isMuted
+                    ? 'bg-red-500/20 border-red-400 text-red-300'
+                    : 'bg-white/15 border-white/25 text-white'
+                }`}
+                title={directCallSnap.isMuted ? 'فتح المايكروفون' : 'كتم المايكروفون'}
+              >
+                {directCallSnap.isMuted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
+              </button>
+              <button
+                type="button"
+                onClick={() => void directCallAudio.hangup()}
+                className="w-16 h-16 rounded-full bg-red-600 hover:bg-red-700 text-white flex items-center justify-center shadow-xl"
+                title="إنهاء المكالمة"
+              >
+                <PhoneOff className="w-7 h-7" />
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };

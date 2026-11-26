@@ -47,6 +47,8 @@ import {
 import { UserProfile, GiftItem, VoiceRoom, RoomSeat, RoomGameEvent } from '../../types';
 import { livoStore } from '../../services/livoStore';
 import { roomRtcAudio } from '../../services/roomRtcAudio';
+import { GIFT_CATEGORIES, normalizeGiftCategory } from '../../data/initialData';
+import { shareContentToSocial } from '../../utils/socialShare';
 import { GiftAnimationOverlay } from './GiftAnimationOverlay';
 import { AvatarWithFrame } from '../common/AvatarWithFrame';
 import { UserNameWithBadges } from '../common/UserNameWithBadges';
@@ -185,6 +187,11 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [showSettingsDrawer, setShowSettingsDrawer] = useState(false);
   const [newModUidInput, setNewModUidInput] = useState('');
+  const [editRoomTitle, setEditRoomTitle] = useState(room.title);
+  const [editRoomCategory, setEditRoomCategory] = useState(room.category || 'دردشة صوتية');
+  const [editRoomAnnouncement, setEditRoomAnnouncement] = useState(room.announcement || '');
+  const [brokenGiftImgs, setBrokenGiftImgs] = useState<Record<string, boolean>>({});
+  const sendingGiftLockRef = useRef<boolean>(false);
 
   // In-Room Music Player state (Local Audio File OR Built-in WebAudio Ambient Synthesizer)
   const [showMusicPanel, setShowMusicPanel] = useState(false);
@@ -563,6 +570,7 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
   };
 
   const executeGiftSend = (gift: GiftItem, customCardMsg?: string) => {
+    if (sendingGiftLockRef.current) return;
     const actor = ensureAuthenticated();
     if (!actor) return;
 
@@ -577,6 +585,11 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
       onOpenRecharge();
       return;
     }
+
+    sendingGiftLockRef.current = true;
+    setTimeout(() => {
+      sendingGiftLockRef.current = false;
+    }, 650);
 
     const res = livoStore.sendGiftInRoom({
       roomId: liveRoom.id,
@@ -945,9 +958,13 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
               </button>
 
               <button
-                onClick={() => {
-                  navigator.clipboard?.writeText(`https://livo.live/room/${liveRoom.id}`);
-                  showToast('تم نسخ رابط الغرفة 📋');
+                onClick={async () => {
+                  const res = await shareContentToSocial('native', {
+                    title: `غرفة ${liveRoom.title} على LIVO`,
+                    text: `انضم الآن لغرفة ${liveRoom.title} في LIVO 🎙️✨`,
+                    url: `${typeof window !== 'undefined' ? window.location.origin : 'https://livo.live'}/?room=${liveRoom.id}`
+                  });
+                  showToast(res.message);
                 }}
                 className="w-7 h-7 rounded-full bg-black/45 border border-white/15 flex items-center justify-center text-purple-200 hover:text-white"
                 title="مشاركة الغرفة"
@@ -1470,6 +1487,66 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
                   className="w-8 h-8 rounded-full bg-purple-900/50 text-purple-200 flex items-center justify-center"
                 >
                   <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Edit Room Title, Category & Announcement */}
+              <div className="space-y-2 bg-black/35 border border-purple-800/50 rounded-2xl p-3">
+                <span className="text-xs font-black text-amber-300 block">بيانات الغرفة وحفظها</span>
+                <div>
+                  <label className="text-[10px] text-purple-200 block mb-1">اسم الغرفة:</label>
+                  <input
+                    type="text"
+                    value={editRoomTitle}
+                    onChange={(e) => setEditRoomTitle(e.target.value)}
+                    placeholder={liveRoom.title}
+                    maxLength={120}
+                    className="w-full bg-black/55 border border-purple-700/60 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-[#FFE600]"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-purple-200 block mb-1">تصنيف الغرفة:</label>
+                  <select
+                    value={editRoomCategory}
+                    onChange={(e) => setEditRoomCategory(e.target.value)}
+                    className="w-full bg-black/55 border border-purple-700/60 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                  >
+                    <option value="دردشة صوتية">دردشة صوتية</option>
+                    <option value="تعارف وأصدقاء">تعارف وأصدقاء</option>
+                    <option value="موسيقى وطرب">موسيقى وطرب</option>
+                    <option value="ألعاب ومسابقات">ألعاب ومسابقات</option>
+                    <option value="فعاليات">فعاليات</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] text-purple-200 block mb-1">إعلان الغرفة:</label>
+                  <input
+                    type="text"
+                    value={editRoomAnnouncement}
+                    onChange={(e) => setEditRoomAnnouncement(e.target.value)}
+                    placeholder={liveRoom.announcement || 'مرحباً بكم في الغرفة'}
+                    maxLength={240}
+                    className="w-full bg-black/55 border border-purple-700/60 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!currentUser) return;
+                    const res = livoStore.updateRoomDetails(
+                      liveRoom.id,
+                      {
+                        title: editRoomTitle,
+                        category: editRoomCategory,
+                        announcement: editRoomAnnouncement
+                      },
+                      currentUser.uid
+                    );
+                    showToast(res.message);
+                  }}
+                  className="w-full py-2 rounded-xl bg-[#FFE600] hover:bg-yellow-400 text-black font-black text-xs shadow"
+                >
+                  حفظ اسم وبيانات الغرفة ✓
                 </button>
               </div>
 
@@ -2448,8 +2525,8 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
                     className="w-full bg-black/50 border border-purple-800/60 rounded-xl pr-8 pl-3 py-1.5 text-[11px] text-white outline-none"
                   />
                 </div>
-                <div className="flex items-center gap-1 overflow-x-auto pb-0.5">
-                  {['الكل', 'كروت إهداء', 'ملكي', 'حيوانات', 'سيارات وطائرات', 'حب', 'ألماس', 'حفلات'].map((cat) => (
+                <div className="flex items-center gap-1 overflow-x-auto pb-0.5 no-scrollbar">
+                  {['الكل', ...GIFT_CATEGORIES].map((cat) => (
                     <button
                       key={cat}
                       type="button"
@@ -2506,9 +2583,7 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
                 {gifts
                   .filter((g) => {
                     if (giftCategory !== 'الكل') {
-                      if (giftCategory === 'كروت إهداء') {
-                        if (!g.isCard && g.category !== 'كروت إهداء') return false;
-                      } else if (g.category !== giftCategory) {
+                      if (normalizeGiftCategory(g.category, g.isCard) !== giftCategory) {
                         return false;
                       }
                     }
@@ -2544,8 +2619,13 @@ export const RoyalVoiceRoomModal: React.FC<RoyalVoiceRoomModalProps> = ({
                             NEW
                           </span>
                         ) : null}
-                        {g.imageUrl ? (
-                          <img src={g.imageUrl} alt={g.name} className="w-9 h-9 object-contain group-hover:scale-125 transition-transform" />
+                        {g.imageUrl && !brokenGiftImgs[g.id] ? (
+                          <img
+                            src={g.imageUrl}
+                            alt={g.name}
+                            onError={() => setBrokenGiftImgs((prev) => ({ ...prev, [g.id]: true }))}
+                            className="w-9 h-9 object-contain group-hover:scale-125 transition-transform"
+                          />
                         ) : (
                           <span className="text-3xl group-hover:scale-125 transition-transform">{g.icon}</span>
                         )}

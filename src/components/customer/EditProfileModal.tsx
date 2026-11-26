@@ -23,11 +23,19 @@ const PRESET_AVATARS = [
   'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=200&h=200&fit=crop'
 ];
 
+const PRESET_COVERS = [
+  'https://images.unsplash.com/photo-1519681393784-d120267933ba?w=900&fit=crop',
+  'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=900&fit=crop',
+  'https://images.unsplash.com/photo-1534447677768-be436bb09401?w=900&fit=crop',
+  'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=900&fit=crop'
+];
+
 export const EditProfileModal: React.FC<EditProfileModalProps> = ({ user, isOpen, onClose }) => {
   const [displayName, setDisplayName] = useState(user.displayName);
   const [username, setUsername] = useState(user.username);
   const [bio, setBio] = useState(user.bio || '');
   const [avatarUrl, setAvatarUrl] = useState(user.avatar);
+  const [coverUrl, setCoverUrl] = useState(user.coverUrl || '');
   const [userPhone, setUserPhone] = useState(user.phoneNumber || '');
   const [isPhoneChanged, setIsPhoneChanged] = useState(false);
   const [showPhoneOtpInput, setShowPhoneOtpInput] = useState(false);
@@ -63,7 +71,8 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ user, isOpen
       });
       setAvatarUrl(compressed);
       try {
-        const downloadUrl = await firebaseService.uploadImage(`avatars/${user.uid}_${Date.now()}`, compressed, {
+        const ownerPathId = user.authUid || user.uid;
+        const downloadUrl = await firebaseService.uploadImage(`avatars/${ownerPathId}/avatar_${Date.now()}`, compressed, {
           maxDim: 512,
           quality: 0.82,
           preserveAlpha: isPng,
@@ -86,7 +95,8 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ user, isOpen
     try {
       setAvatarUrl(transparentPng);
       try {
-        const uploaded = await firebaseService.uploadImage(`avatars/${user.uid}_${Date.now()}.png`, transparentPng, {
+        const ownerPathId = user.authUid || user.uid;
+        const uploaded = await firebaseService.uploadImage(`avatars/${ownerPathId}/cutout_${Date.now()}.png`, transparentPng, {
           preserveAlpha: true,
           maxDim: 512,
           maxBytes: 180_000
@@ -111,6 +121,38 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ user, isOpen
     } catch {}
   };
 
+  const handleCoverChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !file.type.startsWith('image/')) {
+      if (file) setErrorMsg('يرجى اختيار ملف صورة صالح للغلاف');
+      return;
+    }
+    setIsUploading(true);
+    setErrorMsg('');
+    try {
+      const compressed = await compressImageForFirestore(file, {
+        maxDim: 1080,
+        quality: 0.82,
+        maxBytes: 240_000
+      });
+      setCoverUrl(compressed);
+      try {
+        const ownerPathId = user.authUid || user.uid;
+        const downloadUrl = await firebaseService.uploadImage(`covers/${ownerPathId}/cover_${Date.now()}`, compressed, {
+          maxDim: 1080,
+          quality: 0.82,
+          maxBytes: 240_000
+        });
+        setCoverUrl(downloadUrl);
+      } catch {}
+    } catch {
+      setErrorMsg('تعذر معالجة صورة الغلاف المختارة');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
@@ -130,7 +172,8 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ user, isOpen
       displayName: displayName.trim(),
       username: cleanUsername,
       bio: bio.trim(),
-      avatar: avatarUrl
+      avatar: avatarUrl,
+      coverUrl: coverUrl || undefined
     });
 
     setSavedSuccess(true);
@@ -162,7 +205,48 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ user, isOpen
 
         {/* Form Body */}
         <form onSubmit={handleSave} className="p-5 overflow-y-auto space-y-4">
-          
+          {/* Cover Photo Upload & Presets */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-gray-700">صورة غلاف الملف الشخصي:</label>
+              {coverUrl && (
+                <button
+                  type="button"
+                  onClick={() => setCoverUrl('')}
+                  className="text-[11px] font-bold text-red-600 hover:underline"
+                >
+                  إزالة الغلاف
+                </button>
+              )}
+            </div>
+            <div
+              className="relative h-24 rounded-2xl overflow-hidden bg-gradient-to-r from-[#280e4d] via-[#4c1d95] to-[#1f0b3a] bg-cover bg-center border border-gray-200 shadow-inner"
+              style={coverUrl ? { backgroundImage: `url(${coverUrl})` } : undefined}
+            >
+              <div className="absolute inset-0 bg-black/25 flex items-center justify-center">
+                <label className="px-3.5 py-1.5 rounded-full bg-black/65 hover:bg-black/85 text-white text-[11px] font-black flex items-center gap-1.5 cursor-pointer border border-white/25 shadow">
+                  <Camera className="w-3.5 h-3.5 text-[#FFE600]" />
+                  <span>{coverUrl ? 'تغيير صورة الغلاف' : 'رفع صورة غلاف'}</span>
+                  <input type="file" accept="image/*" onChange={handleCoverChange} className="hidden" />
+                </label>
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5 overflow-x-auto py-0.5">
+              {PRESET_COVERS.map((preset, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => setCoverUrl(preset)}
+                  className={`w-14 h-8 rounded-lg overflow-hidden shrink-0 border-2 ${
+                    coverUrl === preset ? 'border-[#FFE600] ring-2 ring-black' : 'border-gray-200'
+                  }`}
+                >
+                  <img src={preset} alt="" className="w-full h-full object-cover" />
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Avatar Upload Preview */}
           <div className="flex flex-col items-center gap-2.5">
             <div className="relative group">

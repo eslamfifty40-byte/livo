@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { UserProfile, GiftItem, StreamSupporter, VoiceRoom } from '../../types';
 import { livoStore } from '../../services/livoStore';
+import { GIFT_CATEGORIES, normalizeGiftCategory } from '../../data/initialData';
 import { GiftAnimationOverlay } from './GiftAnimationOverlay';
 import { UserNameWithBadges } from '../common/UserNameWithBadges';
 
@@ -47,6 +48,8 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
   onMinimize
 }) => {
   const [gifts, setGifts] = useState<GiftItem[]>(livoStore.getActiveGifts());
+  const [giftCategory, setGiftCategory] = useState<string>('الكل');
+  const [brokenGiftImgs, setBrokenGiftImgs] = useState<Record<string, boolean>>({});
   const [showGiftModal, setShowGiftModal] = useState(false);
   const [activeGiftAnimation, setActiveGiftAnimation] = useState<GiftItem | null>(null);
   const [lastSenderName, setLastSenderName] = useState('');
@@ -577,14 +580,46 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
               </div>
             </div>
 
+            <div className="flex items-center gap-1 overflow-x-auto pb-1 no-scrollbar">
+              {['الكل', ...GIFT_CATEGORIES].map((cat) => (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => setGiftCategory(cat)}
+                  className={`px-2.5 py-1 rounded-full text-[10px] font-black shrink-0 ${
+                    giftCategory === cat
+                      ? 'bg-[#FFE600] text-black'
+                      : 'bg-[#120824] text-purple-200 border border-purple-800/50'
+                  }`}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+
             <div className="grid grid-cols-4 gap-2 max-h-60 overflow-y-auto">
-              {gifts.map(gift => (
+              {gifts
+                .filter(
+                  (g) =>
+                    giftCategory === 'الكل' ||
+                    normalizeGiftCategory(g.category, g.isCard) === giftCategory
+                )
+                .map(gift => (
                 <button
                   key={gift.id}
                   onClick={() => handleSendGift(gift, 1)}
                   className="bg-[#120824] hover:bg-purple-900/40 border border-purple-800/50 hover:border-amber-400 p-2 rounded-xl flex flex-col items-center justify-center transition-all group"
                 >
-                  <span className="text-2xl mb-1 group-hover:scale-125 transition-transform">{gift.icon}</span>
+                  {gift.imageUrl && !brokenGiftImgs[gift.id] ? (
+                    <img
+                      src={gift.imageUrl}
+                      alt={gift.name}
+                      onError={() => setBrokenGiftImgs((prev) => ({ ...prev, [gift.id]: true }))}
+                      className="w-8 h-8 object-contain mb-1 group-hover:scale-125 transition-transform"
+                    />
+                  ) : (
+                    <span className="text-2xl mb-1 group-hover:scale-125 transition-transform">{gift.icon}</span>
+                  )}
                   <span className="text-[10px] font-bold text-white truncate w-full text-center">{gift.name}</span>
                   <span className="text-[9px] font-digits font-extrabold text-amber-400 mt-0.5">
                     {gift.coins.toLocaleString()}

@@ -257,41 +257,83 @@
   -webkit-user-drag: none;
 }
 
-/* Walking Lion Crossing Animation */
+/* Realistic Running Lion Crossing Animation */
 @keyframes livoLionWalk {
   0% {
     opacity: 0;
-    transform: translateX(-48vw) translateY(8px) scale(0.85) scaleX(-1);
+    transform: translateX(-55vw) translateY(10px) scale(0.88);
   }
-  15% {
+  12% {
     opacity: 1;
-    transform: translateX(-26vw) translateY(-6px) scale(1.02) scaleX(-1);
+    transform: translateX(-32vw) translateY(-10px) scale(1.02);
   }
-  30% {
+  26% {
     opacity: 1;
-    transform: translateX(-10vw) translateY(4px) scale(1.1) scaleX(-1);
+    transform: translateX(-14vw) translateY(4px) scale(1.1);
   }
-  48% {
+  44% {
     opacity: 1;
-    transform: translateX(0vw) translateY(-10px) scale(1.25) scaleX(-1);
+    transform: translateX(-2vw) translateY(-14px) scale(1.18);
   }
-  62% {
+  58% {
     opacity: 1;
-    transform: translateX(4vw) translateY(2px) scale(1.18) scaleX(-1);
+    transform: translateX(4vw) translateY(-4px) scale(1.22);
   }
-  80% {
+  76% {
     opacity: 1;
-    transform: translateX(24vw) translateY(-6px) scale(1.04) scaleX(-1);
+    transform: translateX(26vw) translateY(-10px) scale(1.08);
   }
   100% {
     opacity: 0;
-    transform: translateX(52vw) translateY(8px) scale(0.85) scaleX(-1);
+    transform: translateX(58vw) translateY(8px) scale(0.9);
   }
 }
 
+@keyframes livoLionLegFront {
+  0%, 100% { transform: rotate(-28deg); }
+  50% { transform: rotate(32deg); }
+}
+
+@keyframes livoLionLegBack {
+  0%, 100% { transform: rotate(30deg); }
+  50% { transform: rotate(-26deg); }
+}
+
+@keyframes livoLionTail {
+  0%, 100% { transform: rotate(-14deg); }
+  50% { transform: rotate(18deg); }
+}
+
+@keyframes livoLionBodyBob {
+  0%, 100% { transform: translateY(0px) rotate(-1.5deg); }
+  50% { transform: translateY(-7px) rotate(1.5deg); }
+}
+
 .livo-lion-walk {
-  animation: livoLionWalk 3.8s cubic-bezier(0.25, 0.85, 0.35, 1) forwards;
+  animation: livoLionWalk 4.3s cubic-bezier(0.22, 0.72, 0.32, 1) forwards;
   will-change: transform, opacity;
+}
+
+.livo-lion-body {
+  animation: livoLionBodyBob 0.42s ease-in-out infinite;
+}
+
+.livo-lion-leg-front {
+  transform-box: fill-box;
+  transform-origin: top center;
+  animation: livoLionLegFront 0.38s ease-in-out infinite;
+}
+
+.livo-lion-leg-back {
+  transform-box: fill-box;
+  transform-origin: top center;
+  animation: livoLionLegBack 0.38s ease-in-out infinite;
+}
+
+.livo-lion-tail {
+  transform-box: fill-box;
+  transform-origin: left center;
+  animation: livoLionTail 0.45s ease-in-out infinite;
 }
 
 /* Gift Card Floating Glow Animation */

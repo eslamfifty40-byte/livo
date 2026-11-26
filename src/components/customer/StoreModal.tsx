@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { X, ShoppingBag, Sparkles, Check, Coins, AlertCircle, RefreshCw } from 'lucide-react';
 import { UserProfile, StoreItem, GiftItem } from '../../types';
 import { livoStore } from '../../services/livoStore';
+import { GIFT_CATEGORIES, normalizeGiftCategory } from '../../data/initialData';
 
 interface StoreModalProps {
   user: UserProfile;
@@ -19,6 +20,8 @@ export const StoreModal: React.FC<StoreModalProps> = ({
   const [storeItems, setStoreItems] = useState<StoreItem[]>(() => livoStore.getActiveStoreItems());
   const [gifts, setGifts] = useState<GiftItem[]>(() => livoStore.getActiveGifts());
   const [activeTab, setActiveTab] = useState<'all' | 'frames' | 'entrances' | 'gifts'>('all');
+  const [giftCategoryFilter, setGiftCategoryFilter] = useState<string>('الكل');
+  const [brokenImageIds, setBrokenImageIds] = useState<Record<string, boolean>>({});
   const [feedback, setFeedback] = useState<{ success: boolean; message: string } | null>(null);
 
   // Real-time synchronization when Admin updates store items or gifts
@@ -129,23 +132,52 @@ export const StoreModal: React.FC<StoreModalProps> = ({
         {/* Content Area with Robust Fallback (No White Screen) */}
         <div className="p-4 overflow-y-auto space-y-3.5 flex-1">
           {activeTab === 'gifts' ? (
-            /* Gifts Catalog View */
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-              {gifts.map((g) => (
-                <div
-                  key={g.id}
-                  className="bg-[#120824]/90 p-3 rounded-2xl border border-purple-800/40 flex flex-col items-center text-center gap-1.5"
-                >
-                  {g.imageUrl ? (
-                    <img src={g.imageUrl} alt={g.name} className="w-12 h-12 object-contain filter drop-shadow" />
-                  ) : (
-                    <span className="text-4xl filter drop-shadow">{g.icon}</span>
-                  )}
-                  <span className="font-bold text-xs text-white truncate max-w-full">{g.name}</span>
-                  <span className="font-digits font-black text-amber-300 text-xs">{g.coins.toLocaleString()} 🪙</span>
-                  <span className="text-[10px] text-purple-400 font-sans">تأثير {g.animationType}</span>
-                </div>
-              ))}
+            <div className="space-y-3">
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+                {['الكل', ...GIFT_CATEGORIES].map((cat) => (
+                  <button
+                    key={cat}
+                    onClick={() => setGiftCategoryFilter(cat)}
+                    className={`px-3 py-1.5 rounded-full text-[11px] font-bold whitespace-nowrap transition-all ${
+                      giftCategoryFilter === cat
+                        ? 'bg-[#FFE600] text-black shadow-xs'
+                        : 'bg-[#120824] text-purple-300 border border-purple-800/50'
+                    }`}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                {gifts
+                  .filter(
+                    (g) =>
+                      giftCategoryFilter === 'الكل' ||
+                      normalizeGiftCategory(g.category, g.isCard) === giftCategoryFilter
+                  )
+                  .map((g) => (
+                    <div
+                      key={g.id}
+                      className="bg-[#120824]/90 p-3 rounded-2xl border border-purple-800/40 flex flex-col items-center text-center gap-1.5"
+                    >
+                      {g.imageUrl && !brokenImageIds[g.id] ? (
+                        <img
+                          src={g.imageUrl}
+                          alt={g.name}
+                          onError={() => setBrokenImageIds((prev) => ({ ...prev, [g.id]: true }))}
+                          className="w-12 h-12 object-contain filter drop-shadow"
+                        />
+                      ) : (
+                        <span className="text-4xl filter drop-shadow">{g.icon}</span>
+                      )}
+                      <span className="font-bold text-xs text-white truncate max-w-full">{g.name}</span>
+                      <span className="font-digits font-black text-amber-300 text-xs">{g.coins.toLocaleString()} 🪙</span>
+                      <span className="text-[10px] text-purple-400 font-sans">
+                        {normalizeGiftCategory(g.category, g.isCard)}
+                      </span>
+                    </div>
+                  ))}
+              </div>
             </div>
           ) : filteredStoreItems.length === 0 ? (
             <div className="text-center py-12 text-purple-400 space-y-2">
@@ -168,10 +200,11 @@ export const StoreModal: React.FC<StoreModalProps> = ({
                     }`}
                   >
                     <div className="flex items-start gap-3 mb-3">
-                      {item.imageUrl ? (
+                      {item.imageUrl && !brokenImageIds[item.id] ? (
                         <img
                           src={item.imageUrl}
                           alt={item.name}
+                          onError={() => setBrokenImageIds((prev) => ({ ...prev, [item.id]: true }))}
                           className="w-11 h-11 object-contain shrink-0 filter drop-shadow-md"
                         />
                       ) : (

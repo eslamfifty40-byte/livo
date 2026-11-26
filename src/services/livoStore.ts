@@ -47,7 +47,8 @@ import {
   INITIAL_STORE_ITEMS,
   INITIAL_PAYMENT_METHODS,
   INITIAL_RECHARGE_CODES,
-  INITIAL_COIN_PACKAGES
+  INITIAL_COIN_PACKAGES,
+  normalizeGiftCategory
 } from '../data/initialData';
 import { firebaseService } from './firebase';
 import { User as FirebaseUser } from 'firebase/auth';
@@ -120,6 +121,8 @@ class LivoStore {
   private authProtectedUnsubs: Unsubscribe[] = [];
   private recentRoomTouchMs: Map<string, number> = new Map();
   private recentUserTouchMs: Map<string, number> = new Map();
+  private recentGiftTxMs: Map<string, number> = new Map();
+  private recentStoreTxMs: Map<string, number> = new Map();
   private syncInFlightByAuthUid: Map<string, Promise<UserProfile>> = new Map();
   private seededCollections: Set<string> = new Set();
   private messagesUnsub: (() => void) | null = null;
@@ -314,8 +317,11 @@ class LivoStore {
     if (Date.now() - touchedAt < 12000) {
       return false;
     }
-    if (!r.ownerAuthUid) {
-      return true;
+    if (!r.ownerAuthUid && this.usersLoadedOnce) {
+      const ownerExists = this.users.some(
+        (u) => u.uid === r.ownerUid && !this.isFakeUserRecord(u)
+      );
+      if (!ownerExists) return true;
     }
     if (this.usersLoadedOnce) {
       const ownerExists = this.users.some(
@@ -854,11 +860,32 @@ class LivoStore {
         lastUsedAt: new Date().toISOString()
       };
       localStorage.setItem(SAVED_ACCOUNTS_KEY, JSON.stringify([summary, ...existing].slice(0, 10)));
+      // Keep an isolated per-account profile snapshot so switching never mixes settings or loses local edits
+      localStorage.setItem(`livo_account_profile_${user.uid}`, JSON.stringify(user));
     } catch {}
   }
 
+  public getIsolatedAccountSnapshot(uid: string): UserProfile | null {
+    if (typeof window === 'undefined' || !uid) return null;
+    try {
+      const raw = localStorage.getItem(`livo_account_profile_${uid}`);
+      if (!raw) return null;
+      return JSON.parse(raw) as UserProfile;
+    } catch {
+      return null;
+    }
+  }
+
   public switchSavedAccount(uid: string): { success: boolean; message: string; user?: UserProfile } {
-    const matched = this.getUserByUid(uid);
+    let matched = this.getUserByUid(uid);
+    if (!matched) {
+      const snapshot = this.getIsolatedAccountSnapshot(uid);
+      if (snapshot && !this.isFakeUserRecord(snapshot)) {
+        this.users = [...this.users, this.enforceOwnerAccountDefaults(snapshot)];
+        this.persistUsersCache();
+        matched = this.getUserByUid(uid);
+      }
+    }
     if (!matched) {
       return { success: false, message: 'بيانات هذا الحساب غير متوفرة حالياً، يرجى تسجيل الدخول به مجدداً.' };
     }
@@ -875,6 +902,7 @@ class LivoStore {
     try {
       const filtered = this.getSavedAccounts().filter(a => a.uid !== uid);
       localStorage.setItem(SAVED_ACCOUNTS_KEY, JSON.stringify(filtered));
+      localStorage.removeItem(`livo_account_profile_${uid}`);
       this.notify();
     } catch {}
   }
@@ -1130,10 +1158,78 @@ class LivoStore {
       followingUids: Array.from(currentFollowing),
       followingCount: currentFollowing.size
     });
+    const actualFollowersCount = this.getFollowersList(targetUid).length;
     this.patchRemoteUserFields(targetUid, {
-      followersCount: Math.max(0, (target.followersCount || 0) + (willFollow ? 1 : -1))
+      followersCount: actualFollowersCount
     });
     return willFollow;
+  }
+
+  public areMutualFriends(uidA?: string | null, uidB?: string | null): boolean {
+    if (!uidA || !uidB || uidA === uidB) return false;
+    const userA = this.getUserByUid(uidA);
+    const userB = this.getUserByUid(uidB);
+    if (!userA || !userB) return false;
+    const aFollowsB = (userA.followingUids || []).includes(uidB);
+    const bFollowsA = (userB.followingUids || []).includes(uidA);
+    return aFollowsB && bFollowsA;
+  }
+
+  public getFollowingList(uid: string): UserProfile[] {
+    const user = this.getUserByUid(uid);
+    if (!user) return [];
+    const set = new Set(user.followingUids || []);
+    return this.getCustomerUsers().filter((u) => u.uid !== uid && set.has(u.uid));
+  }
+
+  public getFollowersList(uid: string): UserProfile[] {
+    if (!uid) return [];
+    return this.getCustomerUsers().filter(
+      (u) => u.uid !== uid && (u.followingUids || []).includes(uid)
+    );
+  }
+
+  public getFriendsList(uid: string): UserProfile[] {
+    const user = this.getUserByUid(uid);
+    if (!user) return [];
+    const followingSet = new Set(user.followingUids || []);
+    return this.getCustomerUsers().filter(
+      (u) => u.uid !== uid && followingSet.has(u.uid) && (u.followingUids || []).includes(uid)
+    );
+  }
+
+  public resolveAccountPrivacy(targetUser: UserProfile): 'public' | 'private' | 'friends_only' {
+    if (targetUser.accountPrivacy) return targetUser.accountPrivacy;
+    if (targetUser.privateProfileOnly) return 'private';
+    return 'public';
+  }
+
+  public canViewUserContent(
+    viewerUid: string | undefined | null,
+    targetUser: UserProfile,
+    contentType: 'profile' | 'photos' | 'videos' | 'posts' = 'profile'
+  ): boolean {
+    if (!targetUser) return false;
+    if (viewerUid && viewerUid === targetUser.uid) return true;
+    const viewer = viewerUid ? this.getUserByUid(viewerUid) : null;
+    if (viewer && this.isAdminAccount(viewer)) return true;
+
+    const basePrivacy = this.resolveAccountPrivacy(targetUser);
+    const specificPrivacy =
+      contentType === 'photos'
+        ? targetUser.photosVisibility || basePrivacy
+        : contentType === 'videos'
+        ? targetUser.videosVisibility || basePrivacy
+        : contentType === 'posts'
+        ? targetUser.postsVisibility || basePrivacy
+        : basePrivacy;
+
+    if (specificPrivacy === 'public') return true;
+    if (specificPrivacy === 'private') return false;
+    if (specificPrivacy === 'friends_only') {
+      return Boolean(viewerUid && this.areMutualFriends(viewerUid, targetUser.uid));
+    }
+    return true;
   }
 
   public toggleBlockUser(currentUid: string, targetUid: string): boolean {
@@ -1668,14 +1764,29 @@ class LivoStore {
       return { success: false, message: 'لا يمكن تحويل الرصيد إلى نفس الحساب' };
     }
 
-    const agentUpdates: Partial<UserProfile> = {
-      coins: agent.coins >= coinsAmount ? agent.coins - coinsAmount : agent.coins
-    };
-    if (agent.agentBalance !== undefined) {
-      agentUpdates.agentBalance = agent.agentBalance - coinsAmount;
+    const agentIdx = this.users.findIndex(u => u.uid === agent.uid);
+    const newAgentCoins = agent.coins >= coinsAmount ? agent.coins - coinsAmount : agent.coins;
+    const newAgentBalance = agent.agentBalance !== undefined ? agent.agentBalance - coinsAmount : undefined;
+    if (agentIdx !== -1) {
+      this.users[agentIdx] = {
+        ...this.users[agentIdx],
+        coins: newAgentCoins,
+        ...(newAgentBalance !== undefined ? { agentBalance: newAgentBalance } : {})
+      };
     }
-    this.updateUserProfile(agentUid, agentUpdates);
-    this.patchRemoteUserFields(targetUid, { coins: targetUser.coins + coinsAmount });
+    const targetIdx = this.users.findIndex(u => u.uid === targetUser.uid);
+    const newTargetCoins = targetUser.coins + coinsAmount;
+    if (targetIdx !== -1) {
+      this.users[targetIdx] = { ...this.users[targetIdx], coins: newTargetCoins };
+    }
+    this.notify();
+    firebaseService.commitAgentTransferBatch({
+      agentUid: agent.uid,
+      agentCoins: newAgentCoins,
+      agentBalance: newAgentBalance,
+      targetUid: targetUser.uid,
+      targetCoins: newTargetCoins
+    });
 
     const agIndex = this.agencies.findIndex(a => a.uid === agentUid);
     if (agIndex !== -1) {
@@ -1791,6 +1902,9 @@ class LivoStore {
     paymentDetails: string;
   }): { success: boolean; message: string } {
     const user = this.getUserByUid(data.uid);
+    if (!Number.isFinite(data.totalCoins) || data.totalCoins <= 0) {
+      return { success: false, message: 'قيمة السحب غير صالحة' };
+    }
     if (!user || user.coins < data.totalCoins) {
       return { success: false, message: 'رصيد الكوينز غير كافٍ للسحب' };
     }
@@ -2551,6 +2665,59 @@ class LivoStore {
     return newRoom;
   }
 
+  public updateRoomDetails(
+    roomId: string,
+    updates: {
+      title?: string;
+      category?: string;
+      announcement?: string;
+      seatCount?: 6 | 12;
+    },
+    actorUid: string
+  ): { success: boolean; message: string; room?: VoiceRoom } {
+    const rIndex = this.rooms.findIndex(r => r.id === roomId);
+    if (rIndex === -1) return { success: false, message: 'الغرفة غير موجودة' };
+    const room = this.rooms[rIndex];
+    if (!this.isRoomModerator(room, actorUid)) {
+      return { success: false, message: 'صلاحية مالك الغرفة أو المشرف مطلوبة للتعديل' };
+    }
+
+    const nextTitle = updates.title !== undefined ? updates.title.trim().slice(0, 180) : room.title;
+    if (!nextTitle) {
+      return { success: false, message: 'يرجى إدخال اسم صالح للغرفة' };
+    }
+    const nextCategory = updates.category !== undefined ? (updates.category.trim() || room.category) : room.category;
+    const nextAnnouncement = updates.announcement !== undefined ? updates.announcement.trim().slice(0, 300) : room.announcement;
+
+    let nextSeats = [...(room.seats || [])];
+    let nextSeatCount = room.seatCount || 12;
+    if (updates.seatCount && (updates.seatCount === 6 || updates.seatCount === 12)) {
+      nextSeatCount = updates.seatCount;
+      while (nextSeats.length < 12) {
+        nextSeats.push({ seatIndex: nextSeats.length, isMuted: false, isLocked: false, points: 0 });
+      }
+      if (updates.seatCount === 6) {
+        nextSeats = nextSeats.map((s, idx) =>
+          idx >= 6 ? { seatIndex: idx, isMuted: false, isLocked: s.isLocked, points: 0 } : s
+        );
+      }
+    }
+
+    const updatedRoom: VoiceRoom = {
+      ...room,
+      title: nextTitle,
+      category: nextCategory,
+      announcement: nextAnnouncement,
+      seatCount: nextSeatCount,
+      seats: this.dedupeRoomSeats(nextSeats)
+    };
+    this.markRoomTouched(roomId);
+    this.rooms[rIndex] = updatedRoom;
+    this.notify();
+    firebaseService.saveRoom(updatedRoom);
+    return { success: true, message: 'تم حفظ بيانات واسم الغرفة في السحابة ✓', room: updatedRoom };
+  }
+
   public closeAndRemoveRoom(roomId: string): void {
     const room = this.rooms.find(r => r.id === roomId);
     if (!room) return;
@@ -2865,6 +3032,15 @@ class LivoStore {
 
     const count = Math.max(1, Math.min(99, data.count || 1));
 
+    // Idempotency guard against accidental double taps within 1.2s
+    const txKey = `${sender.uid}:${room.id}:${gift.id}:${count}:${data.targetAll ? 'all' : (data.recipientUids || [data.recipientUid || '']).join(',')}`;
+    const prevTxMs = this.recentGiftTxMs.get(txKey) || 0;
+    const nowMs = Date.now();
+    if (nowMs - prevTxMs < 1200) {
+      return { success: false, message: 'جاري معالجة الإرسال، يرجى الانتظار لحظة...' };
+    }
+    this.recentGiftTxMs.set(txKey, nowMs);
+
     // Resolve recipient list cleanly (supports "All seated members", multi-select, or single recipient)
     const occupiedSeats = (room.seats || []).filter((s) => Boolean(s.occupiedByUid));
     let targetUids: string[] = [];
@@ -2908,20 +3084,30 @@ class LivoStore {
     const balanceAfter = balanceBefore - totalCost;
     const eligibleBefore = sender.eligibleRechargedCoins || 0;
     const eligibleAfter = eligibleBefore + totalCost;
-    this.updateUserProfile(sender.uid, {
-      coins: balanceAfter,
-      eligibleRechargedCoins: eligibleAfter
-    });
-    const promoResult = this.checkAndPromoteUserLevel(sender.uid);
+    const senderIdx = this.users.findIndex(u => u.uid === sender.uid);
+    if (senderIdx !== -1) {
+      this.users[senderIdx] = {
+        ...this.users[senderIdx],
+        coins: balanceAfter,
+        eligibleRechargedCoins: eligibleAfter
+      };
+    }
 
     const nowIso = new Date().toISOString();
     const targetSet = new Set(recipients.map((r) => r.uid));
+    const recipientUpdates: Array<{ uid: string; diamonds: number }> = [];
+    const createdGiftLogs: GiftSupportLog[] = [];
 
     for (const rec of recipients) {
       const prof = this.getUserByUid(rec.uid);
       if (prof && prof.uid !== sender.uid) {
         const earnedDiamonds = Math.floor(perRecipientCoins * 0.5);
-        this.patchRemoteUserFields(prof.uid, { diamonds: (prof.diamonds || 0) + earnedDiamonds });
+        const nextDiamonds = (prof.diamonds || 0) + earnedDiamonds;
+        const pIdx = this.users.findIndex(u => u.uid === prof.uid);
+        if (pIdx !== -1) {
+          this.users[pIdx] = { ...this.users[pIdx], diamonds: nextDiamonds };
+        }
+        recipientUpdates.push({ uid: prof.uid, diamonds: nextDiamonds });
       }
       const logEntry: GiftSupportLog = {
         id: `glog-${Date.now()}-${Math.floor(Math.random() * 10000)}-${rec.uid.slice(0, 6)}`,
@@ -2941,8 +3127,17 @@ class LivoStore {
         createdAt: nowIso
       };
       this.giftLogs.unshift(logEntry);
-      firebaseService.saveGiftLog(logEntry);
+      createdGiftLogs.push(logEntry);
     }
+
+    firebaseService.commitGiftBatch({
+      senderUid: sender.uid,
+      senderCoins: balanceAfter,
+      senderEligibleRechargedCoins: eligibleAfter,
+      recipientUpdates,
+      giftLogs: createdGiftLogs
+    });
+    const promoResult = this.checkAndPromoteUserLevel(sender.uid);
 
     const cleanCardMsg = data.cardMessage?.trim();
     const recipientNames = recipients.map((r) => r.displayName);
@@ -3303,6 +3498,17 @@ class LivoStore {
 
   // --- STORE PURCHASES ---
   public buyStoreItem(uid: string, itemId: string, itemType: 'frame' | 'entrance', priceCoins: number): { success: boolean; message: string } {
+    if (!Number.isFinite(priceCoins) || priceCoins <= 0) {
+      return { success: false, message: 'سعر العنصر غير صالح' };
+    }
+    const txKey = `${uid}:${itemId}:${itemType}`;
+    const prevMs = this.recentStoreTxMs.get(txKey) || 0;
+    const nowMs = Date.now();
+    if (nowMs - prevMs < 1200) {
+      return { success: false, message: 'جاري معالجة عملية الشراء، يرجى الانتظار...' };
+    }
+    this.recentStoreTxMs.set(txKey, nowMs);
+
     const user = this.getUserByUid(uid);
     if (!user) return { success: false, message: 'المستخدم غير موجود' };
     if (user.coins < priceCoins) {
@@ -3618,11 +3824,16 @@ class LivoStore {
       const updatedDiamonds = (user.diamonds || 0) + totalDiamondsAwarded;
       const updatedRewardsList = Array.from(unlockedRewards);
 
-      this.updateUserProfile(uid, {
+      const actor = this.getCurrentUser();
+      const actorIsAdmin = Boolean(actor && this.isAdminAccount(actor));
+      const levelUpdates: Partial<UserProfile> = {
         level: updatedLevel,
-        diamonds: updatedDiamonds,
         unlockedLevelRewards: updatedRewardsList
-      });
+      };
+      if (actorIsAdmin && totalDiamondsAwarded > 0) {
+        levelUpdates.diamonds = updatedDiamonds;
+      }
+      this.updateUserProfile(uid, levelUpdates);
 
       // Record promotion
       const promoRecord: LevelPromotionRecord = {
@@ -3706,18 +3917,31 @@ class LivoStore {
       return { success: false, message: 'لا يمكن تحويل الرصيد إلى نفس الحساب' };
     }
 
-    // Deduct from agent
     const newAgentBalance = agentBalance - coinsAmount;
-    const agentUpdates: Partial<UserProfile> = {
-      agentBalance: newAgentBalance,
-      coins: agent.coins >= coinsAmount ? agent.coins - coinsAmount : agent.coins
-    };
-    this.updateUserProfile(agent.uid, agentUpdates);
-
-    // Add to target user (DO NOT increment eligibleRechargedCoins, per rule 11: agent transfers do not count for level upgrade)
+    const newAgentCoins = agent.coins >= coinsAmount ? agent.coins - coinsAmount : agent.coins;
     const newTargetCoins = targetUser.coins + coinsAmount;
-    this.patchRemoteUserFields(targetUser.uid, {
-      coins: newTargetCoins
+    const agIdx = this.users.findIndex(u => u.uid === agent.uid);
+    if (agIdx !== -1) {
+      this.users[agIdx] = {
+        ...this.users[agIdx],
+        agentBalance: newAgentBalance,
+        coins: newAgentCoins
+      };
+    }
+    const tgIdx = this.users.findIndex(u => u.uid === targetUser.uid);
+    if (tgIdx !== -1) {
+      this.users[tgIdx] = {
+        ...this.users[tgIdx],
+        coins: newTargetCoins
+      };
+    }
+    this.notify();
+    firebaseService.commitAgentTransferBatch({
+      agentUid: agent.uid,
+      agentCoins: newAgentCoins,
+      agentBalance: newAgentBalance,
+      targetUid: targetUser.uid,
+      targetCoins: newTargetCoins
     });
 
     // Record in agent transfers
@@ -3861,11 +4085,16 @@ class LivoStore {
 
   // --- GIFTS MANAGEMENT (إدارة الهدايا الحية + باقة الـ 200+ هدية) ---
   public getGifts(): GiftItem[] {
-    return [...this.gifts].sort((a, b) => b.coins - a.coins);
+    return this.gifts
+      .map((g) => ({
+        ...g,
+        category: normalizeGiftCategory(g.category, g.isCard || g.animationType === 'card')
+      }))
+      .sort((a, b) => b.coins - a.coins);
   }
 
   public getActiveGifts(): GiftItem[] {
-    return this.gifts.filter(g => g.isActive !== false);
+    return this.getGifts().filter(g => g.isActive !== false);
   }
 
   private async batchSaveGiftsToFirestore(giftsToSave: GiftItem[]): Promise<number> {
@@ -4045,18 +4274,20 @@ class LivoStore {
       return { success: false, message: 'المستخدم غير موجود' };
     }
 
-    // 1. Credit coins
     const balanceBefore = user.coins;
     const balanceAfter = balanceBefore + codeObj.coins;
     const eligibleBefore = user.eligibleRechargedCoins || 0;
     const eligibleAfter = eligibleBefore + codeObj.coins;
 
-    this.updateUserProfile(userUid, {
-      coins: balanceAfter,
-      eligibleRechargedCoins: eligibleAfter
-    });
+    const uIdx = this.users.findIndex(u => u.uid === userUid);
+    if (uIdx !== -1) {
+      this.users[uIdx] = {
+        ...this.users[uIdx],
+        coins: balanceAfter,
+        eligibleRechargedCoins: eligibleAfter
+      };
+    }
 
-    // 2. Mark code usage
     codeObj.usedCount += 1;
     codeObj.usedByUids.push(userUid);
     codeObj.usedAt = new Date().toISOString();
@@ -4064,7 +4295,16 @@ class LivoStore {
       codeObj.status = 'used';
     }
     this.notify();
-    firebaseService.saveRechargeCode(codeObj);
+    firebaseService.commitVoucherRedeemBatch({
+      userUid,
+      newCoins: balanceAfter,
+      newEligibleRechargedCoins: eligibleAfter,
+      codeId: codeObj.id,
+      usedCount: codeObj.usedCount,
+      usedByUids: codeObj.usedByUids,
+      status: codeObj.status,
+      usedAt: codeObj.usedAt
+    });
 
     // 3. Promote level
     this.checkAndPromoteUserLevel(userUid);

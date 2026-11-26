@@ -85,24 +85,45 @@ export const AgencyModal: React.FC<AgencyModalProps> = ({ user, isOpen, onClose 
     }
   ];
 
+  const normalizeDigits = (val: string) =>
+    val
+      .replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+      .replace(/[۰-۹]/g, (d) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)));
+
   const handleApply = (e: React.FormEvent) => {
     e.preventDefault();
     setFormError('');
-    if (!agencyName.trim() || !phone.trim() || !experience.trim()) {
-      setFormError('يرجى ملء جميع الحقول المطلوبة');
+    const cleanAgencyName = agencyName.trim();
+    const cleanPhone = normalizeDigits(phone).replace(/[^0-9+]/g, '').trim();
+    const cleanNationalId = normalizeDigits(nationalId).trim();
+    const cleanExperience = experience.trim();
+
+    if (!cleanAgencyName || cleanAgencyName.length < 2) {
+      setFormError('يرجى إدخال اسم الوكالة التجاري بشكل صحيح');
+      return;
+    }
+    if (!cleanPhone || cleanPhone.length < 7) {
+      setFormError('يرجى إدخال رقم هاتف صحيح للتواصل والواتساب');
+      return;
+    }
+    if (!cleanExperience) {
+      setFormError('يرجى كتابة نبذة عن الخبرة السابقة أو الفريق');
       return;
     }
 
-    livoStore.submitAgencyApplication({
-      uid: user.uid,
-      agencyType,
-      agencyName: agencyName.trim(),
-      phone: phone.trim(),
-      nationalId: nationalId.trim(),
-      experienceNotes: experience.trim()
-    });
-
-    setIsSubmitted(true);
+    try {
+      livoStore.submitAgencyApplication({
+        uid: user.uid,
+        agencyType,
+        agencyName: cleanAgencyName,
+        phone: cleanPhone,
+        nationalId: cleanNationalId,
+        experienceNotes: cleanExperience
+      });
+      setIsSubmitted(true);
+    } catch (err: any) {
+      setFormError(err?.message || 'حدث خطأ أثناء إرسال طلب الوكالة، حاول مرة أخرى');
+    }
   };
 
   const handleAgentChargeMember = (e: React.FormEvent) => {
@@ -412,49 +433,47 @@ export const AgencyModal: React.FC<AgencyModalProps> = ({ user, isOpen, onClose 
                 </div>
 
                 <div>
-                  <label className="block text-xs text-purple-200 mb-1">اسم الوكالة التجاري:</label>
+                  <label className="block text-xs font-semibold text-purple-200 mb-1">اسم الوكالة التجاري:</label>
                   <input
                     type="text"
                     value={agencyName}
                     onChange={(e) => setAgencyName(e.target.value)}
                     placeholder="مثال: وكالة الأهرام للشحن"
                     className="w-full bg-[#120824] border border-purple-800/60 rounded-xl px-3 py-2 text-xs text-white placeholder-purple-400/50 outline-none"
-                    required
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs text-purple-200 mb-1">رقم الهاتف للتواصل والواتساب:</label>
+                  <label className="block text-xs font-semibold text-purple-200 mb-1">رقم الهاتف للتواصل والواتساب:</label>
                   <input
-                    type="text"
+                    type="tel"
+                    inputMode="tel"
                     value={phone}
-                    onChange={(e) => setPhone(e.target.value.replace(/[^0-9]/g, ''))}
+                    onChange={(e) => setPhone(normalizeDigits(e.target.value).replace(/[^0-9+]/g, ''))}
                     placeholder="010XXXXXXXX"
                     className="w-full bg-[#120824] border border-purple-800/60 rounded-xl px-3 py-2 text-xs font-digits text-white placeholder-purple-400/50 outline-none"
-                    required
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs text-purple-200 mb-1">الرقم القومي / إثبات الهوية (اختياري):</label>
+                  <label className="block text-xs font-semibold text-purple-200 mb-1">الرقم القومي / إثبات الهوية (اختياري):</label>
                   <input
                     type="text"
                     value={nationalId}
-                    onChange={(e) => setNationalId(e.target.value)}
+                    onChange={(e) => setNationalId(normalizeDigits(e.target.value))}
                     placeholder="الرقم القومي"
                     className="w-full bg-[#120824] border border-purple-800/60 rounded-xl px-3 py-2 text-xs font-digits text-white placeholder-purple-400/50 outline-none"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs text-purple-200 mb-1">الخبرة السابقة وعدد صناع المحتوى التابعين:</label>
+                  <label className="block text-xs font-semibold text-purple-200 mb-1">الخبرة السابقة وعدد صناع المحتوى التابعين:</label>
                   <textarea
                     value={experience}
                     onChange={(e) => setExperience(e.target.value)}
                     placeholder="اذكر خبراتك السابقة في إدارة البثوث أو الشحن..."
                     rows={3}
                     className="w-full bg-[#120824] border border-purple-800/60 rounded-xl p-2.5 text-xs text-white placeholder-purple-400/50 outline-none"
-                    required
                   />
                 </div>
 

@@ -131,11 +131,19 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({ currentUser, onStart
   }, [genuineUsers, remoteMatchedUsers]);
 
   const candidates = useMemo(() => {
-    const base = mergedUsers.filter(
-      u => u.uid !== currentUser?.uid && !blockedSet.has(u.uid)
-    );
-
     const q = searchQuery.trim().toLowerCase();
+    const base = mergedUsers.filter((u) => {
+      if (u.uid === currentUser?.uid || blockedSet.has(u.uid)) return false;
+      const priv = livoStore.resolveAccountPrivacy(u);
+      if (priv === 'private') {
+        const isExactUidSearch = Boolean(q && u.uid.toLowerCase() === q);
+        if (!isExactUidSearch && !livoStore.canViewUserContent(currentUser?.uid, u, 'profile')) {
+          return false;
+        }
+      }
+      return true;
+    });
+
     const searched = q
       ? base.filter(
           u =>
@@ -477,12 +485,19 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({ currentUser, onStart
                           مباشر الآن
                         </span>
                       )}
+                      {livoStore.areMutualFriends(currentUser?.uid, user.uid) && (
+                        <span className="bg-emerald-100 text-emerald-800 text-[8px] font-black px-1.5 py-0.5 rounded-full shrink-0">
+                          🤝 صديق
+                        </span>
+                      )}
                     </div>
                     <span className="text-[10px] text-gray-400 font-digits block">
                       UID: {user.uid} • @{user.username}
                     </span>
                     <p className="text-[11px] text-gray-600 line-clamp-1 mt-0.5">
-                      {user.bio || 'عضو حقيقي في منصة LIVO 🌟'}
+                      {livoStore.canViewUserContent(currentUser?.uid, user, 'profile')
+                        ? user.bio || 'عضو حقيقي في منصة LIVO 🌟'
+                        : '🔒 الملف مضبوط للأصدقاء فقط'}
                     </p>
                   </div>
 

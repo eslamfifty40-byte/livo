@@ -17,8 +17,10 @@ import {
 } from 'lucide-react';
 import { UserProfile } from '../../types';
 import { livoStore } from '../../services/livoStore';
+import { directCallAudio } from '../../services/directCallAudio';
 import { AvatarWithFrame } from '../common/AvatarWithFrame';
 import { UserNameWithBadges } from '../common/UserNameWithBadges';
+import { UserProfileSheetModal } from '../common/UserProfileSheetModal';
 import { compressImageForFirestore } from '../../utils/imageCompression';
 
 interface PrivateMessagesViewProps {
@@ -27,6 +29,7 @@ interface PrivateMessagesViewProps {
 
 export const PrivateMessagesView: React.FC<PrivateMessagesViewProps> = ({ currentUser }) => {
   const [activePartner, setActivePartner] = useState<UserProfile | null>(null);
+  const [profileModalUser, setProfileModalUser] = useState<UserProfile | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [messageInput, setMessageInput] = useState('');
   const [requestIntroInput, setRequestIntroInput] = useState('');
@@ -153,46 +156,73 @@ export const PrivateMessagesView: React.FC<PrivateMessagesViewProps> = ({ curren
               >
                 <ArrowRight className="w-4 h-4" />
               </button>
-              <AvatarWithFrame
-                sizePx={40}
-                avatarUrl={activePartner.avatar}
-                displayName={activePartner.displayName}
-                frameUrl={activePartner.equippedFrameUrl}
-                frameGlowColor={activePartner.frameGlowColor}
-                frameAnimated={activePartner.frameAnimated}
-                customIconUrl={activePartner.customIconUrl}
-                customIconGlow={activePartner.customIconGlow}
-                customIconAnimated={activePartner.customIconAnimated}
-              />
-              <div className="min-w-0">
-                <UserNameWithBadges
+              <button
+                type="button"
+                onClick={() => setProfileModalUser(activePartner)}
+                className="flex items-center gap-2.5 text-right hover:opacity-85 transition-opacity"
+              >
+                <AvatarWithFrame
+                  sizePx={40}
+                  avatarUrl={activePartner.avatar}
                   displayName={activePartner.displayName}
-                  nameGlowColor={activePartner.nameGlowColor}
-                  isVerified={activePartner.isVerified}
-                  verifiedBadgeColor={activePartner.verifiedBadgeColor}
-                  verifiedBadgeShape={activePartner.verifiedBadgeShape}
-                  verifiedBadgeGlow={activePartner.verifiedBadgeGlow}
+                  frameUrl={activePartner.equippedFrameUrl}
+                  frameGlowColor={activePartner.frameGlowColor}
+                  frameAnimated={activePartner.frameAnimated}
                   customIconUrl={activePartner.customIconUrl}
                   customIconGlow={activePartner.customIconGlow}
                   customIconAnimated={activePartner.customIconAnimated}
-                  customIconLabel={activePartner.customIconLabel}
-                  badgeSize={14}
-                  iconSize={18}
-                  nameClassName="font-bold text-xs text-white"
                 />
-                <span className="text-[10px] text-purple-300 font-digits block">
-                  UID: {activePartner.uid} • @{activePartner.username}
-                </span>
-              </div>
+                <div className="min-w-0">
+                  <UserNameWithBadges
+                    displayName={activePartner.displayName}
+                    nameGlowColor={activePartner.nameGlowColor}
+                    isVerified={activePartner.isVerified}
+                    verifiedBadgeColor={activePartner.verifiedBadgeColor}
+                    verifiedBadgeShape={activePartner.verifiedBadgeShape}
+                    verifiedBadgeGlow={activePartner.verifiedBadgeGlow}
+                    customIconUrl={activePartner.customIconUrl}
+                    customIconGlow={activePartner.customIconGlow}
+                    customIconAnimated={activePartner.customIconAnimated}
+                    customIconLabel={activePartner.customIconLabel}
+                    badgeSize={14}
+                    iconSize={18}
+                    nameClassName="font-bold text-xs text-white"
+                  />
+                  <span className="text-[10px] text-purple-300 font-digits block">
+                    UID: {activePartner.uid} • عرض الملف
+                  </span>
+                </div>
+              </button>
             </div>
 
-            <button
-              onClick={() => setShowReportModal(true)}
-              className="text-purple-400 hover:text-red-400 p-1.5"
-              title="إبلاغ أو حظر"
-            >
-              <ShieldAlert className="w-4 h-4" />
-            </button>
+            <div className="flex items-center gap-1.5">
+              {canChatWithPartner && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    void directCallAudio.startCall(
+                      {
+                        uid: activePartner.uid,
+                        name: activePartner.displayName,
+                        avatar: activePartner.avatar
+                      },
+                      'audio'
+                    )
+                  }
+                  className="w-8 h-8 rounded-full bg-emerald-600/80 hover:bg-emerald-500 text-white flex items-center justify-center"
+                  title="اتصال صوتي مباشر"
+                >
+                  <Mic className="w-4 h-4" />
+                </button>
+              )}
+              <button
+                onClick={() => setShowReportModal(true)}
+                className="text-purple-400 hover:text-red-400 p-1.5"
+                title="إبلاغ أو حظر"
+              >
+                <ShieldAlert className="w-4 h-4" />
+              </button>
+            </div>
           </div>
 
           {!canChatWithPartner ? (
@@ -546,6 +576,18 @@ export const PrivateMessagesView: React.FC<PrivateMessagesViewProps> = ({ curren
           </div>
         </div>
       )}
+      <UserProfileSheetModal
+        isOpen={Boolean(profileModalUser)}
+        user={profileModalUser}
+        currentUser={currentUser}
+        onClose={() => setProfileModalUser(null)}
+        onVoiceCall={(target) => {
+          void directCallAudio.startCall(
+            { uid: target.uid, name: target.displayName, avatar: target.avatar },
+            'audio'
+          );
+        }}
+      />
     </div>
   );
 };

@@ -195,6 +195,9 @@ export const PartyView: React.FC<PartyViewProps> = ({
       .filter(
         u =>
           u.uid !== currentUser?.uid &&
+          (livoStore.resolveAccountPrivacy(u) !== 'private' ||
+            u.uid.toLowerCase() === q ||
+            livoStore.canViewUserContent(currentUser?.uid, u, 'profile')) &&
           (u.uid.toLowerCase().includes(q) ||
             (u.username || '').toLowerCase().includes(q) ||
             (u.displayName || '').toLowerCase().includes(q))

@@ -20,6 +20,7 @@ import {
   onSnapshot,
   getDocFromServer,
   deleteField,
+  writeBatch,
   FieldValue,
   Unsubscribe
 } from 'firebase/firestore';
@@ -728,6 +729,107 @@ export class FirebaseService {
       return true;
     } catch (e) {
       console.error('Error patching user fields in Firestore:', e);
+      return false;
+    }
+  }
+
+  /**
+   * Atomic Firestore writeBatch for sending gifts (deducts sender coins, credits recipient diamonds, writes gift logs)
+   */
+  public async commitGiftBatch(params: {
+    senderUid: string;
+    senderCoins: number;
+    senderEligibleRechargedCoins: number;
+    recipientUpdates: Array<{ uid: string; diamonds: number }>;
+    giftLogs: GiftSupportLog[];
+  }): Promise<boolean> {
+    if (!auth.currentUser) return false;
+    try {
+      const batch = writeBatch(db);
+      batch.update(doc(db, COLLECTIONS.USERS, params.senderUid), {
+        coins: params.senderCoins,
+        eligibleRechargedCoins: params.senderEligibleRechargedCoins
+      });
+      for (const rec of params.recipientUpdates) {
+        if (rec.uid && rec.uid !== params.senderUid) {
+          batch.update(doc(db, COLLECTIONS.USERS, rec.uid), {
+            diamonds: rec.diamonds,
+            lastGiftSenderUid: params.senderUid
+          });
+        }
+      }
+      for (const log of params.giftLogs) {
+        batch.set(doc(db, COLLECTIONS.GIFT_LOGS, log.id), stripUndefined(log));
+      }
+      await batch.commit();
+      return true;
+    } catch (e) {
+      console.error('Error committing atomic gift batch:', e);
+      return false;
+    }
+  }
+
+  /**
+   * Atomic Firestore writeBatch for redeeming a recharge voucher code
+   */
+  public async commitVoucherRedeemBatch(params: {
+    userUid: string;
+    newCoins: number;
+    newEligibleRechargedCoins: number;
+    codeId: string;
+    usedCount: number;
+    usedByUids: string[];
+    status: 'active' | 'used';
+    usedAt: string;
+  }): Promise<boolean> {
+    if (!auth.currentUser) return false;
+    try {
+      const batch = writeBatch(db);
+      batch.update(doc(db, COLLECTIONS.RECHARGE_CODES, params.codeId), {
+        usedCount: params.usedCount,
+        usedByUids: params.usedByUids,
+        status: params.status,
+        usedAt: params.usedAt
+      });
+      batch.update(doc(db, COLLECTIONS.USERS, params.userUid), {
+        coins: params.newCoins,
+        eligibleRechargedCoins: params.newEligibleRechargedCoins,
+        lastVoucherCodeId: params.codeId
+      });
+      await batch.commit();
+      return true;
+    } catch (e) {
+      console.error('Error committing voucher redeem batch:', e);
+      return false;
+    }
+  }
+
+  /**
+   * Atomic Firestore writeBatch for authorized charging agent coin transfers
+   */
+  public async commitAgentTransferBatch(params: {
+    agentUid: string;
+    agentCoins: number;
+    agentBalance?: number;
+    targetUid: string;
+    targetCoins: number;
+  }): Promise<boolean> {
+    if (!auth.currentUser) return false;
+    try {
+      const batch = writeBatch(db);
+      const agentUpdate: Record<string, unknown> = { coins: params.agentCoins };
+      if (params.agentBalance !== undefined) {
+        agentUpdate.agentBalance = params.agentBalance;
+      }
+      batch.update(doc(db, COLLECTIONS.USERS, params.agentUid), agentUpdate);
+      batch.update(doc(db, COLLECTIONS.USERS, params.targetUid), {
+        coins: params.targetCoins,
+        lastAgentUid: params.agentUid
+      });
+      await batch.commit();
+      return true;
+    } catch (e) {
+      console.error('Error committing agent transfer batch:', e);
       return false;
     }
   }
@@ -1643,6 +1745,13 @@ export class FirebaseService {
     return unsub;
   }
 
+  public subscribeToDirectCallSignals(
+    toUid: string,
+    onSignals: (signals: RoomRtcSignal[]) => void
+  ): Unsubscribe {
+    return this.subscribeToRoomRtcSignals('direct_call', toUid, onSignals);
+  }
+
   public async saveRoomRtcSignal(signal: RoomRtcSignal): Promise<boolean> {
     try {
       await setDoc(doc(db, COLLECTIONS.ROOM_RTC_SIGNALS, signal.id), stripUndefined(signal));
@@ -1698,6 +1807,40 @@ export class FirebaseService {
     } catch (e) {
       console.warn('Storage upload fallback to compressed DataURL:', e);
       return preparedDataUrl;
+    }
+  }
+
+  /**
+   * Upload real video file from device to Firebase Storage (/videos/{uid}/...)
+   * Falls back to DataURL ONLY for tiny clips (< 680KB) when Storage is unreachable.
+   */
+  public async uploadVideoFile(uid: string, file: File): Promise<string> {
+    const cleanUid = (uid || 'guest').replace(/[^a-zA-Z0-9_-]/g, '');
+    const storageOwnerUid = auth.currentUser?.uid || cleanUid;
+    const safeExt = (file.name.split('.').pop() || 'mp4').replace(/[^a-zA-Z0-9]/g, '').slice(0, 8) || 'mp4';
+    const path = `videos/${storageOwnerUid}/${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${safeExt}`;
+
+    try {
+      const storageRef = ref(storage, path);
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('انتهت مهلة رفع الفيديو، يرجى المحاولة مرة أخرى')), 45000)
+      );
+      await Promise.race([
+        uploadBytes(storageRef, file, { contentType: file.type || 'video/mp4' }),
+        timeoutPromise
+      ]);
+      const downloadUrl = await Promise.race([getDownloadURL(storageRef), timeoutPromise]);
+      return downloadUrl;
+    } catch (err) {
+      if (file.size <= 680 * 1024) {
+        return await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ''));
+          reader.onerror = () => reject(new Error('تعذر قراءة ملف الفيديو'));
+          reader.readAsDataURL(file);
+        });
+      }
+      throw err instanceof Error ? err : new Error('تعذر رفع الفيديو إلى السحابة، تأكد من اتصال الإنترنت');
     }
   }
 
@@ -1942,6 +2085,29 @@ export class FirebaseService {
     });
   }
 
+  private resolveCapacitorPlugin<T = any>(pluginName: string): T | null {
+    if (typeof window === 'undefined') return null;
+    const capNative = (window as unknown as {
+      Capacitor?: {
+        isNativePlatform?: () => boolean;
+        Plugins?: Record<string, any>;
+        registerPlugin?: (name: string) => any;
+      };
+    }).Capacitor;
+    if (!capNative) return null;
+    if (capNative.Plugins && capNative.Plugins[pluginName]) {
+      return capNative.Plugins[pluginName] as T;
+    }
+    if (typeof capNative.registerPlugin === 'function') {
+      try {
+        return capNative.registerPlugin(pluginName) as T;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+
   private async runGoogleAuthFlow(
     preferRedirect = false
   ): Promise<{ success: boolean; user?: FirebaseUser; redirectStarted?: boolean; error?: string }> {
@@ -1949,30 +2115,45 @@ export class FirebaseService {
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
 
-    // livo_native_google: inside the APK use the native Google account picker
-    const capNative = typeof window !== 'undefined' ? (window as any).Capacitor : undefined;
+    // Inside Capacitor native APK: safely resolve native FirebaseAuthentication plugin without throwing "n.registerPlugin is not a function"
+    const capNative = typeof window !== 'undefined'
+      ? (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor
+      : undefined;
     if (capNative?.isNativePlatform?.()) {
-      try {
-        const FA = capNative.registerPlugin('FirebaseAuthentication');
-        const res = await FA.signInWithGoogle({ skipNativeAuth: true });
-        const idToken = res?.credential?.idToken;
-        if (!idToken) return { success: false, error: 'لم يتم الحصول على بيانات حساب Google' };
-        const { signInWithCredential } = await import('firebase/auth');
-        const nativeCred = await signInWithCredential(auth, GoogleAuthProvider.credential(idToken));
-        return { success: true, user: nativeCred.user };
-      } catch (err: any) {
-        return { success: false, error: this.formatFirebaseAuthError(err, 'تم إلغاء تسجيل الدخول عبر Google') };
+      const FA = this.resolveCapacitorPlugin<{
+        signInWithGoogle?: (opts?: { skipNativeAuth?: boolean }) => Promise<{ credential?: { idToken?: string } }>;
+      }>('FirebaseAuthentication');
+
+      if (FA && typeof FA.signInWithGoogle === 'function') {
+        try {
+          const res = await FA.signInWithGoogle({ skipNativeAuth: true });
+          const idToken = res?.credential?.idToken;
+          if (!idToken) {
+            return { success: false, error: 'لم يتم الحصول على بيانات حساب Google' };
+          }
+          const nativeCred = await signInWithCredential(auth, GoogleAuthProvider.credential(idToken));
+          return { success: true, user: nativeCred.user };
+        } catch (err: any) {
+          const msg = String(err?.message || '');
+          // If native plugin unavailable or unimplemented, fall through cleanly to GIS / popup instead of crashing
+          if (!/unimplemented|not implemented|not available/i.test(msg)) {
+            return { success: false, error: this.formatFirebaseAuthError(err, 'تم إلغاء تسجيل الدخول عبر Google') };
+          }
+        }
       }
     }
 
     // Cross-origin signInWithRedirect (e.g. run.app / localhost APK -> firebaseapp.com/__/auth/handler)
-    // fails in storage-partitioned browsers with "missing initial state".
-    // Only allow redirect when hosted directly on authDomain outside iframes & restricted browsers.
+    // fails in storage-partitioned browsers/WebViews with "missing initial state".
     const isSameAuthDomain =
       typeof window !== 'undefined' &&
       Boolean(firebaseConfig.authDomain) &&
       window.location.hostname === firebaseConfig.authDomain;
-    const canUseRedirect = isSameAuthDomain && !this.isInsideIframe() && !this.isBraveOrRestrictedBrowser();
+    const canUseRedirect =
+      isSameAuthDomain &&
+      !this.isInsideIframe() &&
+      !this.isWebViewOrCapacitor() &&
+      !this.isBraveOrRestrictedBrowser();
 
     if (preferRedirect && canUseRedirect) {
       try {
@@ -1986,6 +2167,14 @@ export class FirebaseService {
           window.sessionStorage.removeItem('livo_google_redirect_pending');
         }
         return { success: false, error: this.formatFirebaseAuthError(err, 'تعذر بدء تسجيل الدخول عبر Google') };
+      }
+    }
+
+    // If caller requested full-page fallback on a restricted WebView/partitioned browser, try GIS One-Tap / FedCM first
+    if (preferRedirect && !canUseRedirect) {
+      const gsiFirst = await this.tryGoogleIdentityServicesSignIn();
+      if (gsiFirst?.user) {
+        return { success: true, user: gsiFirst.user };
       }
     }
 
@@ -2014,7 +2203,8 @@ export class FirebaseService {
       if (
         code === 'auth/popup-blocked' ||
         code === 'auth/operation-not-supported-in-this-environment' ||
-        code === 'auth/internal-error'
+        code === 'auth/internal-error' ||
+        code === 'auth/cancelled-popup-request'
       ) {
         const gsiRes = await this.tryGoogleIdentityServicesSignIn();
         if (gsiRes?.user) {
@@ -2025,7 +2215,7 @@ export class FirebaseService {
         }
       }
       console.warn('Google Auth error:', err);
-      return { success: false, error: this.formatFirebaseAuthError(err, 'تم إلغاء نافذة اختيار حساب Google') };
+      return { success: false, error: this.formatFirebaseAuthError(err, 'تعذر فتح نافذة اختيار حساب Google، جرب البريد وكلمة المرور أو أعد المحاولة.') };
     }
   }
 

@@ -23,7 +23,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [showBlockedModal, setShowBlockedModal] = useState(false);
   const publicBroadcast = user.publicBroadcast !== false;
-  const privateProfileOnly = Boolean(user.privateProfileOnly);
+  const accountPrivacy: 'public' | 'friends_only' | 'private' =
+    user.accountPrivacy || (user.privateProfileOnly ? 'private' : 'public');
+  const photosVisibility = user.photosVisibility || accountPrivacy;
+  const videosVisibility = user.videosVisibility || accountPrivacy;
+  const postsVisibility = user.postsVisibility || accountPrivacy;
+  const savedAccountsCount = livoStore.getSavedAccounts().length;
 
   if (!isOpen) return null;
 
@@ -120,18 +125,74 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </span>
           </div>
 
-          <div
-            onClick={() => {
-              const next = !privateProfileOnly;
-              livoStore.updateUserProfile(user.uid, { privateProfileOnly: next });
-              showToast(next ? 'الخصوصية: الظهور للأصدقاء فقط ✓' : 'الخصوصية: الظهور للجميع في LIVO ✓');
-            }}
-            className="px-5 py-3.5 flex items-center justify-between hover:bg-gray-50 cursor-pointer"
-          >
-            <span className="font-bold text-xs text-gray-900">الخصوصية والظهور</span>
-            <span className="text-[10px] font-bold text-gray-600 bg-gray-100 px-2.5 py-0.5 rounded-full">
-              {privateProfileOnly ? 'الأصدقاء فقط' : 'متاح للجميع'}
-            </span>
+          <div className="px-5 py-3.5 space-y-2.5 bg-white">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-xs text-gray-900">خصوصية الحساب والظهور</span>
+              <span className="text-[10px] font-black text-amber-800 bg-amber-100 px-2.5 py-0.5 rounded-full">
+                {accountPrivacy === 'public'
+                  ? 'عام للجميع'
+                  : accountPrivacy === 'friends_only'
+                  ? 'الأصدقاء فقط'
+                  : 'خاص (مخفي)'}
+              </span>
+            </div>
+            <div className="grid grid-cols-3 gap-1.5">
+              {(
+                [
+                  { id: 'public', label: 'عام للجميع' },
+                  { id: 'friends_only', label: 'الأصدقاء فقط' },
+                  { id: 'private', label: 'حساب خاص' }
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => {
+                    livoStore.updateUserProfile(user.uid, {
+                      accountPrivacy: opt.id,
+                      privateProfileOnly: opt.id !== 'public'
+                    });
+                    showToast(`تم تحديث الخصوصية إلى: ${opt.label} ✓`);
+                  }}
+                  className={`py-2 rounded-xl text-[11px] font-black border transition-all ${
+                    accountPrivacy === opt.id
+                      ? 'bg-[#FFE600] border-amber-400 text-black shadow-xs'
+                      : 'bg-gray-50 border-gray-200 text-gray-600'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-3 gap-1.5 pt-1">
+              {(
+                [
+                  { key: 'photosVisibility', label: 'الصور', val: photosVisibility },
+                  { key: 'videosVisibility', label: 'الفيديوهات', val: videosVisibility },
+                  { key: 'postsVisibility', label: 'المنشورات', val: postsVisibility }
+                ] as const
+              ).map((item) => {
+                const cycleOrder: Array<'public' | 'friends_only' | 'private'> = ['public', 'friends_only', 'private'];
+                const nextMode = cycleOrder[(cycleOrder.indexOf(item.val) + 1) % cycleOrder.length];
+                const labelText =
+                  item.val === 'public' ? 'الجميع' : item.val === 'friends_only' ? 'الأصدقاء' : 'خاص';
+                return (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => {
+                      livoStore.updateUserProfile(user.uid, { [item.key]: nextMode });
+                      showToast(`خصوصية ${item.label}: ${nextMode === 'public' ? 'الجميع' : nextMode === 'friends_only' ? 'الأصدقاء' : 'خاص'} ✓`);
+                    }}
+                    className="p-2 rounded-xl bg-gray-50 hover:bg-gray-100 border border-gray-200 text-center"
+                  >
+                    <span className="text-[10px] text-gray-500 block font-bold">{item.label}</span>
+                    <span className="text-[11px] font-black text-gray-900">{labelText}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           <div
@@ -188,7 +249,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             }}
             className="px-5 py-3.5 flex items-center justify-between hover:bg-gray-50 cursor-pointer"
           >
-            <span className="font-bold text-xs text-gray-900">تبديل الحساب</span>
+            <span className="font-bold text-xs text-gray-900">إدارة وتبديل الحسابات ({savedAccountsCount})</span>
             <ChevronLeft className="w-4 h-4 text-gray-400" />
           </div>
 

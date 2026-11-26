@@ -84,6 +84,35 @@ service cloud.firestore {
       ];
     }
 
+    function isValidPrivacy(val) {
+      return val in ['public', 'friends_only', 'private'];
+    }
+
+    function isValidUserFields(data) {
+      return isStrMax(data.get('displayName', ''), 64) &&
+        isStrMax(data.get('username', ''), 64) &&
+        isStrMax(data.get('bio', ''), 500) &&
+        isStrMax(data.get('coverUrl', ''), 500000) &&
+        isStrMax(data.get('avatar', ''), 500000) &&
+        data.get('level', 0) is number &&
+        data.get('level', 0) >= 0 &&
+        data.get('level', 0) <= 50 &&
+        data.coins is number &&
+        data.coins >= 0 &&
+        data.coins <= 500000000 &&
+        data.get('diamonds', 0) is number &&
+        data.get('diamonds', 0) >= 0 &&
+        data.get('diamonds', 0) <= 500000000 &&
+        data.get('eligibleRechargedCoins', 0) is number &&
+        data.get('eligibleRechargedCoins', 0) >= 0 &&
+        data.get('agentBalance', 0) is number &&
+        data.get('agentBalance', 0) >= 0 &&
+        isValidPrivacy(data.get('accountPrivacy', 'public')) &&
+        isValidPrivacy(data.get('photosVisibility', 'public')) &&
+        isValidPrivacy(data.get('videosVisibility', 'public')) &&
+        isValidPrivacy(data.get('postsVisibility', 'public'));
+    }
+
     function isValidUserCreate(data, userId) {
       return isNonEmptyStrMax(data.uid, 32) &&
         data.uid == userId &&
@@ -94,6 +123,7 @@ service cloud.firestore {
         data.get('diamonds', 0) is number &&
         data.get('diamonds', 0) == 0 &&
         data.isVerified == false &&
+        isValidUserFields(data) &&
         !data.keys().hasAny(adminCosmeticKeys()) &&
         !data.keys().hasAny(['canChargeUsers', 'canStealthRooms', 'agencyBadgeLabel', 'isBanned', 'banDetails', 'verifiedUntil', 'agencyType', 'agencyName', 'agentBalance']);
     }
@@ -183,25 +213,78 @@ service cloud.firestore {
           request.resource.data.get('canStealthRooms', false) == resource.data.get('canStealthRooms', false) &&
           request.resource.data.get('agencyBadgeLabel', '') == resource.data.get('agencyBadgeLabel', '') &&
           request.resource.data.get('isBanned', false) == resource.data.get('isBanned', false) &&
-          request.resource.data.coins is number &&
-          request.resource.data.coins >= 0 &&
-          request.resource.data.get('diamonds', 0) is number &&
-          request.resource.data.get('diamonds', 0) >= 0 &&
+          isValidUserFields(request.resource.data) &&
           !request.resource.data.diff(resource.data).affectedKeys().hasAny(adminCosmeticKeys()) &&
           (
-            resource.data.get('authUid', '') == request.auth.uid ||
+            (
+              resource.data.get('authUid', '') == request.auth.uid &&
+              request.resource.data.get('authUid', '') == resource.data.get('authUid', '') &&
+              request.resource.data.get('agentBalance', 0) <= resource.data.get('agentBalance', 0) &&
+              request.resource.data.get('diamonds', 0) <= resource.data.get('diamonds', 0) &&
+              (
+                (
+                  request.resource.data.coins <= resource.data.coins &&
+                  request.resource.data.get('eligibleRechargedCoins', 0) <=
+                    resource.data.get('eligibleRechargedCoins', 0) + (resource.data.coins - request.resource.data.coins)
+                ) ||
+                (
+                  request.resource.data.get('lastVoucherCodeId', '') is string &&
+                  request.resource.data.get('lastVoucherCodeId', '').size() > 0 &&
+                  exists(/databases/$(database)/documents/recharge_codes/$(request.resource.data.lastVoucherCodeId)) &&
+                  get(/databases/$(database)/documents/recharge_codes/$(request.resource.data.lastVoucherCodeId)).data.status == 'active' &&
+                  !(resource.data.uid in get(/databases/$(database)/documents/recharge_codes/$(request.resource.data.lastVoucherCodeId)).data.get('usedByUids', [])) &&
+                  getAfter(/databases/$(database)/documents/recharge_codes/$(request.resource.data.lastVoucherCodeId)).data.usedCount ==
+                    get(/databases/$(database)/documents/recharge_codes/$(request.resource.data.lastVoucherCodeId)).data.get('usedCount', 0) + 1 &&
+                  request.resource.data.coins ==
+                    resource.data.coins + get(/databases/$(database)/documents/recharge_codes/$(request.resource.data.lastVoucherCodeId)).data.coins &&
+                  request.resource.data.get('eligibleRechargedCoins', 0) <=
+                    resource.data.get('eligibleRechargedCoins', 0) + get(/databases/$(database)/documents/recharge_codes/$(request.resource.data.lastVoucherCodeId)).data.coins
+                )
+              )
+            ) ||
             (
               resource.data.get('authUid', '') == '' &&
               resource.data.get('role', 'user') == 'user' &&
-              request.resource.data.get('authUid', '') == request.auth.uid
+              request.resource.data.get('authUid', '') == request.auth.uid &&
+              request.resource.data.coins == resource.data.coins &&
+              request.resource.data.get('diamonds', 0) == resource.data.get('diamonds', 0)
             ) ||
-            request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-              'followersCount',
-              'diamonds',
-              'coins',
-              'eligibleRechargedCoins',
-              'agentBalance'
-            ])
+            (
+              request.resource.data.get('authUid', '') == resource.data.get('authUid', '') &&
+              request.resource.data.diff(resource.data).affectedKeys().hasOnly(['followersCount']) &&
+              request.resource.data.get('followersCount', 0) is number &&
+              request.resource.data.get('followersCount', 0) >= 0
+            ) ||
+            (
+              request.resource.data.get('authUid', '') == resource.data.get('authUid', '') &&
+              request.resource.data.diff(resource.data).affectedKeys().hasOnly(['diamonds', 'lastGiftSenderUid']) &&
+              request.resource.data.get('lastGiftSenderUid', '') is string &&
+              request.resource.data.get('lastGiftSenderUid', '') != userId &&
+              exists(/databases/$(database)/documents/users/$(request.resource.data.lastGiftSenderUid)) &&
+              get(/databases/$(database)/documents/users/$(request.resource.data.lastGiftSenderUid)).data.get('authUid', '') == request.auth.uid &&
+              getAfter(/databases/$(database)/documents/users/$(request.resource.data.lastGiftSenderUid)).data.coins <
+                get(/databases/$(database)/documents/users/$(request.resource.data.lastGiftSenderUid)).data.coins &&
+              request.resource.data.get('diamonds', 0) > resource.data.get('diamonds', 0) &&
+              (request.resource.data.get('diamonds', 0) - resource.data.get('diamonds', 0)) <=
+                (get(/databases/$(database)/documents/users/$(request.resource.data.lastGiftSenderUid)).data.coins -
+                 getAfter(/databases/$(database)/documents/users/$(request.resource.data.lastGiftSenderUid)).data.coins)
+            ) ||
+            (
+              request.resource.data.get('authUid', '') == resource.data.get('authUid', '') &&
+              request.resource.data.diff(resource.data).affectedKeys().hasOnly(['coins', 'lastAgentUid']) &&
+              request.resource.data.get('lastAgentUid', '') is string &&
+              request.resource.data.get('lastAgentUid', '') != userId &&
+              exists(/databases/$(database)/documents/users/$(request.resource.data.lastAgentUid)) &&
+              get(/databases/$(database)/documents/users/$(request.resource.data.lastAgentUid)).data.get('authUid', '') == request.auth.uid &&
+              (
+                get(/databases/$(database)/documents/users/$(request.resource.data.lastAgentUid)).data.get('canChargeUsers', false) == true ||
+                get(/databases/$(database)/documents/users/$(request.resource.data.lastAgentUid)).data.get('role', 'user') in ['charging_agent', 'owner']
+              ) &&
+              request.resource.data.coins > resource.data.coins &&
+              getAfter(/databases/$(database)/documents/users/$(request.resource.data.lastAgentUid)).data.get('agentBalance', 0) <=
+                get(/databases/$(database)/documents/users/$(request.resource.data.lastAgentUid)).data.get('agentBalance', 0) -
+                (request.resource.data.coins - resource.data.coins)
+            )
           )
         )
       );
@@ -531,6 +614,10 @@ service cloud.firestore {
           request.resource.data.code == resource.data.code &&
           request.resource.data.coins == resource.data.coins &&
           request.resource.data.maxUses == resource.data.maxUses &&
+          request.resource.data.get('usedCount', 0) is number &&
+          request.resource.data.get('usedCount', 0) >= resource.data.get('usedCount', 0) &&
+          request.resource.data.get('usedCount', 0) <= resource.data.maxUses &&
+          request.resource.data.status in ['active', 'used'] &&
           request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'usedCount',
             'usedByUids',
@@ -725,7 +812,9 @@ service cloud.firestore {
         isNonEmptyStrMax(request.resource.data.roomId, 64) &&
         isNonEmptyStrMax(request.resource.data.fromUid, 32) &&
         isNonEmptyStrMax(request.resource.data.toUid, 32) &&
-        request.resource.data.type in ['offer', 'answer', 'candidate', 'presence'];
+        request.resource.data.type in ['offer', 'answer', 'candidate', 'presence', 'ring', 'accept', 'decline', 'hangup'] &&
+        isStrMax(request.resource.data.get('callMode', 'audio'), 16) &&
+        isStrMax(request.resource.data.get('callerName', ''), 64);
 
       allow update: if false;
       allow delete: if isValidDocId(signalId) && isAuthenticated();

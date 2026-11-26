@@ -1,45 +1,76 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    
+
+    function isSignedIn() {
+      return request.auth != null && request.auth.uid != null;
+    }
+
+    function isAdminOrOwner() {
+      return isSignedIn() && (
+        request.auth.token.get('role', '') in ['owner', 'supervisor'] ||
+        (
+          request.auth.token.email_verified == true &&
+          request.auth.token.email is string &&
+          request.auth.token.email.lower() in ['livo.admin@gmail.com', 'eslamfifty11@gmail.com']
+        )
+      );
+    }
+
     // User profile avatars
     match /avatars/{userId}/{allPaths=**} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null && request.auth.uid == userId
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && request.auth.uid == userId
                    && request.resource.size < 5 * 1024 * 1024
                    && request.resource.contentType.matches('image/.*');
     }
-    
+
+    // User profile cover banners
+    match /covers/{userId}/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && request.auth.uid == userId
+                   && request.resource.size < 5 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*');
+    }
+
     // Recharge payment receipts (Item 10 & 11)
     match /receipts/{userId}/{allPaths=**} {
-      // User can upload their own receipt; Admins can read
-      allow create: if request.auth != null && request.auth.uid == userId
+      allow create: if isSignedIn() && request.auth.uid == userId
                     && request.resource.size < 10 * 1024 * 1024
                     && request.resource.contentType.matches('image/.*');
-      allow read: if request.auth != null && (
-        request.auth.uid == userId ||
-        request.auth.token.role == 'owner' ||
-        request.auth.token.role == 'supervisor' ||
-        request.auth.token.email == 'livo.admin@gmail.com'
-      );
-      // Never allow deleting receipts once submitted
+      allow read: if isSignedIn() && (request.auth.uid == userId || isAdminOrOwner());
       allow delete: if false;
     }
-    
+
     // Verification proof documents
     match /verifications/{userId}/{allPaths=**} {
-      allow create: if request.auth != null && request.auth.uid == userId
-                    && request.resource.size < 10 * 1024 * 1024;
-      allow read: if request.auth != null;
+      allow create: if isSignedIn() && request.auth.uid == userId
+                    && request.resource.size < 10 * 1024 * 1024
+                    && request.resource.contentType.matches('image/.*');
+      allow read: if isSignedIn() && (request.auth.uid == userId || isAdminOrOwner());
       allow delete: if false;
     }
-    
-    // Genuine uploaded short videos
+
+    // Genuine uploaded short videos (up to 50MB)
     match /videos/{userId}/{allPaths=**} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null && request.auth.uid == userId
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && request.auth.uid == userId
                    && request.resource.size < 50 * 1024 * 1024
                    && request.resource.contentType.matches('video/.*');
+    }
+
+    // Admin-managed public media assets (gifts, splash banners, frames, icons, ads)
+    match /{folder}/{allPaths=**} {
+      allow read: if folder in ['gifts', 'splash', 'frames', 'icons', 'ads'];
+      allow write: if folder in ['gifts', 'splash', 'frames', 'icons', 'ads']
+                   && isAdminOrOwner()
+                   && request.resource.size < 10 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*');
+    }
+
+    // Default deny fallback
+    match /{allPaths=**} {
+      allow read, write: if false;
     }
   }
 }

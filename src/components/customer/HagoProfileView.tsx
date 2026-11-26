@@ -41,6 +41,7 @@ import { AvatarWithFrame } from '../common/AvatarWithFrame';
 import { EditProfileModal } from './EditProfileModal';
 import { VideosView } from './VideosView';
 import { livoStore, SavedAccountSummary } from '../../services/livoStore';
+import { shareContentToSocial, SharePlatform } from '../../utils/socialShare';
 
 interface HagoProfileViewProps {
   user: UserProfile | null;
@@ -87,6 +88,7 @@ export const HagoProfileView: React.FC<HagoProfileViewProps> = ({
   const [showSquareModal, setShowSquareModal] = useState(false);
   const [profileTab, setProfileTab] = useState<'services' | 'videos' | 'about'>('services');
   const [infoNotice, setInfoNotice] = useState<string | null>(null);
+  const [socialModalTab, setSocialModalTab] = useState<'friends' | 'followers' | 'following' | null>(null);
 
   const refreshSavedAccounts = () => {
     setSavedAccounts(livoStore.getSavedAccounts());
@@ -221,31 +223,36 @@ export const HagoProfileView: React.FC<HagoProfileViewProps> = ({
     setTimeout(() => setCopiedUid(false), 2000);
   };
 
+  const followersList = livoStore.getFollowersList(user.uid);
+  const followingList = livoStore.getFollowingList(user.uid);
+  const friendsList = livoStore.getFriendsList(user.uid);
+  const followingUidsSet = new Set(user.followingUids || []);
+
   const [shareFeedback, setShareFeedback] = useState<string | null>(null);
-  const handleCopyLink = (channelLabel?: string) => {
-    const shareUrl = `https://livo.live/u/${user.uid}`;
-    if (navigator.share && channelLabel && channelLabel !== 'نسخ الرابط') {
-      navigator.share({ title: `ملف ${user.displayName} في LIVO`, url: shareUrl }).catch(() => undefined);
-    }
-    navigator.clipboard?.writeText(shareUrl).catch(() => undefined);
+  const handleSocialShare = async (platform: SharePlatform) => {
+    const shareUrl = `${typeof window !== 'undefined' ? window.location.origin : 'https://livo.live'}/?uid=${user.uid}`;
+    const res = await shareContentToSocial(platform, {
+      title: `حساب ${user.displayName} على LIVO`,
+      text: `انضم إليّ في منصة LIVO الصوتية والاجتماعية! معرّف حسابي: ${user.uid} 🎙️✨`,
+      url: shareUrl
+    });
     setCopiedLink(true);
-    setShareFeedback(
-      channelLabel
-        ? `تم نسخ رابط ملفك للمشاركة عبر ${channelLabel} ✓`
-        : 'تم نسخ رابط ملفك بنجاح ✓'
-    );
+    setShareFeedback(res.message);
     setTimeout(() => {
       setCopiedLink(false);
       setShareFeedback(null);
-    }, 2400);
+    }, 2600);
   };
 
   const hasUnreadNotifs = livoStore.getInAppNotifications().some((n) => !n.isRead);
 
   return (
     <div className="flex flex-col h-full bg-[#FAFAFA] text-black select-none overflow-y-auto pb-8">
-      {/* HAGO Dark Cover Header */}
-      <div className="relative bg-gradient-to-br from-[#23103b] via-[#180a2a] to-[#0e0717] text-white px-4 pt-3.5 pb-10">
+      {/* HAGO Dark Cover Header (with optional user coverUrl) */}
+      <div
+        className="relative bg-gradient-to-br from-[#23103b] via-[#180a2a] to-[#0e0717] bg-cover bg-center text-white px-4 pt-3.5 pb-10"
+        style={user.coverUrl ? { backgroundImage: `linear-gradient(180deg, rgba(16,6,28,0.45) 0%, rgba(14,7,23,0.88) 100%), url(${user.coverUrl})` } : undefined}
+      >
         {/* Top Action Icons (Menu with real unread dot, Share, Edit, Likes Heart) */}
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
@@ -391,28 +398,48 @@ export const HagoProfileView: React.FC<HagoProfileViewProps> = ({
 
       {/* Overlapping White Sheet (HAGO Stats + Family/Agency + Mint Wallet + Tabs) */}
       <div className="-mt-6 bg-[#FAFAFA] rounded-t-[26px] px-4 pt-4 pb-2 relative z-10 shadow-sm">
-        {/* Following & Followers Bar */}
-        <div className="flex items-center justify-around bg-white border border-gray-100 rounded-2xl py-2.5 px-3 text-center shadow-2xs">
-          <div>
+        {/* Following, Followers, Friends & Videos Interactive Bar */}
+        <div className="grid grid-cols-4 bg-white border border-gray-100 rounded-2xl py-2.5 px-2 text-center shadow-2xs divide-x divide-x-reverse divide-gray-100">
+          <button
+            type="button"
+            onClick={() => setSocialModalTab('followers')}
+            className="hover:bg-amber-50/60 rounded-xl py-0.5 transition-colors"
+          >
             <span className="font-digits font-black text-base text-gray-900 block">
-              {(user.followersCount || 0).toLocaleString()}
+              {Math.max(followersList.length, user.followersCount || 0).toLocaleString()}
             </span>
-            <span className="text-[10px] text-gray-500 font-bold">متابعين</span>
-          </div>
-          <div className="h-6 w-[1px] bg-gray-200" />
-          <div>
+            <span className="text-[10px] text-gray-500 font-bold">متابعون</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setSocialModalTab('following')}
+            className="hover:bg-amber-50/60 rounded-xl py-0.5 transition-colors"
+          >
             <span className="font-digits font-black text-base text-gray-900 block">
-              {(user.followingCount || 0).toLocaleString()}
+              {Math.max(followingList.length, user.followingCount || 0).toLocaleString()}
             </span>
-            <span className="text-[10px] text-gray-500 font-bold">متابَع</span>
-          </div>
-          <div className="h-6 w-[1px] bg-gray-200" />
-          <div>
+            <span className="text-[10px] text-gray-500 font-bold">أتابعهم</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setSocialModalTab('friends')}
+            className="hover:bg-emerald-50/70 rounded-xl py-0.5 transition-colors"
+          >
+            <span className="font-digits font-black text-base text-emerald-700 block">
+              {friendsList.length.toLocaleString()}
+            </span>
+            <span className="text-[10px] text-emerald-700 font-bold">الأصدقاء</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setProfileTab('videos')}
+            className="hover:bg-purple-50/60 rounded-xl py-0.5 transition-colors"
+          >
             <span className="font-digits font-black text-base text-gray-900 block">
               {userVideos.length}
             </span>
             <span className="text-[10px] text-gray-500 font-bold">الفيديوهات</span>
-          </div>
+          </button>
         </div>
 
         {/* Bio if exists */}
@@ -1006,7 +1033,7 @@ export const HagoProfileView: React.FC<HagoProfileViewProps> = ({
             {/* Share Targets */}
             <div className="grid grid-cols-4 gap-2 text-center text-[10px] font-bold text-gray-700">
               <button
-                onClick={() => handleCopyLink('واتساب')}
+                onClick={() => handleSocialShare('whatsapp')}
                 className="flex flex-col items-center gap-1 group"
               >
                 <div className="w-12 h-12 rounded-full bg-[#25D366] text-white flex items-center justify-center text-xl shadow group-hover:scale-105 transition-transform">
@@ -1016,7 +1043,7 @@ export const HagoProfileView: React.FC<HagoProfileViewProps> = ({
               </button>
 
               <button
-                onClick={() => handleCopyLink('فيسبوك')}
+                onClick={() => handleSocialShare('facebook')}
                 className="flex flex-col items-center gap-1 group"
               >
                 <div className="w-12 h-12 rounded-full bg-[#1877F2] text-white flex items-center justify-center text-xl shadow group-hover:scale-105 transition-transform">
@@ -1026,7 +1053,7 @@ export const HagoProfileView: React.FC<HagoProfileViewProps> = ({
               </button>
 
               <button
-                onClick={() => handleCopyLink('سناب شات')}
+                onClick={() => handleSocialShare('snapchat')}
                 className="flex flex-col items-center gap-1 group"
               >
                 <div className="w-12 h-12 rounded-full bg-[#FFFC00] text-black flex items-center justify-center text-xl shadow group-hover:scale-105 transition-transform">
@@ -1036,7 +1063,7 @@ export const HagoProfileView: React.FC<HagoProfileViewProps> = ({
               </button>
 
               <button
-                onClick={() => handleCopyLink('نسخ الرابط')}
+                onClick={() => handleSocialShare('copy')}
                 className="flex flex-col items-center gap-1 group"
               >
                 <div className="w-12 h-12 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-800 flex items-center justify-center shadow group-hover:scale-105 transition-transform">
@@ -1044,6 +1071,132 @@ export const HagoProfileView: React.FC<HagoProfileViewProps> = ({
                 </div>
                 <span>{copiedLink ? 'تم النسخ ✓' : 'نسخ الرابط'}</span>
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Interactive Followers / Following / Friends List Modal */}
+      {socialModalTab && (
+        <div
+          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in"
+          onClick={() => setSocialModalTab(null)}
+        >
+          <div
+            className="bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl p-4 shadow-2xl space-y-3 text-gray-900 max-h-[82vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-gray-100 pb-2.5">
+              <h3 className="font-black text-sm text-gray-900">
+                {socialModalTab === 'friends'
+                  ? `الأصدقاء المتبادلون (${friendsList.length})`
+                  : socialModalTab === 'followers'
+                  ? `المتابعون (${followersList.length})`
+                  : `الأشخاص الذين أتابعهم (${followingList.length})`}
+              </h3>
+              <button
+                onClick={() => setSocialModalTab(null)}
+                className="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-3 gap-1.5 bg-gray-100 p-1 rounded-2xl">
+              {(
+                [
+                  { id: 'followers', label: `المتابعون (${followersList.length})` },
+                  { id: 'following', label: `أتابعهم (${followingList.length})` },
+                  { id: 'friends', label: `الأصدقاء (${friendsList.length})` }
+                ] as const
+              ).map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setSocialModalTab(t.id)}
+                  className={`py-1.5 rounded-xl text-[11px] font-black transition-all ${
+                    socialModalTab === t.id ? 'bg-[#FFE600] text-black shadow-2xs' : 'text-gray-600'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-2 py-1">
+              {(() => {
+                const items =
+                  socialModalTab === 'friends'
+                    ? friendsList
+                    : socialModalTab === 'followers'
+                    ? followersList
+                    : followingList;
+                if (items.length === 0) {
+                  return (
+                    <div className="text-center py-10 text-gray-400 space-y-1.5">
+                      <UserPlus className="w-8 h-8 mx-auto opacity-40" />
+                      <p className="text-xs font-bold text-gray-500">
+                        {socialModalTab === 'friends'
+                          ? 'لا يوجد أصدقاء متبادلون بعد (عندما تتابع شخصاً ويتابعك يصبح صديقك تلقائياً)'
+                          : socialModalTab === 'followers'
+                          ? 'لا يوجد متابعون حتى الآن'
+                          : 'أنت لا تتابع أي حساب حالياً'}
+                      </p>
+                    </div>
+                  );
+                }
+                return items.map((member) => {
+                  const amFollowing = followingUidsSet.has(member.uid);
+                  const isMutual = livoStore.areMutualFriends(user.uid, member.uid);
+                  return (
+                    <div
+                      key={member.uid}
+                      className="flex items-center justify-between gap-2 p-2.5 rounded-2xl bg-gray-50 border border-gray-100"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <AvatarWithFrame
+                          sizePx={42}
+                          avatarUrl={member.avatar}
+                          displayName={member.displayName}
+                          frameUrl={livoStore.getResolvedFrameUrl(member)}
+                          frameGlowColor={member.frameGlowColor}
+                          frameAnimated={member.frameAnimated}
+                        />
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <UserNameWithBadges
+                              displayName={member.displayName}
+                              isVerified={member.isVerified}
+                              verifiedBadgeColor={member.verifiedBadgeColor}
+                              badgeSize={13}
+                              nameClassName="text-xs font-black text-gray-900"
+                            />
+                            {isMutual && (
+                              <span className="text-[9px] font-black bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded-full">
+                                🤝 صديق
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[10px] text-gray-500 font-digits block">
+                            UID: {member.uid} • Lv.{member.level || 0}
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => livoStore.toggleFollowUser(user.uid, member.uid)}
+                        className={`px-3 py-1.5 rounded-full text-[11px] font-black shrink-0 ${
+                          amFollowing
+                            ? 'bg-gray-200 text-gray-700 hover:bg-red-100 hover:text-red-700'
+                            : 'bg-[#FFE600] text-black'
+                        }`}
+                      >
+                        {amFollowing ? 'إلغاء المتابعة' : 'متابعة +'}
+                      </button>
+                    </div>
+                  );
+                });
+              })()}
             </div>
           </div>
         </div>

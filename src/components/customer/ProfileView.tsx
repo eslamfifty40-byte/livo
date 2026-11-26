@@ -12,10 +12,13 @@ import {
   Sparkles,
   ChevronLeft,
   ShieldCheck,
-  Flame
+  Flame,
+  X,
+  Users
 } from 'lucide-react';
 import { UserProfile } from '../../types';
 import { CUSTOMER_SUPPORT_CONTACT } from '../../data/initialData';
+import { livoStore } from '../../services/livoStore';
 
 interface ProfileViewProps {
   user: UserProfile;
@@ -36,6 +39,11 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 }) => {
   const [copiedUid, setCopiedUid] = useState(false);
   const [showSupportModal, setShowSupportModal] = useState(false);
+  const [socialModalTab, setSocialModalTab] = useState<'friends' | 'followers' | 'following' | null>(null);
+
+  const followersList = livoStore.getFollowersList(user.uid);
+  const followingList = livoStore.getFollowingList(user.uid);
+  const friendsList = livoStore.getFriendsList(user.uid);
 
   const handleCopyUid = () => {
     navigator.clipboard.writeText(user.uid);
@@ -46,7 +54,10 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   return (
     <div className="flex flex-col h-[620px] bg-[#0c0517] rounded-2xl border border-purple-900/50 overflow-hidden text-white shadow-2xl">
       {/* Top Banner & Avatar Header */}
-      <div className="relative bg-gradient-to-b from-purple-950 via-[#1a0c33] to-[#0c0517] p-4 pt-6 border-b border-purple-900/40">
+      <div
+        className="relative bg-gradient-to-b from-purple-950 via-[#1a0c33] to-[#0c0517] bg-cover bg-center p-4 pt-6 border-b border-purple-900/40"
+        style={user.coverUrl ? { backgroundImage: `linear-gradient(180deg, rgba(20,8,40,0.48) 0%, rgba(12,5,23,0.92) 100%), url(${user.coverUrl})` } : undefined}
+      >
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-3">
             {/* Avatar with Equipped Frame */}
@@ -107,23 +118,27 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           </p>
         )}
 
-        {/* Stats Strip */}
-        <div className="flex items-center justify-around mt-3 pt-3 border-t border-purple-900/40 text-center">
-          <div>
+        {/* Interactive Stats Strip */}
+        <div className="grid grid-cols-4 gap-1 mt-3 pt-3 border-t border-purple-900/40 text-center">
+          <button type="button" onClick={() => setSocialModalTab('following')} className="hover:bg-white/5 rounded-xl py-1">
             <span className="font-digits font-extrabold text-sm text-white block">
-              {user.followingCount}
+              {Math.max(followingList.length, user.followingCount)}
             </span>
             <span className="text-[10px] text-purple-400">أتابعهم</span>
-          </div>
-          <div className="w-px h-6 bg-purple-900/60" />
-          <div>
+          </button>
+          <button type="button" onClick={() => setSocialModalTab('followers')} className="hover:bg-white/5 rounded-xl py-1">
             <span className="font-digits font-extrabold text-sm text-white block">
-              {user.followersCount.toLocaleString()}
+              {Math.max(followersList.length, user.followersCount).toLocaleString()}
             </span>
             <span className="text-[10px] text-purple-400">المتابعون</span>
-          </div>
-          <div className="w-px h-6 bg-purple-900/60" />
-          <div>
+          </button>
+          <button type="button" onClick={() => setSocialModalTab('friends')} className="hover:bg-white/5 rounded-xl py-1">
+            <span className="font-digits font-extrabold text-sm text-emerald-300 block">
+              {friendsList.length}
+            </span>
+            <span className="text-[10px] text-emerald-400">الأصدقاء</span>
+          </button>
+          <div className="py-1">
             <span className="font-digits font-extrabold text-sm text-amber-400 block">
               Lv.{user.level || 0}
             </span>
@@ -264,6 +279,44 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             >
               إغلاق
             </button>
+          </div>
+        </div>
+      )}
+      {socialModalTab && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setSocialModalTab(null)}>
+          <div className="bg-[#170b2c] w-full max-w-sm rounded-2xl border border-purple-800 p-4 space-y-3 shadow-2xl max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-purple-800/40 pb-2">
+              <h3 className="font-bold text-sm text-white flex items-center gap-1.5">
+                <Users className="w-4 h-4 text-[#FFE600]" />
+                {socialModalTab === 'friends' ? 'الأصدقاء المتبادلون' : socialModalTab === 'followers' ? 'المتابعون' : 'أتابعهم'}
+              </h3>
+              <button onClick={() => setSocialModalTab(null)} className="text-purple-300 hover:text-white">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto space-y-2">
+              {(socialModalTab === 'friends' ? friendsList : socialModalTab === 'followers' ? followersList : followingList).map((m) => (
+                <div key={m.uid} className="flex items-center justify-between p-2 rounded-xl bg-[#120824] border border-purple-800/40">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <img src={m.avatar} alt={m.displayName} className="w-9 h-9 rounded-full object-cover" />
+                    <div className="min-w-0">
+                      <span className="text-xs font-bold text-white block truncate">{m.displayName}</span>
+                      <span className="text-[10px] text-purple-300 font-digits">UID: {m.uid}</span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => livoStore.toggleFollowUser(user.uid, m.uid)}
+                    className="px-2.5 py-1 rounded-full bg-amber-400 text-black text-[10px] font-black"
+                  >
+                    {(user.followingUids || []).includes(m.uid) ? 'إلغاء' : 'متابعة'}
+                  </button>
+                </div>
+              ))}
+              {(socialModalTab === 'friends' ? friendsList : socialModalTab === 'followers' ? followersList : followingList).length === 0 && (
+                <p className="text-xs text-purple-300 text-center py-6">لا توجد بيانات في هذه القائمة بعد</p>
+              )}
+            </div>
           </div>
         </div>
       )}

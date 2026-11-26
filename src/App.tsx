@@ -4,13 +4,18 @@ import { livoStore } from './services/livoStore';
 import { UserProfile } from './types';
 import { ArrowRight } from 'lucide-react';
 
-const AdminApp = lazy(() =>
-  import('./components/admin/AdminApp').then((mod) => ({ default: mod.AdminApp }))
-);
+const IS_CUSTOMER_ONLY_BUILD = (import.meta as any).env?.VITE_APP_MODE === 'customer';
+
+const AdminApp = !IS_CUSTOMER_ONLY_BUILD
+  ? lazy(() =>
+      import('./components/admin/AdminApp').then((mod) => ({ default: mod.AdminApp }))
+    )
+  : null;
 
 export default function App() {
   // Support independent app launch: Customer by default, Admin via VITE_APP_MODE=admin or ?app=admin
   const [appMode, setAppMode] = useState<'customer' | 'admin'>(() => {
+    if (IS_CUSTOMER_ONLY_BUILD) return 'customer';
     const buildMode = (import.meta as any).env?.VITE_APP_MODE;
     if (buildMode === 'admin') return 'admin';
     if (typeof window !== 'undefined') {
@@ -22,7 +27,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(livoStore.getCurrentUser());
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
+    if (!IS_CUSTOMER_ONLY_BUILD && typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       if (params.get('app') === 'admin') {
         setAppMode('admin');
@@ -49,7 +54,7 @@ export default function App() {
         )}
 
         {/* LIVO Admin Standalone Application */}
-        {appMode === 'admin' && (
+        {!IS_CUSTOMER_ONLY_BUILD && AdminApp && appMode === 'admin' && (
           <div className="w-full h-full p-2 sm:p-4 animate-in fade-in">
             {/* Mobile Exit to Customer */}
             <div className="lg:hidden mb-2 flex justify-start">

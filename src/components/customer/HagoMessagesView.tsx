@@ -22,9 +22,11 @@ import {
 } from 'lucide-react';
 import { UserProfile, DirectMessage, MessageRequest } from '../../types';
 import { livoStore } from '../../services/livoStore';
+import { directCallAudio } from '../../services/directCallAudio';
 import { AvatarWithFrame } from '../common/AvatarWithFrame';
 import { VerifiedBadgeColor, VerifiedBadgeShape } from '../common/LivoVerifiedBadge';
 import { UserNameWithBadges } from '../common/UserNameWithBadges';
+import { UserProfileSheetModal } from '../common/UserProfileSheetModal';
 import { compressImageForFirestore } from '../../utils/imageCompression';
 
 interface HagoMessagesViewProps {
@@ -88,6 +90,7 @@ export const HagoMessagesView: React.FC<HagoMessagesViewProps> = ({
   const [showQuickRoomModal, setShowQuickRoomModal] = useState(false);
   const [quickRoomTitle, setQuickRoomTitle] = useState('');
   const [activeCallMode, setActiveCallMode] = useState<'audio' | 'video' | null>(null);
+  const [profileModalUser, setProfileModalUser] = useState<UserProfile | null>(null);
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
@@ -1056,46 +1059,56 @@ export const HagoMessagesView: React.FC<HagoMessagesViewProps> = ({
                 <ArrowRight className="w-5 h-5" />
               </button>
 
-              <div className="relative">
-                {activeChatTarget.isBot ? (
-                  <div className="w-9 h-9 rounded-full bg-[#FFE600] flex items-center justify-center text-lg font-black text-black">
-                    ☻
-                  </div>
-                ) : (
-                  <img
-                    src={activeChatTarget.avatar}
-                    alt={activeChatTarget.name}
-                    className="w-9 h-9 rounded-full object-cover"
-                  />
-                )}
-                {activeChatTarget.isOnline && (
-                  <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-green-500 border border-white" />
-                )}
-              </div>
-
               {(() => {
                 const partnerUser = !activeChatTarget.isBot ? livoStore.getUserByUid(activeChatTarget.id) : undefined;
+                const openPartnerSheet = () => {
+                  if (partnerUser) setProfileModalUser(partnerUser);
+                };
                 return (
-                  <div className="min-w-0 max-w-[175px]">
-                    <UserNameWithBadges
-                      displayName={partnerUser?.displayName || activeChatTarget.name}
-                      nameGlowColor={partnerUser?.nameGlowColor}
-                      isVerified={activeChatTarget.isBot ? true : partnerUser?.isVerified}
-                      verifiedBadgeColor={activeChatTarget.isBot ? 'gold' : partnerUser?.verifiedBadgeColor}
-                      verifiedBadgeShape={activeChatTarget.isBot ? 'crown' : partnerUser?.verifiedBadgeShape}
-                      verifiedBadgeGlow={partnerUser?.verifiedBadgeGlow}
-                      customIconUrl={partnerUser?.customIconUrl}
-                      customIconGlow={partnerUser?.customIconGlow}
-                      customIconAnimated={partnerUser?.customIconAnimated}
-                      customIconLabel={partnerUser?.customIconLabel}
-                      badgeSize={14}
-                      iconSize={17}
-                      nameClassName="font-extrabold text-xs text-gray-900"
-                    />
-                    <span className="text-[9px] text-green-600 font-bold block">
-                      {activeChatTarget.isBot ? 'الدعم الرسمي' : `UID: ${activeChatTarget.id}`}
-                    </span>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={openPartnerSheet}
+                    disabled={!partnerUser}
+                    className="flex items-center gap-2 text-right hover:opacity-85 transition-opacity disabled:cursor-default"
+                  >
+                    <div className="relative">
+                      {activeChatTarget.isBot ? (
+                        <div className="w-9 h-9 rounded-full bg-[#FFE600] flex items-center justify-center text-lg font-black text-black">
+                          ☻
+                        </div>
+                      ) : (
+                        <img
+                          src={activeChatTarget.avatar}
+                          alt={activeChatTarget.name}
+                          className="w-9 h-9 rounded-full object-cover ring-2 ring-amber-300/60"
+                        />
+                      )}
+                      {activeChatTarget.isOnline && (
+                        <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-green-500 border border-white" />
+                      )}
+                    </div>
+
+                    <div className="min-w-0 max-w-[175px]">
+                      <UserNameWithBadges
+                        displayName={partnerUser?.displayName || activeChatTarget.name}
+                        nameGlowColor={partnerUser?.nameGlowColor}
+                        isVerified={activeChatTarget.isBot ? true : partnerUser?.isVerified}
+                        verifiedBadgeColor={activeChatTarget.isBot ? 'gold' : partnerUser?.verifiedBadgeColor}
+                        verifiedBadgeShape={activeChatTarget.isBot ? 'crown' : partnerUser?.verifiedBadgeShape}
+                        verifiedBadgeGlow={partnerUser?.verifiedBadgeGlow}
+                        customIconUrl={partnerUser?.customIconUrl}
+                        customIconGlow={partnerUser?.customIconGlow}
+                        customIconAnimated={partnerUser?.customIconAnimated}
+                        customIconLabel={partnerUser?.customIconLabel}
+                        badgeSize={14}
+                        iconSize={17}
+                        nameClassName="font-extrabold text-xs text-gray-900"
+                      />
+                      <span className="text-[9px] text-green-600 font-bold block">
+                        {activeChatTarget.isBot ? 'الدعم الرسمي' : `UID: ${activeChatTarget.id} • عرض الملف`}
+                      </span>
+                    </div>
+                  </button>
                 );
               })()}
             </div>
@@ -1116,14 +1129,27 @@ export const HagoMessagesView: React.FC<HagoMessagesViewProps> = ({
                   {followingSet.has(activeChatTarget.id) ? 'متابَع ✓' : 'تابع +'}
                 </button>
               )}
-              {canDirectChat && (
+              {canDirectChat && !activeChatTarget.isBot && (
                 <>
                   <button
-                    onClick={() => setActiveCallMode('audio')}
-                    className="w-8 h-8 rounded-full hover:bg-gray-100 flex items-center justify-center text-gray-700"
-                    title="مكالمة صوتية"
+                    onClick={() => {
+                      if (!currentUser) {
+                        onRequireAuth?.();
+                        return;
+                      }
+                      void directCallAudio.startCall(
+                        {
+                          uid: activeChatTarget.id,
+                          name: activeChatTarget.name,
+                          avatar: activeChatTarget.avatar
+                        },
+                        'audio'
+                      );
+                    }}
+                    className="w-8 h-8 rounded-full bg-emerald-50 hover:bg-emerald-100 flex items-center justify-center text-emerald-700 border border-emerald-200"
+                    title="اتصال صوتي مباشر (WebRTC)"
                   >
-                    <Phone className="w-4 h-4" />
+                    <Mic className="w-4 h-4" />
                   </button>
                   <button
                     onClick={() => setActiveCallMode('video')}
@@ -1254,7 +1280,12 @@ export const HagoMessagesView: React.FC<HagoMessagesViewProps> = ({
                 {(() => {
                   const partner = !activeChatTarget.isBot ? livoStore.getUserByUid(activeChatTarget.id) : undefined;
                   return (
-                    <div className="bg-white rounded-2xl border border-gray-100 p-3 flex items-center justify-between gap-3 shadow-2xs">
+                    <button
+                      type="button"
+                      onClick={() => partner && setProfileModalUser(partner)}
+                      disabled={!partner}
+                      className="w-full text-right bg-white rounded-2xl border border-gray-100 p-3 flex items-center justify-between gap-3 shadow-2xs hover:border-amber-300 transition-colors disabled:cursor-default"
+                    >
                       <div className="flex items-center gap-2.5 min-w-0">
                         <img
                           src={activeChatTarget.avatar}
@@ -1271,7 +1302,7 @@ export const HagoMessagesView: React.FC<HagoMessagesViewProps> = ({
                       <span className="text-[10px] font-black px-2 py-1 rounded-full bg-amber-50 text-amber-700 shrink-0">
                         {activeChatTarget.isBot ? 'رسمي' : `Lv.${partner?.level || 0}`}
                       </span>
-                    </div>
+                    </button>
                   );
                 })()}
 
@@ -1443,6 +1474,20 @@ export const HagoMessagesView: React.FC<HagoMessagesViewProps> = ({
           />
         </div>
       )}
+
+      {/* Partner Full User Profile Card Sheet */}
+      <UserProfileSheetModal
+        isOpen={Boolean(profileModalUser)}
+        user={profileModalUser}
+        currentUser={currentUser}
+        onClose={() => setProfileModalUser(null)}
+        onVoiceCall={(target) => {
+          void directCallAudio.startCall(
+            { uid: target.uid, name: target.displayName, avatar: target.avatar },
+            'audio'
+          );
+        }}
+      />
     </div>
   );
 };

@@ -112,16 +112,41 @@ export const VERIFICATION_PLANS = [
   { months: 12, priceEGP: 1100, saveTag: 'أفضل قيمة' },
 ];
 
+// Exact 7 Official Gift Categories
+export const GIFT_CATEGORIES = [
+  'الهدايا الملكية',
+  'الحيوانات',
+  'السيارات',
+  'الحب',
+  'الألماس',
+  'الحفلات',
+  'كروت الهدايا'
+] as const;
+
+export function normalizeGiftCategory(rawCategory?: string, isCard?: boolean): string {
+  if (isCard) return 'كروت الهدايا';
+  const cat = (rawCategory || '').trim();
+  if (!cat) return 'الهدايا الملكية';
+  if (cat === 'ملكي' || cat === 'الهدايا الملكية') return 'الهدايا الملكية';
+  if (cat === 'حيوانات' || cat === 'الحيوانات') return 'الحيوانات';
+  if (cat === 'سيارات وطائرات' || cat === 'السيارات') return 'السيارات';
+  if (cat === 'حب' || cat === 'الحب') return 'الحب';
+  if (cat === 'ألماس' || cat === 'الألماس') return 'الألماس';
+  if (cat === 'حفلات' || cat === 'الحفلات') return 'الحفلات';
+  if (cat === 'كروت إهداء' || cat === 'كروت الهدايا') return 'كروت الهدايا';
+  return cat;
+}
+
 // Interactive live stream animated gifts (8 core + 200 expanded catalog gifts = 208 gifts)
 const CORE_INITIAL_GIFTS: GiftItem[] = [
-  { id: 'gift-lion', name: 'الأسد الذهبي', coins: 5000, icon: '🦁', animationType: 'lion', durationMs: 4000, category: 'حيوانات' },
-  { id: 'gift-car', name: 'سيارة سوبر سبورت', coins: 2000, icon: '🏎️', animationType: 'car', durationMs: 3500, category: 'سيارات وطائرات' },
-  { id: 'gift-dragon', name: 'التنين الأسطوري', coins: 1000, icon: '🐉', animationType: 'dragon', durationMs: 3500, category: 'حيوانات' },
-  { id: 'gift-castle', name: 'القصر الملكي', coins: 800, icon: '🏰', animationType: 'castle', durationMs: 3000, category: 'ملكي' },
-  { id: 'gift-rocket', name: 'الصاروخ الفضائي', coins: 500, icon: '🚀', animationType: 'rocket', durationMs: 2500, category: 'سيارات وطائرات' },
-  { id: 'gift-diamond', name: 'ألماسة فاخرة', coins: 200, icon: '💎', animationType: 'diamond', durationMs: 2000, category: 'ألماس' },
-  { id: 'gift-rose', name: 'وردة حمراء', coins: 20, icon: '🌹', animationType: 'rose', durationMs: 1500, category: 'حب' },
-  { id: 'gift-heart', name: 'قلب نيون', coins: 10, icon: '💖', animationType: 'heart', durationMs: 1200, category: 'حب' },
+  { id: 'gift-lion', name: 'الأسد الذهبي', coins: 5000, icon: '🦁', animationType: 'lion', durationMs: 4400, category: 'الحيوانات' },
+  { id: 'gift-car', name: 'سيارة سوبر سبورت', coins: 2000, icon: '🏎️', animationType: 'car', durationMs: 3500, category: 'السيارات' },
+  { id: 'gift-dragon', name: 'التنين الأسطوري', coins: 1000, icon: '🐉', animationType: 'dragon', durationMs: 3500, category: 'الحيوانات' },
+  { id: 'gift-castle', name: 'القصر الملكي', coins: 800, icon: '🏰', animationType: 'castle', durationMs: 3000, category: 'الهدايا الملكية' },
+  { id: 'gift-rocket', name: 'الصاروخ الفضائي', coins: 500, icon: '🚀', animationType: 'rocket', durationMs: 2500, category: 'السيارات' },
+  { id: 'gift-diamond', name: 'ألماسة فاخرة', coins: 200, icon: '💎', animationType: 'diamond', durationMs: 2000, category: 'الألماس' },
+  { id: 'gift-rose', name: 'وردة حمراء', coins: 20, icon: '🌹', animationType: 'rose', durationMs: 1500, category: 'الحب' },
+  { id: 'gift-heart', name: 'قلب نيون', coins: 10, icon: '💖', animationType: 'heart', durationMs: 1200, category: 'الحب' },
 ];
 
 const EXPANDED_GIFT_TEMPLATES: Array<{
@@ -274,8 +299,8 @@ const BUILT_200_GIFTS: GiftItem[] = (() => {
     coins: t.coins,
     icon: t.icon,
     animationType: t.animationType,
-    durationMs: t.animationType === 'lion' ? 3800 : t.isCard ? 3600 : t.coins >= 1000 ? 3400 : 2200,
-    category: t.category,
+    durationMs: t.animationType === 'lion' ? 4400 : t.isCard ? 3600 : t.coins >= 1000 ? 3400 : 2200,
+    category: normalizeGiftCategory(t.category, t.isCard),
     isCard: Boolean(t.isCard),
     isActive: true
   }));
@@ -289,8 +314,8 @@ const BUILT_200_GIFTS: GiftItem[] = (() => {
         coins: price,
         icon: grp.icon,
         animationType: grp.animationType,
-        durationMs: grp.animationType === 'lion' ? 3800 : grp.isCard ? 3600 : price >= 1000 ? 3400 : 2300,
-        category: grp.category,
+        durationMs: grp.animationType === 'lion' ? 4400 : grp.isCard ? 3600 : price >= 1000 ? 3400 : 2300,
+        category: normalizeGiftCategory(grp.category, grp.isCard),
         isCard: Boolean(grp.isCard),
         isActive: true
       });
