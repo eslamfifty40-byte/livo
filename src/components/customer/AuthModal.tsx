@@ -50,6 +50,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
+  const emailInputRef = React.useRef<HTMLInputElement>(null);
+  const passwordInputRef = React.useRef<HTMLInputElement>(null);
   const [phoneNumber, setPhoneNumber] = useState('');
   const [phoneCountryCode, setPhoneCountryCode] = useState('+20');
   const [otpCode, setOtpCode] = useState('');
@@ -117,7 +119,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   /**
    * Real Firebase Email & Password Sign-In / Sign-Up
    */
-  const handleEmailAuth = async (e: React.FormEvent) => {
+  const handleEmailAuth = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!agreedToTerms) {
       setErrorMsg('يرجى الموافقة على شروط الاستخدام وسياسة الخصوصية للمتابعة.');
@@ -126,16 +128,31 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
     setErrorMsg('');
     setInfoMsg('');
-    const cleanEmail = email.trim().toLowerCase();
-    if (!cleanEmail || !password.trim()) {
-      setErrorMsg('يرجى كتابة البريد الإلكتروني وكلمة المرور');
+    const formData = new FormData(e.currentTarget);
+    const rawEmail = email || emailInputRef.current?.value || String(formData.get('email') || '');
+    const rawPassword = password || passwordInputRef.current?.value || String(formData.get('password') || '');
+
+    if (rawEmail && rawEmail !== email) setEmail(rawEmail);
+    if (rawPassword && rawPassword !== password) setPassword(rawPassword);
+
+    const cleanEmail = firebaseService.sanitizeEmail(rawEmail);
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      setErrorMsg('يرجى كتابة البريد الإلكتروني بشكل صحيح');
+      return;
+    }
+    if (!rawPassword || !rawPassword.trim()) {
+      setErrorMsg('يرجى كتابة كلمة المرور للمتابعة');
+      return;
+    }
+    if (authMode === 'signup' && rawPassword.trim().length < 6) {
+      setErrorMsg('كلمة المرور يجب أن تكون 6 أحرف على الأقل');
       return;
     }
 
     setLoading(true);
     try {
       if (authMode === 'login') {
-        const res = await firebaseService.loginCustomerWithEmail(cleanEmail, password);
+        const res = await firebaseService.loginCustomerWithEmail(cleanEmail, rawPassword);
         if (!res.success || !res.user) {
           setLoading(false);
           setErrorMsg(res.error || 'فشل تسجيل الدخول');
@@ -154,20 +171,25 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         onSuccess(synced);
         onClose();
       } else {
-        if (!displayName.trim()) {
+        const cleanDisplayName = displayName.trim();
+        if (!cleanDisplayName) {
           setLoading(false);
           setErrorMsg('يرجى كتابة الاسم المطلوب للحساب');
           return;
         }
-        const res = await firebaseService.registerCustomerWithEmail(cleanEmail, password, displayName.trim());
+        const res = await firebaseService.registerCustomerWithEmail(cleanEmail, rawPassword, cleanDisplayName);
         if (!res.success || !res.user) {
           setLoading(false);
           setErrorMsg(res.error || 'تعذر إنشاء الحساب');
           return;
         }
-        const synced = await livoStore.syncFirebaseUserAsync(res.user, {
-          displayName: displayName.trim()
+        let synced = await livoStore.syncFirebaseUserAsync(res.user, {
+          displayName: cleanDisplayName
         });
+        if (cleanDisplayName && synced.displayName !== cleanDisplayName) {
+          livoStore.updateUserProfile(synced.uid, { displayName: cleanDisplayName });
+          synced = { ...synced, displayName: cleanDisplayName };
+        }
         setLoading(false);
         onSuccess(synced);
         onClose();
@@ -179,13 +201,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   };
 
   const handleResetPassword = async () => {
-    if (!email.trim()) {
+    const cleanEmail = firebaseService.sanitizeEmail(email || emailInputRef.current?.value);
+    if (!cleanEmail) {
       setErrorMsg('اكتب بريدك الإلكتروني أولاً ثم اضغط على استعادة كلمة المرور');
       return;
     }
     setLoading(true);
     setErrorMsg('');
-    const res = await firebaseService.resetCustomerPassword(email);
+    const res = await firebaseService.resetCustomerPassword(cleanEmail);
     setLoading(false);
     if (res.success) {
       setInfoMsg(res.message);
@@ -471,7 +494,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             <div>
               <label className="text-[11px] font-bold text-gray-700 block mb-1">البريد الإلكتروني</label>
               <input
+                ref={emailInputRef}
+                name="email"
                 type="email"
+                autoComplete="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="name@example.com"
@@ -494,7 +520,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 )}
               </div>
               <input
+                ref={passwordInputRef}
+                name="password"
                 type="password"
+                autoComplete={authMode === 'signup' ? 'new-password' : 'current-password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"

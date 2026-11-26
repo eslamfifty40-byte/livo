@@ -967,13 +967,13 @@ class LivoStore {
     }
 
     const task = (async () => {
-      const fbEmail = fbUser.email?.trim().toLowerCase();
+      const fbEmail = this.normalizeEmail(fbUser.email);
       const deviceId = this.getOrCreateDeviceId();
       const localMatch =
         this.users.find((u) => u.authUid === fbUser.uid) ||
         (fbEmail
           ? this.users.find(
-              (u) => u.email?.trim().toLowerCase() === fbEmail && (!u.authUid || u.authUid === fbUser.uid)
+              (u) => this.normalizeEmail(u.email) === fbEmail && (!u.authUid || u.authUid === fbUser.uid)
             )
           : undefined);
 
@@ -983,6 +983,13 @@ class LivoStore {
         if (serverMatch && !this.isFakeUserRecord(serverMatch)) {
           resolvedUid = serverMatch.uid;
           this.mergeUsersSafe([serverMatch]);
+        }
+      }
+
+      if (this.isOwnerEmail(fbEmail) && !this.getUserByUid('10000')) {
+        const owner10000 = await firebaseService.findUserByUid('10000');
+        if (owner10000 && !this.isFakeUserRecord(owner10000)) {
+          this.mergeUsersSafe([owner10000]);
         }
       }
 
@@ -1012,11 +1019,11 @@ class LivoStore {
     fbUser: FirebaseUser,
     options?: { accountType?: 'personal' | 'business'; displayName?: string }
   ): UserProfile {
-    const fbEmail = fbUser.email?.trim().toLowerCase();
+    const fbEmail = this.normalizeEmail(fbUser.email);
     const isOwner = this.isOwnerEmail(fbEmail);
     const deviceId = this.getOrCreateDeviceId();
     const activeSupervisor = fbEmail
-      ? this.supervisors.find(s => s.isActive && s.email.trim().toLowerCase() === fbEmail)
+      ? this.supervisors.find(s => s.isActive && this.normalizeEmail(s.email) === fbEmail)
       : undefined;
 
     // 1. Strict authUid match
@@ -1025,7 +1032,7 @@ class LivoStore {
     // 2. Email match only if profile isn't claimed by a different authUid
     if (!matched && fbEmail) {
       matched = this.users.find(
-        u => u.email?.trim().toLowerCase() === fbEmail && (!u.authUid || u.authUid === fbUser.uid)
+        u => this.normalizeEmail(u.email) === fbEmail && (!u.authUid || u.authUid === fbUser.uid)
       );
     }
 
@@ -1034,6 +1041,9 @@ class LivoStore {
       if (!matched.authUid) updates.authUid = fbUser.uid;
       if (!matched.deviceId && !isOwner) updates.deviceId = deviceId;
       if (fbEmail && !matched.email) updates.email = fbEmail;
+      if (options?.displayName?.trim() && (!matched.displayName || matched.displayName.startsWith('عضو_') || matched.displayName === fbEmail?.split('@')[0])) {
+        updates.displayName = options.displayName.trim();
+      }
       if (fbUser.photoURL && (!matched.avatar || matched.avatar === '/assets/livo/customer_icon.jpg')) {
         updates.avatar = fbUser.photoURL;
       }

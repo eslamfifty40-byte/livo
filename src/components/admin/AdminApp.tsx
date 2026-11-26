@@ -109,6 +109,8 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
   const [authError, setAuthError] = useState('');
   const [authInfo, setAuthInfo] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const adminEmailRef = useRef<HTMLInputElement>(null);
+  const adminPasswordRef = useRef<HTMLInputElement>(null);
 
   // Active Admin Section Navigation
   const [activeSection, setActiveSection] = useState<
@@ -481,21 +483,34 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
   ]);
 
   // Admin Login with Firebase Auth and real server-side validation (Owner + Active Supervisors)
-  const handleAdminLogin = async (e: React.FormEvent) => {
+  const handleAdminLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setAuthError('');
     setAuthInfo('');
     setIsLoggingIn(true);
 
-    const cleanEmail = livoStore.normalizeEmail(adminUsername);
+    const formData = new FormData(e.currentTarget);
+    const rawEmail = adminUsername || adminEmailRef.current?.value || String(formData.get('email') || '');
+    const rawPassword = adminPassword || adminPasswordRef.current?.value || String(formData.get('password') || '');
+
+    if (rawEmail && rawEmail !== adminUsername) setAdminUsername(rawEmail);
+    if (rawPassword && rawPassword !== adminPassword) setAdminPassword(rawPassword);
+
+    const cleanEmail = livoStore.normalizeEmail(rawEmail);
     if (!cleanEmail || !cleanEmail.includes('@')) {
       setAuthError('يرجى إدخال البريد الإلكتروني بشكل صحيح.');
       setIsLoggingIn(false);
       return;
     }
 
+    if (!rawPassword || !rawPassword.trim()) {
+      setAuthError('يرجى كتابة كلمة المرور للمتابعة.');
+      setIsLoggingIn(false);
+      return;
+    }
+
     try {
-      const res = await firebaseService.loginAdmin(cleanEmail, adminPassword);
+      const res = await firebaseService.loginAdmin(cleanEmail, rawPassword);
       if (res.success && res.user) {
         const verifiedEmail = livoStore.normalizeEmail(res.user.email || cleanEmail);
         const authorized = await livoStore.verifyAdminAuthorizationAsync(verifiedEmail, res.user.uid);
@@ -592,7 +607,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
   const handleAdminPasswordReset = async () => {
     setAuthError('');
     setAuthInfo('');
-    const cleanEmail = adminUsername.trim().toLowerCase();
+    const cleanEmail = livoStore.normalizeEmail(adminUsername || adminEmailRef.current?.value);
     if (!cleanEmail || !cleanEmail.includes('@')) {
       setAuthError('اكتب بريدك الإلكتروني أولاً في الخانة ثم اضغط على استعادة كلمة المرور.');
       return;
@@ -1084,7 +1099,10 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
           <div>
             <label className="block text-xs font-bold text-gray-700 mb-1">البريد الإلكتروني للإدارة:</label>
             <input
+              ref={adminEmailRef}
+              name="email"
               type="email"
+              autoComplete="email"
               value={adminUsername}
               onChange={(e) => {
                 setAdminUsername(e.target.value);
@@ -1109,7 +1127,10 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
               </button>
             </div>
             <input
+              ref={adminPasswordRef}
+              name="password"
               type="password"
+              autoComplete="current-password"
               value={adminPassword}
               onChange={(e) => {
                 setAdminPassword(e.target.value);

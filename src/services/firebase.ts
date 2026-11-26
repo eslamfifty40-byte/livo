@@ -35,6 +35,7 @@ import {
   onAuthStateChanged,
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithCredential,
   signInWithRedirect,
   getRedirectResult,
   signInAnonymously,
@@ -1710,14 +1711,17 @@ export class FirebaseService {
 
   public isWebViewOrCapacitor(): boolean {
     if (typeof window === 'undefined') return false;
-    const cap = (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
-    if (cap?.isNativePlatform?.()) return true;
-    if (window.location.protocol === 'capacitor:' || window.location.protocol === 'ionic:') return true;
-    // Capacitor Android default origin is https://localhost or http://localhost inside Android WebView
-    const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : '';
-    if (/\bwv\b|; wv\)/i.test(ua)) return true;
-    if (/Android/i.test(ua) && /Version\/\d+\.\d+/i.test(ua) && !/Chrome\/\d+.*Mobile Safari/i.test(ua)) {
-      return true;
+    try {
+      const cap = (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
+      if (cap && typeof cap.isNativePlatform === 'function' && cap.isNativePlatform()) return true;
+      if (window.location.protocol === 'capacitor:' || window.location.protocol === 'ionic:') return true;
+      const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : '';
+      if (/\bwv\b|; wv\)/i.test(ua)) return true;
+      if (/Android/i.test(ua) && /Version\/\d+\.\d+/i.test(ua) && !/Chrome\/\d+.*Mobile Safari/i.test(ua)) {
+        return true;
+      }
+    } catch {
+      return false;
     }
     return false;
   }
@@ -1814,8 +1818,22 @@ export class FirebaseService {
     if (code === 'auth/operation-not-allowed') {
       return 'طريقة الدخول بالبريد وكلمة المرور غير مفعّلة في Firebase Console حالياً. استخدم زر "تسجيل الدخول السريع بحساب Google" أو فعّل Email/Password في Firebase Authentication.';
     }
-    if (code === 'auth/user-not-found' || code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
+    if (code === 'auth/missing-password') {
+      return 'يرجى كتابة كلمة المرور للمتابعة.';
+    }
+    if (code === 'auth/missing-email') {
+      return 'يرجى كتابة البريد الإلكتروني للمتابعة.';
+    }
+    if (
+      code === 'auth/user-not-found' ||
+      code === 'auth/wrong-password' ||
+      code === 'auth/invalid-credential' ||
+      code === 'auth/invalid-login-credentials'
+    ) {
       return 'البريد الإلكتروني أو كلمة المرور غير صحيحة، أو أن الحساب مسجل عبر Google فقط (جرّب الدخول بحساب Google أو اضغط نسيت كلمة المرور لتعيين كلمة مرور).';
+    }
+    if (code === 'auth/user-disabled') {
+      return 'تم تعطيل هذا الحساب في نظام المصادقة.';
     }
     if (code === 'auth/email-already-in-use') {
       return 'هذا البريد الإلكتروني مسجل بالفعل. يرجى تسجيل الدخول.';
@@ -1832,9 +1850,102 @@ export class FirebaseService {
     return err?.message || fallback;
   }
 
+  private gsiScriptPromise: Promise<boolean> | null = null;
+
+  private ensureGoogleIdentityScript(): Promise<boolean> {
+    if (typeof window === 'undefined' || typeof document === 'undefined') {
+      return Promise.resolve(false);
+    }
+    const win = window as unknown as { google?: { accounts?: { id?: unknown } } };
+    if (win.google?.accounts?.id) {
+      return Promise.resolve(true);
+    }
+    if (this.gsiScriptPromise) {
+      return this.gsiScriptPromise;
+    }
+    this.gsiScriptPromise = new Promise<boolean>((resolve) => {
+      const existing = document.querySelector('script[src*="accounts.google.com/gsi/client"]') as HTMLScriptElement | null;
+      if (existing) {
+        existing.addEventListener('load', () => resolve(true), { once: true });
+        existing.addEventListener('error', () => resolve(false), { once: true });
+        setTimeout(() => resolve(Boolean(win.google?.accounts?.id)), 3000);
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = 'https://accounts.google.com/gsi/client';
+      script.async = true;
+      script.defer = true;
+      script.onload = () => resolve(Boolean(win.google?.accounts?.id));
+      script.onerror = () => resolve(false);
+      document.head.appendChild(script);
+    });
+    return this.gsiScriptPromise;
+  }
+
+  private async tryGoogleIdentityServicesSignIn(): Promise<{ user?: FirebaseUser; error?: string } | null> {
+    const clientId = (firebaseConfig as { oAuthClientId?: string }).oAuthClientId;
+    if (!clientId || typeof window === 'undefined') return null;
+
+    const loaded = await this.ensureGoogleIdentityScript();
+    const gsi = (window as unknown as {
+      google?: {
+        accounts?: {
+          id?: {
+            initialize: (cfg: { client_id: string; callback: (res: { credential?: string }) => void; ux_mode?: string; use_fedcm_for_prompt?: boolean }) => void;
+            prompt: (cb?: (notification: { isNotDisplayed?: () => boolean; isSkippedMoment?: () => boolean; isDismissedMoment?: () => boolean }) => void) => void;
+          };
+        };
+      };
+    }).google?.accounts?.id;
+
+    if (!loaded || !gsi) return null;
+
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (val: { user?: FirebaseUser; error?: string } | null) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        resolve(val);
+      };
+
+      const timer = window.setTimeout(() => finish(null), 8000);
+
+      try {
+        gsi.initialize({
+          client_id: clientId,
+          ux_mode: 'popup',
+          use_fedcm_for_prompt: true,
+          callback: async (response: { credential?: string }) => {
+            if (!response?.credential) {
+              finish(null);
+              return;
+            }
+            try {
+              const credential = GoogleAuthProvider.credential(response.credential);
+              const userCred = await signInWithCredential(auth, credential);
+              finish({ user: userCred.user });
+            } catch (credErr: any) {
+              finish({ error: this.formatFirebaseAuthError(credErr, 'تعذر إكمال الدخول عبر Google') });
+            }
+          }
+        });
+
+        gsi.prompt((notification) => {
+          if (notification?.isNotDisplayed?.() || notification?.isSkippedMoment?.()) {
+            finish(null);
+          }
+        });
+      } catch {
+        finish(null);
+      }
+    });
+  }
+
   private async runGoogleAuthFlow(
     preferRedirect = false
   ): Promise<{ success: boolean; user?: FirebaseUser; redirectStarted?: boolean; error?: string }> {
+    void this.ensureGoogleIdentityScript();
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
 
@@ -1900,6 +2011,19 @@ export class FirebaseService {
           return { success: false, error: this.formatFirebaseAuthError(redirectErr, 'تعذر فتح تسجيل الدخول عبر Google') };
         }
       }
+      if (
+        code === 'auth/popup-blocked' ||
+        code === 'auth/operation-not-supported-in-this-environment' ||
+        code === 'auth/internal-error'
+      ) {
+        const gsiRes = await this.tryGoogleIdentityServicesSignIn();
+        if (gsiRes?.user) {
+          return { success: true, user: gsiRes.user };
+        }
+        if (gsiRes?.error) {
+          return { success: false, error: gsiRes.error };
+        }
+      }
       console.warn('Google Auth error:', err);
       return { success: false, error: this.formatFirebaseAuthError(err, 'تم إلغاء نافذة اختيار حساب Google') };
     }
@@ -1910,7 +2034,15 @@ export class FirebaseService {
    */
   public async loginAdmin(email: string, pass: string): Promise<{ success: boolean; user?: FirebaseUser; error?: string }> {
     const cleanEmail = this.sanitizeEmail(email);
-    const cleanPass = pass.trim();
+    const rawPass = typeof pass === 'string' ? pass : '';
+    const cleanPass = rawPass.trim();
+
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      return { success: false, error: 'يرجى إدخال البريد الإلكتروني بشكل صحيح.' };
+    }
+    if (!cleanPass) {
+      return { success: false, error: 'يرجى كتابة كلمة المرور للمتابعة.' };
+    }
 
     try {
       const cred = await signInWithEmailAndPassword(auth, cleanEmail, cleanPass);
@@ -1940,7 +2072,16 @@ export class FirebaseService {
    */
   public async loginCustomerWithEmail(email: string, pass: string): Promise<{ success: boolean; user?: FirebaseUser; error?: string }> {
     const cleanEmail = this.sanitizeEmail(email);
-    const cleanPass = pass.trim();
+    const rawPass = typeof pass === 'string' ? pass : '';
+    const cleanPass = rawPass.trim();
+
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      return { success: false, error: 'يرجى كتابة البريد الإلكتروني بشكل صحيح.' };
+    }
+    if (!cleanPass) {
+      return { success: false, error: 'يرجى كتابة كلمة المرور للمتابعة.' };
+    }
+
     try {
       const cred = await signInWithEmailAndPassword(auth, cleanEmail, cleanPass);
       return { success: true, user: cred.user };
@@ -1954,7 +2095,19 @@ export class FirebaseService {
    */
   public async registerCustomerWithEmail(email: string, pass: string, displayName?: string): Promise<{ success: boolean; user?: FirebaseUser; error?: string }> {
     const cleanEmail = this.sanitizeEmail(email);
-    const cleanPass = pass.trim();
+    const rawPass = typeof pass === 'string' ? pass : '';
+    const cleanPass = rawPass.trim();
+
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      return { success: false, error: 'يرجى كتابة البريد الإلكتروني بشكل صحيح.' };
+    }
+    if (!cleanPass) {
+      return { success: false, error: 'يرجى كتابة كلمة المرور للمتابعة.' };
+    }
+    if (cleanPass.length < 6) {
+      return { success: false, error: 'كلمة المرور يجب أن تكون 6 أحرف على الأقل.' };
+    }
+
     try {
       const cred = await createUserWithEmailAndPassword(auth, cleanEmail, cleanPass);
       if (displayName && cred.user) {
@@ -2008,11 +2161,15 @@ export class FirebaseService {
    * Send Password Reset Email
    */
   public async resetCustomerPassword(email: string): Promise<{ success: boolean; message: string }> {
-    try {
-      await sendPasswordResetEmail(auth, email.trim().toLowerCase());
-      return { success: true, message: 'تم إرسال رابط إعادة تعيين كلمة المرور إلى بريدك الإلكتروني' };
-    } catch {
+    const cleanEmail = this.sanitizeEmail(email);
+    if (!cleanEmail || !cleanEmail.includes('@')) {
       return { success: false, message: 'تأكد من كتابة البريد الإلكتروني المسجل بشكل صحيح' };
+    }
+    try {
+      await sendPasswordResetEmail(auth, cleanEmail);
+      return { success: true, message: 'تم إرسال رابط إعادة تعيين كلمة المرور إلى بريدك الإلكتروني' };
+    } catch (err: any) {
+      return { success: false, message: this.formatFirebaseAuthError(err, 'تأكد من كتابة البريد الإلكتروني المسجل بشكل صحيح') };
     }
   }
 
