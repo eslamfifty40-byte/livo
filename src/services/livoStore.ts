@@ -3271,7 +3271,7 @@ class LivoStore {
         roomTitle: room.title,
         senderUid: '10000',
         senderName: data.senderName?.trim() || 'إدارة LIVO الملكية',
-        senderAvatar: '/assets/livo/admin_icon.jpg',
+        senderAvatar: '/assets/livo/admin_icon.png',
         recipientUid: rUid,
         recipientName: rName,
         giftId: gift.id,
