@@ -5,6 +5,22 @@
 
 export type UserRole = 'user' | 'charging_agent' | 'distributor_agent' | 'agent' | 'supervisor' | 'owner';
 
+export type VerifiedBadgeColor =
+  | 'blue'
+  | 'gold'
+  | 'crimson'
+  | 'emerald'
+  | 'purple'
+  | 'cyan'
+  | 'pink'
+  | 'orange'
+  | 'lime'
+  | 'indigo'
+  | 'silver'
+  | 'rainbow';
+
+export type VerifiedBadgeShape = 'rosette' | 'crown' | 'shield' | 'diamond';
+
 export interface UserProfile {
   uid: string; // Unique 5+ digit alphanumeric ID (Public ID)
   authUid?: string; // Firebase Auth UID
@@ -20,10 +36,10 @@ export interface UserProfile {
   unlockedLevelRewards: number[]; // Array of level numbers whose diamond rewards have been claimed
   isVerified: boolean; // Verified check badge (Admin/Verification only)
   verifiedUntil?: string;
-  verifiedBadgeColor?: 'blue' | 'gold' | 'crimson' | 'emerald' | 'purple' | 'cyan';
-  verifiedBadgeShape?: 'rosette' | 'crown' | 'shield' | 'diamond';
+  verifiedBadgeColor?: VerifiedBadgeColor;
+  verifiedBadgeShape?: VerifiedBadgeShape;
   verifiedBadgeGlow?: boolean;
-  nameGlowColor?: 'none' | 'gold' | 'cyan' | 'crimson' | 'purple' | 'emerald' | 'rainbow';
+  nameGlowColor?: 'none' | 'gold' | 'cyan' | 'crimson' | 'purple' | 'emerald' | 'pink' | 'orange' | 'lime' | 'indigo' | 'silver' | 'rainbow';
   equippedFrame?: string;
   equippedFrameUrl?: string;
   frameGlowColor?: string;
@@ -57,6 +73,16 @@ export interface UserProfile {
   followingUids?: string[];
   blockedUids?: string[];
   notificationsEnabled?: boolean;
+  publicBroadcast?: boolean;
+  privateProfileOnly?: boolean;
+  locationEnabled?: boolean;
+  locationCoords?: {
+    lat: number;
+    lng: number;
+    updatedAt: string;
+  };
+  canStealthRooms?: boolean; // Admin-granted permission for stealth room entry
+  agencyBadgeLabel?: string; // e.g. 'وكيل شحن' or 'وكيل مذيعين'
   createdAt: string;
 }
 
@@ -211,9 +237,13 @@ export interface RoomMessage {
   text: string;
   isVip?: boolean;
   isVerified?: boolean;
-  verifiedBadgeColor?: 'blue' | 'gold' | 'crimson' | 'emerald' | 'purple' | 'cyan';
-  verifiedBadgeShape?: 'rosette' | 'crown' | 'shield' | 'diamond';
-  nameGlowColor?: 'none' | 'gold' | 'cyan' | 'crimson' | 'purple' | 'emerald' | 'rainbow';
+  verifiedBadgeColor?: VerifiedBadgeColor;
+  verifiedBadgeShape?: VerifiedBadgeShape;
+  verifiedBadgeGlow?: boolean;
+  nameGlowColor?: UserProfile['nameGlowColor'];
+  customIconUrl?: string;
+  customIconGlow?: string;
+  customIconAnimated?: boolean;
   emojiSize?: 'small' | 'large';
   createdAt: string;
 }
@@ -228,8 +258,26 @@ export interface RoomGiftBlast {
   senderUid: string;
   senderName: string;
   recipientName?: string;
+  recipientNames?: string[];
+  targetAll?: boolean;
+  cardMessage?: string;
   count: number;
   coinsEach: number;
+  createdAt: string;
+}
+
+export interface RoomGameEvent {
+  id: string;
+  type: 'dice' | 'couple_heart';
+  actorUid: string;
+  actorName: string;
+  diceValue?: number;
+  partner1Uid?: string;
+  partner1Name?: string;
+  partner1Avatar?: string;
+  partner2Uid?: string;
+  partner2Name?: string;
+  partner2Avatar?: string;
   createdAt: string;
 }
 
@@ -237,6 +285,7 @@ export interface VoiceRoom {
   id: string;
   title: string;
   ownerUid: string;
+  ownerAuthUid?: string;
   ownerName: string;
   ownerAvatar: string;
   isOfficial: boolean; // "LIVO Admin" official room
@@ -250,11 +299,14 @@ export interface VoiceRoom {
   category: string;
   seats: RoomSeat[];
   mutedUsers: string[]; // uids forbidden to write
+  micBlockedUsers?: string[]; // uids whose microphone is locked by Admin/Moderator
   bannedUsers: string[]; // uids banned from room
+  stealthUids?: string[]; // uids currently browsing in stealth mode
   allChatDisabled: boolean;
   announcement?: string;
   messages?: RoomMessage[];
   latestGiftBlast?: RoomGiftBlast;
+  latestGameEvent?: RoomGameEvent;
 }
 
 export interface RoomSeat {
@@ -263,19 +315,23 @@ export interface RoomSeat {
   occupiedByName?: string;
   occupiedByAvatar?: string;
   isVerified?: boolean;
-  verifiedBadgeColor?: 'blue' | 'gold' | 'crimson' | 'emerald' | 'purple' | 'cyan';
-  verifiedBadgeShape?: 'rosette' | 'crown' | 'shield' | 'diamond';
-  nameGlowColor?: 'none' | 'gold' | 'cyan' | 'crimson' | 'purple' | 'emerald' | 'rainbow';
+  verifiedBadgeColor?: VerifiedBadgeColor;
+  verifiedBadgeShape?: VerifiedBadgeShape;
+  verifiedBadgeGlow?: boolean;
+  nameGlowColor?: UserProfile['nameGlowColor'];
   equippedFrameUrl?: string;
   frameGlowColor?: string;
   frameAnimated?: boolean;
   customIconUrl?: string;
   customIconGlow?: string;
+  customIconAnimated?: boolean;
+  agencyBadgeLabel?: string;
   isMuted: boolean;
   isLocked: boolean;
   isMicBlocked?: boolean;
   isChatBlocked?: boolean;
   points?: number;
+  giftsCount?: number;
 }
 
 export interface LiveStream {
@@ -325,10 +381,24 @@ export interface GiftItem {
   name: string;
   coins: number;
   icon: string;
-  animationType: 'lion' | 'car' | 'dragon' | 'castle' | 'diamond' | 'heart' | 'rose' | 'rocket';
+  animationType:
+    | 'lion'
+    | 'car'
+    | 'dragon'
+    | 'castle'
+    | 'diamond'
+    | 'heart'
+    | 'rose'
+    | 'rocket'
+    | 'card'
+    | 'ship'
+    | 'crown'
+    | 'wings'
+    | 'fireworks';
   durationMs: number;
   category?: string;
   imageUrl?: string;
+  isCard?: boolean;
   isActive?: boolean;
   updatedAt?: string;
 }
@@ -403,6 +473,7 @@ export interface BlueVerificationRequest {
   paymentPhone: string;
   receiptUrl: string;
   status: 'pending' | 'approved' | 'rejected';
+  rejectReason?: string;
   createdAt: string;
   reviewedBy?: string;
   reviewedAt?: string;
@@ -419,6 +490,7 @@ export interface WithdrawalRequest {
   paymentMethod: 'vodafone_cash' | 'instapay' | 'bank_transfer';
   paymentDetails: string;
   status: 'pending' | 'approved' | 'rejected';
+  rejectReason?: string;
   transferProofUrl?: string;
   createdAt: string;
   reviewedBy?: string;
@@ -434,6 +506,7 @@ export interface BanRecord {
   banType: 'account' | 'device' | 'both';
   duration: 'temporary' | 'permanent';
   durationDays?: number;
+  expiresAt?: string;
   reason: string;
   bannedBy: string;
   createdAt: string;
@@ -446,6 +519,7 @@ export interface BanRecord {
 export interface VideoPost {
   id: string;
   authorUid: string;
+  authorAuthUid?: string;
   authorName: string;
   authorAvatar: string;
   isVerified: boolean;
@@ -487,4 +561,74 @@ export interface SupportTicket {
   reply?: string;
   repliedBy?: string;
   repliedAt?: string;
+}
+
+export interface GiftSupportLog {
+  id: string;
+  roomId: string;
+  roomTitle?: string;
+  senderUid: string;
+  senderName: string;
+  senderAvatar: string;
+  recipientUid: string;
+  recipientName: string;
+  giftId: string;
+  giftName: string;
+  giftIcon: string;
+  coinsTotal: number;
+  count: number;
+  cardMessage?: string;
+  createdAt: string;
+}
+
+export interface SupporterRankEntry {
+  uid: string;
+  displayName: string;
+  avatar: string;
+  totalCoins: number;
+  giftsCount: number;
+  isVerified?: boolean;
+  verifiedBadgeColor?: VerifiedBadgeColor;
+  agencyBadgeLabel?: string;
+}
+
+export interface SplashBannerConfig {
+  id: string;
+  title: string;
+  dedicationMessage?: string;
+  senderName?: string;
+  recipientName?: string;
+  imageUrl: string;
+  isActive: boolean;
+  durationMs?: number; // Default 3000ms (3 seconds)
+  createdAt: string;
+  createdBy: string;
+}
+
+export interface InAppNotification {
+  id: string;
+  uid: string;
+  type: 'recharge_approved' | 'gift_received' | 'system' | 'agency_approved';
+  title: string;
+  body: string;
+  coinsAmount?: number;
+  isRead: boolean;
+  createdAt: string;
+}
+
+export interface RoomRtcSignal {
+  id: string;
+  roomId: string;
+  fromUid: string;
+  fromAuthUid?: string;
+  toUid: string;
+  type: 'offer' | 'answer' | 'candidate' | 'presence';
+  sdp?: string;
+  sdpType?: 'offer' | 'answer';
+  candidate?: {
+    candidate: string;
+    sdpMid?: string | null;
+    sdpMLineIndex?: number | null;
+  };
+  createdAt: string;
 }

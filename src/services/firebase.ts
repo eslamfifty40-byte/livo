@@ -16,14 +16,17 @@ import {
   collection,
   query,
   where,
-  orderBy,
+  limit,
   onSnapshot,
-  serverTimestamp,
   getDocFromServer,
+  deleteField,
+  FieldValue,
   Unsubscribe
 } from 'firebase/firestore';
 import {
   getAuth,
+  setPersistence,
+  browserLocalPersistence,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   sendPasswordResetEmail,
@@ -33,10 +36,13 @@ import {
   GoogleAuthProvider,
   signInWithPopup,
   signInWithRedirect,
+  getRedirectResult,
+  signInAnonymously,
   User as FirebaseUser
 } from 'firebase/auth';
 import { getStorage, ref, uploadBytes, getDownloadURL, uploadString } from 'firebase/storage';
 import firebaseConfig from '../../firebase-applet-config.json';
+import { compressImageForFirestore, CompressImageOptions } from '../utils/imageCompression';
 import {
   UserProfile,
   RechargeRequest,
@@ -60,26 +66,48 @@ import {
   StoreItem,
   RechargeCode,
   CoinPackage,
-  SupervisorRecord
+  SupervisorRecord,
+  GiftSupportLog,
+  SplashBannerConfig,
+  InAppNotification,
+  RoomRtcSignal
 } from '../types';
 
 /**
- * Recursively strips undefined keys so Firestore setDoc never fails on optional fields.
+ * Recursively strips undefined keys safely (cycle & depth guarded, preserves FieldValue/Date)
+ * so Firestore setDoc never throws "Maximum call stack size exceeded" or fails on optional fields.
  */
-function stripUndefined<T>(value: T): T {
+function stripUndefined<T>(value: T, depth = 0, seen = new WeakSet<object>()): T {
+  if (value === null || value === undefined || typeof value !== 'object') {
+    return value;
+  }
+  if (value instanceof Date || value instanceof FieldValue) {
+    return value;
+  }
+  if (depth > 25) {
+    return value;
+  }
+  if (seen.has(value as object)) {
+    return value;
+  }
+  seen.add(value as object);
+
   if (Array.isArray(value)) {
-    return value.map((item) => stripUndefined(item)) as unknown as T;
+    return value.map((item) => stripUndefined(item, depth + 1, seen)) as unknown as T;
   }
-  if (value !== null && typeof value === 'object') {
-    const clean: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      if (v !== undefined) {
-        clean[k] = stripUndefined(v);
-      }
+
+  const proto = Object.getPrototypeOf(value);
+  if (proto !== Object.prototype && proto !== null) {
+    return value;
+  }
+
+  const clean: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (v !== undefined) {
+      clean[k] = stripUndefined(v, depth + 1, seen);
     }
-    return clean as T;
   }
-  return value;
+  return clean as T;
 }
 
 // 1. Initialize Firebase App
@@ -89,6 +117,9 @@ const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
 export const storage = getStorage(app);
+
+// Keep session persisted reliably across reloads & mobile redirect flows
+setPersistence(auth, browserLocalPersistence).catch(() => {});
 
 // 2. Strict Error Handling conforming to FirestoreErrorInfo (SKILL.md)
 export enum OperationType {
@@ -176,7 +207,12 @@ export const COLLECTIONS = {
   STORE_ITEMS: 'store_items',
   RECHARGE_CODES: 'recharge_codes',
   COIN_PACKAGES: 'coin_packages',
-  SUPERVISORS: 'supervisors'
+  SUPERVISORS: 'supervisors',
+  STAFF_AUTH: 'staff_auth',
+  GIFT_LOGS: 'gift_logs',
+  SPLASH_BANNERS: 'splash_banners',
+  NOTIFICATIONS: 'notifications',
+  ROOM_RTC_SIGNALS: 'room_rtc_signals'
 };
 
 // 4. Firebase Service Implementation
@@ -577,172 +613,352 @@ export class FirebaseService {
   }
 
   /**
+   * Lookup user directly from Firestore by UID (handles 10000-100000+ server lookup)
+   */
+  public async findUserByUid(uid: string): Promise<UserProfile | null> {
+    const cleanUid = uid.trim();
+    if (!cleanUid) return null;
+    try {
+      const snap = await getDoc(doc(db, COLLECTIONS.USERS, cleanUid));
+      if (snap.exists()) return snap.data() as UserProfile;
+      const q = query(collection(db, COLLECTIONS.USERS), where('uid', '==', cleanUid), limit(1));
+      const qs = await getDocs(q);
+      if (!qs.empty) return qs.docs[0].data() as UserProfile;
+      return null;
+    } catch (e) {
+      console.warn('findUserByUid error:', e);
+      return null;
+    }
+  }
+
+  /**
+   * Lookup user directly from Firestore by Firebase Auth UID or verified email
+   */
+  public async findUserByAuthUidOrEmail(authUid: string, email?: string | null): Promise<UserProfile | null> {
+    try {
+      if (authUid) {
+        const qAuth = query(collection(db, COLLECTIONS.USERS), where('authUid', '==', authUid), limit(1));
+        const snapAuth = await getDocs(qAuth);
+        if (!snapAuth.empty) {
+          return snapAuth.docs[0].data() as UserProfile;
+        }
+      }
+      const cleanEmail = email?.trim().toLowerCase();
+      if (cleanEmail) {
+        const qEmail = query(collection(db, COLLECTIONS.USERS), where('email', '==', cleanEmail), limit(5));
+        const snapEmail = await getDocs(qEmail);
+        if (!snapEmail.empty) {
+          const allMatches = snapEmail.docs.map((d) => d.data() as UserProfile);
+          return allMatches.find((u) => !u.isBanned) || allMatches[0];
+        }
+      }
+      return null;
+    } catch (e) {
+      console.warn('findUserByAuthUidOrEmail error:', e);
+      return null;
+    }
+  }
+
+  /**
+   * Lookup active ban records directly from Firestore by UID or deviceId
+   */
+  public async findActiveBanForUser(uid?: string, deviceId?: string): Promise<BanRecord | null> {
+    try {
+      const checks: Promise<BanRecord | null>[] = [];
+      if (uid?.trim()) {
+        const qUid = query(collection(db, COLLECTIONS.BANS), where('uid', '==', uid.trim()), limit(10));
+        checks.push(
+          getDocs(qUid).then((snap) => {
+            const matches = snap.docs
+              .map((d) => d.data() as BanRecord)
+              .filter((b) => b.status === 'active');
+            return matches[0] || null;
+          })
+        );
+      }
+      if (deviceId?.trim()) {
+        const qDev = query(collection(db, COLLECTIONS.BANS), where('deviceId', '==', deviceId.trim()), limit(10));
+        checks.push(
+          getDocs(qDev).then((snap) => {
+            const matches = snap.docs
+              .map((d) => d.data() as BanRecord)
+              .filter((b) => b.status === 'active' && (b.banType === 'device' || b.banType === 'both'));
+            return matches[0] || null;
+          })
+        );
+      }
+      if (checks.length === 0) return null;
+      const results = await Promise.all(checks);
+      return results.find(Boolean) || null;
+    } catch (e) {
+      console.warn('findActiveBanForUser error:', e);
+      return null;
+    }
+  }
+
+  /**
    * Write or update user profile in Firestore
    */
-  public async saveUserProfile(user: UserProfile): Promise<void> {
+  public async saveUserProfile(user: UserProfile): Promise<boolean> {
     try {
-      await setDoc(doc(db, COLLECTIONS.USERS, user.uid), stripUndefined(user), { merge: true });
+      const payload: Record<string, unknown> = {
+        ...(stripUndefined(user) as unknown as Record<string, unknown>),
+      };
+      if (user.isBanned === false && !user.banDetails) {
+        payload.banDetails = deleteField();
+      }
+      await setDoc(doc(db, COLLECTIONS.USERS, user.uid), payload, { merge: true });
+      return true;
     } catch (e) {
       console.error('Error saving user profile to Firestore:', e);
+      return false;
+    }
+  }
+
+  /**
+   * Rule-compliant partial field update (e.g. cross-user followersCount / diamonds / coins)
+   */
+  public async patchUserFields(uid: string, fields: Partial<UserProfile>): Promise<boolean> {
+    if (!uid?.trim()) return false;
+    try {
+      const payload = stripUndefined(fields) as unknown as Record<string, unknown>;
+      if (Object.keys(payload).length === 0) return true;
+      await updateDoc(doc(db, COLLECTIONS.USERS, uid.trim()), payload);
+      return true;
+    } catch (e) {
+      console.error('Error patching user fields in Firestore:', e);
+      return false;
+    }
+  }
+
+  public async deleteUserByUid(uid: string): Promise<boolean> {
+    if (!auth.currentUser || !uid?.trim()) return false;
+    try {
+      await deleteDoc(doc(db, COLLECTIONS.USERS, uid.trim()));
+      return true;
+    } catch (e) {
+      console.error('Error deleting user profile from Firestore:', e);
+      return false;
     }
   }
 
   /**
    * Write or update recharge request
    */
-  public async saveRechargeRequest(req: RechargeRequest): Promise<void> {
+  public async saveRechargeRequest(req: RechargeRequest): Promise<boolean> {
     try {
       await setDoc(doc(db, COLLECTIONS.RECHARGE_REQUESTS, req.id), stripUndefined(req), { merge: true });
+      return true;
     } catch (e) {
       console.error('Error saving recharge request to Firestore:', e);
+      return false;
     }
   }
 
   /**
    * Write or update coin audit log
    */
-  public async saveCoinAudit(audit: CoinAuditRecord): Promise<void> {
+  public async saveCoinAudit(audit: CoinAuditRecord): Promise<boolean> {
     try {
       await setDoc(doc(db, COLLECTIONS.COIN_AUDITS, audit.id), stripUndefined(audit));
+      return true;
     } catch (e) {
       console.error('Error saving coin audit to Firestore:', e);
+      return false;
     }
   }
 
   /**
    * Write or update message
    */
-  public async saveMessage(msg: DirectMessage): Promise<void> {
+  public async saveMessage(msg: DirectMessage): Promise<boolean> {
     try {
       await setDoc(doc(db, COLLECTIONS.MESSAGES, msg.id), stripUndefined(msg), { merge: true });
+      return true;
     } catch (e) {
       console.error('Error saving message to Firestore:', e);
+      return false;
     }
   }
 
   /**
    * Write or update message request
    */
-  public async saveMessageRequest(req: MessageRequest): Promise<void> {
+  public async saveMessageRequest(req: MessageRequest): Promise<boolean> {
     try {
       await setDoc(doc(db, COLLECTIONS.MESSAGE_REQUESTS, req.id), stripUndefined(req), { merge: true });
+      return true;
     } catch (e) {
       console.error('Error saving message request to Firestore:', e);
+      return false;
     }
   }
 
-  public async deleteMessageRequest(id: string): Promise<void> {
+  public async deleteMessageRequest(id: string): Promise<boolean> {
     try {
       await deleteDoc(doc(db, COLLECTIONS.MESSAGE_REQUESTS, id));
+      return true;
     } catch (e) {
       console.error('Error deleting message request from Firestore:', e);
+      return false;
     }
   }
 
   /**
    * Write or update room
    */
-  public async saveRoom(room: VoiceRoom): Promise<void> {
+  public async saveRoom(room: VoiceRoom): Promise<boolean> {
+    if (!auth.currentUser) {
+      return false;
+    }
+    const cleanId = (room.id || '').trim().slice(0, 64);
+    if (!cleanId || !/^[a-zA-Z0-9_\-.@]+$/.test(cleanId)) {
+      return false;
+    }
+    const cleanTitle = (room.title || 'غرفة LIVO').trim().slice(0, 180) || 'غرفة LIVO';
+    const cleanOwnerUid = (room.ownerUid || '10000').trim().slice(0, 64) || '10000';
+    const validStatuses: Array<VoiceRoom['status']> = ['open', 'closed', 'locked_by_admin'];
+    const cleanStatus: VoiceRoom['status'] = validStatuses.includes(room.status) ? room.status : 'open';
+    const normalizedRoom: VoiceRoom = {
+      ...room,
+      id: cleanId,
+      title: cleanTitle,
+      ownerUid: cleanOwnerUid,
+      isOfficial: Boolean(room.isOfficial || cleanId === 'room-official-livo'),
+      status: cleanStatus
+    };
     try {
-      await setDoc(doc(db, COLLECTIONS.ROOMS, room.id), stripUndefined(room), { merge: true });
-    } catch (e) {
-      console.error('Error saving room to Firestore:', e);
+      await setDoc(doc(db, COLLECTIONS.ROOMS, cleanId), stripUndefined(normalizedRoom), { merge: true });
+      return true;
+    } catch (e: any) {
+      if (e?.code === 'permission-denied') {
+        console.warn('Firestore saveRoom permission-denied:', {
+          roomId: cleanId,
+          authUid: auth.currentUser?.uid,
+          ownerUid: cleanOwnerUid,
+          isOfficial: normalizedRoom.isOfficial
+        });
+      } else {
+        console.error('Error saving room to Firestore:', e);
+      }
+      return false;
     }
   }
 
-  public async deleteRoom(roomId: string): Promise<void> {
+  public async deleteRoom(roomId: string): Promise<boolean> {
+    if (!auth.currentUser) {
+      return false;
+    }
     try {
       await deleteDoc(doc(db, COLLECTIONS.ROOMS, roomId));
-    } catch (e) {
+      return true;
+    } catch (e: any) {
       console.error('Error deleting room from Firestore:', e);
+      return false;
     }
   }
 
   /**
    * Write or update agency
    */
-  public async saveAgency(agency: AgencyApplication): Promise<void> {
+  public async saveAgency(agency: AgencyApplication): Promise<boolean> {
     try {
-      await setDoc(doc(db, COLLECTIONS.AGENCIES, agency.id), agency, { merge: true });
+      await setDoc(doc(db, COLLECTIONS.AGENCIES, agency.id), stripUndefined(agency), { merge: true });
+      return true;
     } catch (e) {
       console.error('Error saving agency to Firestore:', e);
+      return false;
     }
   }
 
   /**
    * Write or update verification
    */
-  public async saveVerification(ver: BlueVerificationRequest): Promise<void> {
+  public async saveVerification(ver: BlueVerificationRequest): Promise<boolean> {
     try {
-      await setDoc(doc(db, COLLECTIONS.VERIFICATIONS, ver.id), ver, { merge: true });
+      await setDoc(doc(db, COLLECTIONS.VERIFICATIONS, ver.id), stripUndefined(ver), { merge: true });
+      return true;
     } catch (e) {
       console.error('Error saving verification to Firestore:', e);
+      return false;
     }
   }
 
   /**
    * Write or update withdrawal
    */
-  public async saveWithdrawal(wth: WithdrawalRequest): Promise<void> {
+  public async saveWithdrawal(wth: WithdrawalRequest): Promise<boolean> {
     try {
-      await setDoc(doc(db, COLLECTIONS.WITHDRAWALS, wth.id), wth, { merge: true });
+      await setDoc(doc(db, COLLECTIONS.WITHDRAWALS, wth.id), stripUndefined(wth), { merge: true });
+      return true;
     } catch (e) {
       console.error('Error saving withdrawal to Firestore:', e);
+      return false;
     }
   }
 
   /**
    * Write or update ban
    */
-  public async saveBan(ban: BanRecord): Promise<void> {
+  public async saveBan(ban: BanRecord): Promise<boolean> {
     try {
-      await setDoc(doc(db, COLLECTIONS.BANS, ban.id), ban, { merge: true });
+      await setDoc(doc(db, COLLECTIONS.BANS, ban.id), stripUndefined(ban), { merge: true });
+      return true;
     } catch (e) {
       console.error('Error saving ban to Firestore:', e);
+      return false;
     }
   }
 
   /**
    * Write or update advertisement
    */
-  public async saveAdvertisement(ad: Advertisement): Promise<void> {
+  public async saveAdvertisement(ad: Advertisement): Promise<boolean> {
     try {
-      await setDoc(doc(db, COLLECTIONS.ADVERTISEMENTS, ad.id), ad, { merge: true });
+      await setDoc(doc(db, COLLECTIONS.ADVERTISEMENTS, ad.id), stripUndefined(ad), { merge: true });
+      return true;
     } catch (e) {
       console.error('Error saving advertisement to Firestore:', e);
+      return false;
     }
   }
 
   /**
    * Delete advertisement
    */
-  public async deleteAdvertisement(adId: string): Promise<void> {
+  public async deleteAdvertisement(adId: string): Promise<boolean> {
     try {
       await deleteDoc(doc(db, COLLECTIONS.ADVERTISEMENTS, adId));
+      return true;
     } catch (e) {
       console.error('Error deleting advertisement from Firestore:', e);
+      return false;
     }
   }
 
   /**
    * Write or update support ticket
    */
-  public async saveSupportTicket(ticket: SupportTicket): Promise<void> {
+  public async saveSupportTicket(ticket: SupportTicket): Promise<boolean> {
     try {
-      await setDoc(doc(db, COLLECTIONS.SUPPORT_TICKETS, ticket.id), ticket, { merge: true });
+      await setDoc(doc(db, COLLECTIONS.SUPPORT_TICKETS, ticket.id), stripUndefined(ticket), { merge: true });
+      return true;
     } catch (e) {
       console.error('Error saving support ticket to Firestore:', e);
+      return false;
     }
   }
 
   /**
    * Delete support ticket
    */
-  public async deleteSupportTicket(ticketId: string): Promise<void> {
+  public async deleteSupportTicket(ticketId: string): Promise<boolean> {
     try {
       await deleteDoc(doc(db, COLLECTIONS.SUPPORT_TICKETS, ticketId));
+      return true;
     } catch (e) {
       console.error('Error deleting support ticket from Firestore:', e);
+      return false;
     }
   }
 
@@ -772,24 +988,28 @@ export class FirebaseService {
   /**
    * Save or update individual level configuration in Firestore
    */
-  public async saveLevelConfig(config: LevelConfig): Promise<void> {
+  public async saveLevelConfig(config: LevelConfig): Promise<boolean> {
     try {
-      await setDoc(doc(db, COLLECTIONS.LEVEL_CONFIGS, `lvl_${config.level}`), config, { merge: true });
+      await setDoc(doc(db, COLLECTIONS.LEVEL_CONFIGS, `lvl_${config.level}`), stripUndefined(config), { merge: true });
+      return true;
     } catch (e) {
       console.error('Error saving level config to Firestore:', e);
+      return false;
     }
   }
 
   /**
    * Batch seed or save all 0-50 levels
    */
-  public async saveLevelConfigs(configs: LevelConfig[]): Promise<void> {
+  public async saveLevelConfigs(configs: LevelConfig[]): Promise<boolean> {
     try {
       for (const cfg of configs) {
-        await setDoc(doc(db, COLLECTIONS.LEVEL_CONFIGS, `lvl_${cfg.level}`), cfg, { merge: true });
+        await setDoc(doc(db, COLLECTIONS.LEVEL_CONFIGS, `lvl_${cfg.level}`), stripUndefined(cfg), { merge: true });
       }
+      return true;
     } catch (e) {
       console.error('Error saving batch level configs to Firestore:', e);
+      return false;
     }
   }
 
@@ -819,22 +1039,26 @@ export class FirebaseService {
   /**
    * Save distributor record
    */
-  public async saveDistributor(distributor: DistributorRecord): Promise<void> {
+  public async saveDistributor(distributor: DistributorRecord): Promise<boolean> {
     try {
-      await setDoc(doc(db, COLLECTIONS.DISTRIBUTORS, distributor.id), distributor, { merge: true });
+      await setDoc(doc(db, COLLECTIONS.DISTRIBUTORS, distributor.id), stripUndefined(distributor), { merge: true });
+      return true;
     } catch (e) {
       console.error('Error saving distributor to Firestore:', e);
+      return false;
     }
   }
 
   /**
    * Delete distributor record
    */
-  public async deleteDistributor(distributorId: string): Promise<void> {
+  public async deleteDistributor(distributorId: string): Promise<boolean> {
     try {
       await deleteDoc(doc(db, COLLECTIONS.DISTRIBUTORS, distributorId));
+      return true;
     } catch (e) {
       console.error('Error deleting distributor from Firestore:', e);
+      return false;
     }
   }
 
@@ -864,22 +1088,26 @@ export class FirebaseService {
   /**
    * Save agent transfer record
    */
-  public async saveAgentTransfer(transfer: AgentTransferRecord): Promise<void> {
+  public async saveAgentTransfer(transfer: AgentTransferRecord): Promise<boolean> {
     try {
-      await setDoc(doc(db, COLLECTIONS.AGENT_TRANSFERS, transfer.id), transfer);
+      await setDoc(doc(db, COLLECTIONS.AGENT_TRANSFERS, transfer.id), stripUndefined(transfer));
+      return true;
     } catch (e) {
       console.error('Error saving agent transfer to Firestore:', e);
+      return false;
     }
   }
 
   /**
    * Save level promotion audit
    */
-  public async saveLevelPromotion(record: LevelPromotionRecord): Promise<void> {
+  public async saveLevelPromotion(record: LevelPromotionRecord): Promise<boolean> {
     try {
-      await setDoc(doc(db, COLLECTIONS.LEVEL_PROMOTIONS, record.id), record);
+      await setDoc(doc(db, COLLECTIONS.LEVEL_PROMOTIONS, record.id), stripUndefined(record));
+      return true;
     } catch (e) {
       console.error('Error saving level promotion audit to Firestore:', e);
+      return false;
     }
   }
 
@@ -906,19 +1134,23 @@ export class FirebaseService {
     return unsub;
   }
 
-  public async savePaymentMethod(method: PaymentMethodConfig): Promise<void> {
+  public async savePaymentMethod(method: PaymentMethodConfig): Promise<boolean> {
     try {
-      await setDoc(doc(db, COLLECTIONS.PAYMENT_METHODS, method.id), method, { merge: true });
+      await setDoc(doc(db, COLLECTIONS.PAYMENT_METHODS, method.id), stripUndefined(method), { merge: true });
+      return true;
     } catch (e) {
       console.error('Error saving payment method to Firestore:', e);
+      return false;
     }
   }
 
-  public async deletePaymentMethod(id: string): Promise<void> {
+  public async deletePaymentMethod(id: string): Promise<boolean> {
     try {
       await deleteDoc(doc(db, COLLECTIONS.PAYMENT_METHODS, id));
+      return true;
     } catch (e) {
       console.error('Error deleting payment method from Firestore:', e);
+      return false;
     }
   }
 
@@ -945,19 +1177,23 @@ export class FirebaseService {
     return unsub;
   }
 
-  public async saveGift(gift: GiftItem): Promise<void> {
+  public async saveGift(gift: GiftItem): Promise<boolean> {
     try {
-      await setDoc(doc(db, COLLECTIONS.GIFTS, gift.id), gift, { merge: true });
+      await setDoc(doc(db, COLLECTIONS.GIFTS, gift.id), stripUndefined(gift), { merge: true });
+      return true;
     } catch (e) {
       console.error('Error saving gift to Firestore:', e);
+      return false;
     }
   }
 
-  public async deleteGift(id: string): Promise<void> {
+  public async deleteGift(id: string): Promise<boolean> {
     try {
       await deleteDoc(doc(db, COLLECTIONS.GIFTS, id));
+      return true;
     } catch (e) {
       console.error('Error deleting gift from Firestore:', e);
+      return false;
     }
   }
 
@@ -984,19 +1220,23 @@ export class FirebaseService {
     return unsub;
   }
 
-  public async saveStoreItem(item: StoreItem): Promise<void> {
+  public async saveStoreItem(item: StoreItem): Promise<boolean> {
     try {
-      await setDoc(doc(db, COLLECTIONS.STORE_ITEMS, item.id), item, { merge: true });
+      await setDoc(doc(db, COLLECTIONS.STORE_ITEMS, item.id), stripUndefined(item), { merge: true });
+      return true;
     } catch (e) {
       console.error('Error saving store item to Firestore:', e);
+      return false;
     }
   }
 
-  public async deleteStoreItem(id: string): Promise<void> {
+  public async deleteStoreItem(id: string): Promise<boolean> {
     try {
       await deleteDoc(doc(db, COLLECTIONS.STORE_ITEMS, id));
+      return true;
     } catch (e) {
       console.error('Error deleting store item from Firestore:', e);
+      return false;
     }
   }
 
@@ -1023,19 +1263,23 @@ export class FirebaseService {
     return unsub;
   }
 
-  public async saveRechargeCode(code: RechargeCode): Promise<void> {
+  public async saveRechargeCode(code: RechargeCode): Promise<boolean> {
     try {
-      await setDoc(doc(db, COLLECTIONS.RECHARGE_CODES, code.id), code, { merge: true });
+      await setDoc(doc(db, COLLECTIONS.RECHARGE_CODES, code.id), stripUndefined(code), { merge: true });
+      return true;
     } catch (e) {
       console.error('Error saving recharge code to Firestore:', e);
+      return false;
     }
   }
 
-  public async deleteRechargeCode(id: string): Promise<void> {
+  public async deleteRechargeCode(id: string): Promise<boolean> {
     try {
       await deleteDoc(doc(db, COLLECTIONS.RECHARGE_CODES, id));
+      return true;
     } catch (e) {
       console.error('Error deleting recharge code from Firestore:', e);
+      return false;
     }
   }
 
@@ -1062,19 +1306,23 @@ export class FirebaseService {
     return unsub;
   }
 
-  public async saveCoinPackage(pkg: CoinPackage): Promise<void> {
+  public async saveCoinPackage(pkg: CoinPackage): Promise<boolean> {
     try {
-      await setDoc(doc(db, COLLECTIONS.COIN_PACKAGES, pkg.id), pkg, { merge: true });
+      await setDoc(doc(db, COLLECTIONS.COIN_PACKAGES, pkg.id), stripUndefined(pkg), { merge: true });
+      return true;
     } catch (e) {
       console.error('Error saving coin package to Firestore:', e);
+      return false;
     }
   }
 
-  public async deleteCoinPackage(id: string): Promise<void> {
+  public async deleteCoinPackage(id: string): Promise<boolean> {
     try {
       await deleteDoc(doc(db, COLLECTIONS.COIN_PACKAGES, id));
+      return true;
     } catch (e) {
       console.error('Error deleting coin package from Firestore:', e);
+      return false;
     }
   }
 
@@ -1101,20 +1349,98 @@ export class FirebaseService {
     return unsub;
   }
 
-  public async saveSupervisor(sup: SupervisorRecord): Promise<void> {
+  public async saveSupervisor(sup: SupervisorRecord): Promise<boolean> {
     try {
-      await setDoc(doc(db, COLLECTIONS.SUPERVISORS, sup.id), sup, { merge: true });
+      await setDoc(doc(db, COLLECTIONS.SUPERVISORS, sup.id), stripUndefined(sup), { merge: true });
+      return true;
     } catch (e) {
       console.error('Error saving supervisor to Firestore:', e);
+      return false;
     }
   }
 
-  public async deleteSupervisor(id: string): Promise<void> {
+  public async deleteSupervisor(id: string): Promise<boolean> {
     try {
       await deleteDoc(doc(db, COLLECTIONS.SUPERVISORS, id));
+      return true;
     } catch (e) {
       console.error('Error deleting supervisor from Firestore:', e);
+      return false;
     }
+  }
+
+  public async saveStaffAuth(
+    authUid: string,
+    data: { authUid: string; role: 'owner' | 'supervisor'; email?: string; isActive: boolean; updatedAt: string }
+  ): Promise<boolean> {
+    if (!authUid || !auth.currentUser) return false;
+    try {
+      await setDoc(doc(db, COLLECTIONS.STAFF_AUTH, authUid), stripUndefined(data), { merge: true });
+      return true;
+    } catch (e) {
+      console.warn('Could not sync staff_auth doc:', e);
+      return false;
+    }
+  }
+
+  public async deleteStaffAuth(authUid: string): Promise<boolean> {
+    if (!authUid || !auth.currentUser) return false;
+    try {
+      await deleteDoc(doc(db, COLLECTIONS.STAFF_AUTH, authUid));
+      return true;
+    } catch (e) {
+      console.warn('Could not delete staff_auth doc:', e);
+      return false;
+    }
+  }
+
+  public sanitizeEmail(email?: string | null): string {
+    if (!email) return '';
+    return email
+      .replace(/[\s\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF\u00A0]/g, '')
+      .toLowerCase();
+  }
+
+  public async checkStaffAuthorization(
+    email?: string | null,
+    authUid?: string | null
+  ): Promise<{ isAuthorized: boolean; role?: 'owner' | 'supervisor' }> {
+    const cleanEmail = this.sanitizeEmail(email);
+    try {
+      if (authUid) {
+        const uidSnap = await getDoc(doc(db, COLLECTIONS.STAFF_AUTH, authUid));
+        if (uidSnap.exists()) {
+          const d = uidSnap.data() as { role?: string; isActive?: boolean };
+          if (d?.isActive && (d.role === 'owner' || d.role === 'supervisor')) {
+            return { isAuthorized: true, role: d.role };
+          }
+        }
+      }
+      if (cleanEmail) {
+        const emailSnap = await getDoc(doc(db, COLLECTIONS.STAFF_AUTH, cleanEmail));
+        if (emailSnap.exists()) {
+          const d = emailSnap.data() as { role?: string; isActive?: boolean };
+          if (d?.isActive && (d.role === 'owner' || d.role === 'supervisor')) {
+            return { isAuthorized: true, role: d.role };
+          }
+        }
+        const supQ = query(
+          collection(db, COLLECTIONS.SUPERVISORS),
+          where('email', '==', cleanEmail),
+          limit(5)
+        );
+        const supDocs = await getDocs(supQ);
+        for (const sDoc of supDocs.docs) {
+          const sup = sDoc.data() as SupervisorRecord;
+          if (sup?.isActive && this.sanitizeEmail(sup.email) === cleanEmail) {
+            return { isAuthorized: true, role: 'supervisor' };
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Staff authorization check fallback:', e);
+    }
+    return { isAuthorized: false };
   }
 
   /**
@@ -1140,64 +1466,356 @@ export class FirebaseService {
     return unsub;
   }
 
-  public async saveVideo(video: VideoPost): Promise<void> {
+  public async saveVideo(video: VideoPost): Promise<boolean> {
     try {
-      await setDoc(doc(db, COLLECTIONS.VIDEOS, video.id), video, { merge: true });
+      await setDoc(doc(db, COLLECTIONS.VIDEOS, video.id), stripUndefined(video), { merge: true });
+      return true;
     } catch (e) {
       console.error('Error saving video to Firestore:', e);
+      return false;
     }
   }
 
-  public async deleteVideo(id: string): Promise<void> {
+  public async patchVideoStats(
+    videoId: string,
+    stats: Partial<Pick<VideoPost, 'likesCount' | 'commentsCount'>>
+  ): Promise<boolean> {
+    if (!videoId?.trim()) return false;
+    try {
+      await updateDoc(doc(db, COLLECTIONS.VIDEOS, videoId.trim()), stripUndefined(stats));
+      return true;
+    } catch (e) {
+      console.error('Error patching video stats in Firestore:', e);
+      return false;
+    }
+  }
+
+  public async deleteVideo(id: string): Promise<boolean> {
     try {
       await deleteDoc(doc(db, COLLECTIONS.VIDEOS, id));
+      return true;
     } catch (e) {
       console.error('Error deleting video from Firestore:', e);
+      return false;
     }
   }
 
   /**
-   * Upload image file to Firebase Storage with base64 DataURL fallback
+   * Real-time subscription to Gift Support Logs (Supporters cup & leaderboard)
    */
-  public async uploadImage(path: string, fileOrDataUrl: File | string): Promise<string> {
+  public subscribeToGiftLogs(onUpdate: (logs: GiftSupportLog[]) => void): Unsubscribe {
+    const q = collection(db, COLLECTIONS.GIFT_LOGS);
+    const unsub = onSnapshot(
+      q,
+      (snapshot) => {
+        const list: GiftSupportLog[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push(docSnap.data() as GiftSupportLog);
+        });
+        list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        onUpdate(list);
+      },
+      (error) => {
+        console.warn('Error listening to gift logs:', error.message);
+      }
+    );
+    this.activeListeners.push(unsub);
+    return unsub;
+  }
+
+  public async saveGiftLog(log: GiftSupportLog): Promise<boolean> {
+    try {
+      await setDoc(doc(db, COLLECTIONS.GIFT_LOGS, log.id), stripUndefined(log));
+      return true;
+    } catch (e) {
+      console.error('Error saving gift log:', e);
+      return false;
+    }
+  }
+
+  /**
+   * Real-time subscription to Admin Splash Greeting/Gift Banners
+   */
+  public subscribeToSplashBanners(onUpdate: (banners: SplashBannerConfig[]) => void): Unsubscribe {
+    const q = collection(db, COLLECTIONS.SPLASH_BANNERS);
+    const unsub = onSnapshot(
+      q,
+      (snapshot) => {
+        const list: SplashBannerConfig[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push(docSnap.data() as SplashBannerConfig);
+        });
+        list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        onUpdate(list);
+      },
+      (error) => {
+        console.warn('Error listening to splash banners:', error.message);
+      }
+    );
+    this.activeListeners.push(unsub);
+    return unsub;
+  }
+
+  public async saveSplashBanner(banner: SplashBannerConfig): Promise<boolean> {
+    try {
+      await setDoc(doc(db, COLLECTIONS.SPLASH_BANNERS, banner.id), stripUndefined(banner), { merge: true });
+      return true;
+    } catch (e) {
+      console.error('Error saving splash banner:', e);
+      return false;
+    }
+  }
+
+  public async deleteSplashBanner(id: string): Promise<boolean> {
+    try {
+      await deleteDoc(doc(db, COLLECTIONS.SPLASH_BANNERS, id));
+      return true;
+    } catch (e) {
+      console.error('Error deleting splash banner:', e);
+      return false;
+    }
+  }
+
+  /**
+   * Real-time subscription to In-App Notifications for a user
+   */
+  public subscribeToNotifications(uid: string, onUpdate: (items: InAppNotification[]) => void): Unsubscribe {
+    if (!uid?.trim()) return () => {};
+    const q = query(collection(db, COLLECTIONS.NOTIFICATIONS), where('uid', '==', uid.trim()));
+    const unsub = onSnapshot(
+      q,
+      (snapshot) => {
+        const list: InAppNotification[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push(docSnap.data() as InAppNotification);
+        });
+        list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        onUpdate(list);
+      },
+      (error) => {
+        console.warn('Error listening to notifications:', error.message);
+      }
+    );
+    this.activeListeners.push(unsub);
+    return unsub;
+  }
+
+  public async saveNotification(notif: InAppNotification): Promise<boolean> {
+    try {
+      await setDoc(doc(db, COLLECTIONS.NOTIFICATIONS, notif.id), stripUndefined(notif), { merge: true });
+      return true;
+    } catch (e) {
+      console.error('Error saving notification:', e);
+      return false;
+    }
+  }
+
+  /**
+   * Real-time WebRTC signaling listener for a specific room & target user
+   */
+  public subscribeToRoomRtcSignals(
+    roomId: string,
+    toUid: string,
+    onSignals: (signals: RoomRtcSignal[]) => void
+  ): Unsubscribe {
+    if (!roomId || !toUid) return () => {};
+    const q = query(
+      collection(db, COLLECTIONS.ROOM_RTC_SIGNALS),
+      where('roomId', '==', roomId),
+      where('toUid', '==', toUid)
+    );
+    const unsub = onSnapshot(
+      q,
+      (snapshot) => {
+        const list: RoomRtcSignal[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push(docSnap.data() as RoomRtcSignal);
+        });
+        list.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+        onSignals(list);
+      },
+      (error) => {
+        console.warn('Error listening to RTC signals:', error.message);
+      }
+    );
+    this.activeListeners.push(unsub);
+    return unsub;
+  }
+
+  public async saveRoomRtcSignal(signal: RoomRtcSignal): Promise<boolean> {
+    try {
+      await setDoc(doc(db, COLLECTIONS.ROOM_RTC_SIGNALS, signal.id), stripUndefined(signal));
+      return true;
+    } catch (e) {
+      console.warn('Error saving RTC signal:', e);
+      return false;
+    }
+  }
+
+  public async deleteRoomRtcSignal(signalId: string): Promise<boolean> {
+    try {
+      await deleteDoc(doc(db, COLLECTIONS.ROOM_RTC_SIGNALS, signalId));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Upload image file to Firebase Storage with automatic Firestore-safe compression + 4s timeout fallback
+   */
+  public async uploadImage(
+    path: string,
+    fileOrDataUrl: File | string,
+    compressionOptions: CompressImageOptions = { maxDim: 900, quality: 0.76, maxBytes: 240_000 }
+  ): Promise<string> {
+    const preparedDataUrl =
+      typeof fileOrDataUrl === 'string' && !fileOrDataUrl.startsWith('data:image')
+        ? fileOrDataUrl
+        : await compressImageForFirestore(fileOrDataUrl, compressionOptions);
+
+    if (typeof fileOrDataUrl === 'string' && !fileOrDataUrl.startsWith('data:')) {
+      return fileOrDataUrl;
+    }
+
     try {
       const storageRef = ref(storage, path);
-      if (typeof fileOrDataUrl === 'string') {
-        if (fileOrDataUrl.startsWith('data:')) {
-          await uploadString(storageRef, fileOrDataUrl, 'data_url');
-          return await getDownloadURL(storageRef);
-        }
-        return fileOrDataUrl;
-      } else {
-        await uploadBytes(storageRef, fileOrDataUrl);
-        return await getDownloadURL(storageRef);
-      }
+      const uploadTask =
+        typeof fileOrDataUrl === 'string'
+          ? uploadString(storageRef, preparedDataUrl, 'data_url')
+          : preparedDataUrl.startsWith('data:')
+          ? uploadString(storageRef, preparedDataUrl, 'data_url')
+          : uploadBytes(storageRef, fileOrDataUrl);
+
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Storage upload timeout')), 4000)
+      );
+
+      await Promise.race([uploadTask, timeoutPromise]);
+      const url = await Promise.race([getDownloadURL(storageRef), timeoutPromise]);
+      return url;
     } catch (e) {
-      console.warn('Storage upload fallback to DataURL:', e);
-      // Fallback: if Firebase storage upload fails or has no rules, return base64 string
-      if (typeof fileOrDataUrl === 'string') return fileOrDataUrl;
-      return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.readAsDataURL(fileOrDataUrl);
+      console.warn('Storage upload fallback to compressed DataURL:', e);
+      return preparedDataUrl;
+    }
+  }
+
+  private isInsideIframe(): boolean {
+    try {
+      return typeof window !== 'undefined' && window.self !== window.top;
+    } catch {
+      return true;
+    }
+  }
+
+  public isWebViewOrCapacitor(): boolean {
+    if (typeof window === 'undefined') return false;
+    const cap = (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
+    if (cap?.isNativePlatform?.()) return true;
+    if (window.location.protocol === 'capacitor:' || window.location.protocol === 'ionic:') return true;
+    // Capacitor Android default origin is https://localhost or http://localhost inside Android WebView
+    const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : '';
+    if (/\bwv\b|; wv\)/i.test(ua)) return true;
+    if (/Android/i.test(ua) && /Version\/\d+\.\d+/i.test(ua) && !/Chrome\/\d+.*Mobile Safari/i.test(ua)) {
+      return true;
+    }
+    return false;
+  }
+
+  private isBraveOrRestrictedBrowser(): boolean {
+    if (typeof navigator === 'undefined') return false;
+    const ua = navigator.userAgent || '';
+    const hasBraveApi = Boolean((navigator as unknown as { brave?: unknown }).brave);
+    return hasBraveApi || /Brave|wv\)|WebView/i.test(ua);
+  }
+
+  private redirectResultPromise: Promise<{ user?: FirebaseUser; error?: string }> | null = null;
+
+  /**
+   * Checks and consumes any completed Google signInWithRedirect result
+   */
+  public async consumeGoogleRedirectResult(): Promise<{ user?: FirebaseUser; error?: string }> {
+    let hadPendingRedirect = false;
+    const isSameAuthDomain =
+      typeof window !== 'undefined' &&
+      Boolean(firebaseConfig.authDomain) &&
+      window.location.hostname === firebaseConfig.authDomain;
+    if (typeof window !== 'undefined') {
+      try {
+        hadPendingRedirect = Boolean(window.sessionStorage.getItem('livo_google_redirect_pending'));
+        window.sessionStorage.removeItem('livo_google_redirect_pending');
+      } catch {
+        // ignore storage restrictions
+      }
+    }
+    if (!hadPendingRedirect && !isSameAuthDomain) {
+      return {};
+    }
+    if (!this.redirectResultPromise) {
+      this.redirectResultPromise = (async () => {
+        try {
+          const res = await getRedirectResult(auth);
+          if (res?.user) {
+            return { user: res.user };
+          }
+          return {};
+        } catch (err: any) {
+          console.warn('Google Redirect Result error:', err);
+          return { error: this.formatFirebaseAuthError(err, 'تعذر إكمال تسجيل الدخول عبر Google') };
+        }
+      })().finally(() => {
+        // Allow future redirect attempts in the same SPA session if needed
+        this.redirectResultPromise = null;
       });
     }
+    return this.redirectResultPromise;
   }
 
   private formatFirebaseAuthError(err: any, fallback: string): string {
     const code = err?.code || '';
+    const msg = String(err?.message || '');
+    const lowerMsg = msg.toLowerCase();
     const host = typeof window !== 'undefined' ? window.location.hostname : '';
-    if (code === 'auth/unauthorized-domain') {
-      return `النطاق الحالي (${host || 'هذا الرابط'}) غير مضاف في قائمة Authorized Domains في Firebase Authentication. يمكنك الدخول مباشرة الآن بالبريد الإلكتروني وكلمة المرور أو رقم الهاتف، أو إضافة النطاق من Firebase Console.`;
+    if (code === 'auth/unauthorized-domain' || msg.includes('unauthorized-domain')) {
+      return `النطاق الحالي (${host || 'هذا الرابط'}) غير مضاف في Authorized Domains داخل Firebase Authentication. أضف "${host}" من Firebase Console > Authentication > Settings > Authorized domains، أو سجّل الدخول الآن بالبريد الإلكتروني / رقم الهاتف.`;
     }
-    if (code === 'auth/popup-blocked' || code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
-      return 'تم حجب أو إغلاق نافذة Google في هذا المتصفح. يمكنك تسجيل الدخول مباشرة عبر البريد وكلمة المرور أو رقم الهاتف.';
+    if (
+      code === 'auth/missing-initial-state' ||
+      lowerMsg.includes('missing initial state') ||
+      code === 'auth/invalid-action-code' ||
+      lowerMsg.includes('requested action is invalid') ||
+      code === 'auth/missing-continue-uri' ||
+      code === 'auth/invalid-continue-uri'
+    ) {
+      return 'تعذر إكمال التحويل التلقائي بسبب قيود تخزين المتصفح. استخدم زر تسجيل الدخول السريع عبر Google (النافذة المنبثقة) مع السماح بالنوافذ المنبثقة، أو سجّل الدخول بالبريد الإلكتروني وكلمة المرور.';
+    }
+    if (code === 'auth/web-storage-unsupported') {
+      return 'المتصفح يمنع تخزين الجلسة (Cookies / IndexedDB). فعّل الكوكيز أو أوقف حظر التخزين في المتصفح، أو استخدم البريد الإلكتروني / رقم الهاتف.';
+    }
+    if (
+      code === 'auth/popup-blocked' ||
+      code === 'auth/popup-closed-by-user' ||
+      code === 'auth/cancelled-popup-request' ||
+      code === 'auth/operation-not-supported-in-this-environment'
+    ) {
+      return this.isBraveOrRestrictedBrowser()
+        ? 'تم حجب أو إغلاق نافذة Google في هذا المتصفح/التطبيق. اسمح بالنوافذ المنبثقة (Popups) وأعد المحاولة، أو سجّل الدخول بالبريد الإلكتروني وكلمة المرور.'
+        : 'تم إغلاق أو حجب نافذة تسجيل الدخول عبر Google. اسمح بالنوافذ المنبثقة لهذا الموقع وأعد المحاولة، أو سجّل الدخول بالبريد الإلكتروني وكلمة المرور.';
+    }
+    if (code === 'auth/account-exists-with-different-credential') {
+      return 'هذا البريد مسجل بالفعل بطريقة دخول أخرى. سجّل الدخول بالبريد الإلكتروني وكلمة المرور.';
+    }
+    if (code === 'auth/network-request-failed') {
+      return 'تعذر الاتصال بخوادم Google. تحقق من اتصال الإنترنت وأعد المحاولة.';
+    }
+    if (code === 'auth/internal-error') {
+      return 'حدث خطأ مؤقت أثناء المصادقة مع Google. يرجى المحاولة بالنافذة المنبثقة أو البريد الإلكتروني.';
     }
     if (code === 'auth/operation-not-allowed') {
-      return 'طريقة الدخول هذه غير مفعّلة في إعدادات مشروع Firebase Authentication.';
+      return 'طريقة الدخول بالبريد وكلمة المرور غير مفعّلة في Firebase Console حالياً. استخدم زر "تسجيل الدخول السريع بحساب Google" أو فعّل Email/Password في Firebase Authentication.';
     }
     if (code === 'auth/user-not-found' || code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
-      return 'البريد الإلكتروني أو كلمة المرور غير صحيحة.';
+      return 'البريد الإلكتروني أو كلمة المرور غير صحيحة، أو أن الحساب مسجل عبر Google فقط (جرّب الدخول بحساب Google أو اضغط نسيت كلمة المرور لتعيين كلمة مرور).';
     }
     if (code === 'auth/email-already-in-use') {
       return 'هذا البريد الإلكتروني مسجل بالفعل. يرجى تسجيل الدخول.';
@@ -1214,13 +1832,84 @@ export class FirebaseService {
     return err?.message || fallback;
   }
 
+  private async runGoogleAuthFlow(
+    preferRedirect = false
+  ): Promise<{ success: boolean; user?: FirebaseUser; redirectStarted?: boolean; error?: string }> {
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+
+    // livo_native_google: inside the APK use the native Google account picker
+    const capNative = typeof window !== 'undefined' ? (window as any).Capacitor : undefined;
+    if (capNative?.isNativePlatform?.()) {
+      try {
+        const FA = capNative.registerPlugin('FirebaseAuthentication');
+        const res = await FA.signInWithGoogle({ skipNativeAuth: true });
+        const idToken = res?.credential?.idToken;
+        if (!idToken) return { success: false, error: 'لم يتم الحصول على بيانات حساب Google' };
+        const { signInWithCredential } = await import('firebase/auth');
+        const nativeCred = await signInWithCredential(auth, GoogleAuthProvider.credential(idToken));
+        return { success: true, user: nativeCred.user };
+      } catch (err: any) {
+        return { success: false, error: this.formatFirebaseAuthError(err, 'تم إلغاء تسجيل الدخول عبر Google') };
+      }
+    }
+
+    // Cross-origin signInWithRedirect (e.g. run.app / localhost APK -> firebaseapp.com/__/auth/handler)
+    // fails in storage-partitioned browsers with "missing initial state".
+    // Only allow redirect when hosted directly on authDomain outside iframes & restricted browsers.
+    const isSameAuthDomain =
+      typeof window !== 'undefined' &&
+      Boolean(firebaseConfig.authDomain) &&
+      window.location.hostname === firebaseConfig.authDomain;
+    const canUseRedirect = isSameAuthDomain && !this.isInsideIframe() && !this.isBraveOrRestrictedBrowser();
+
+    if (preferRedirect && canUseRedirect) {
+      try {
+        if (typeof window !== 'undefined') {
+          window.sessionStorage.setItem('livo_google_redirect_pending', String(Date.now()));
+        }
+        await signInWithRedirect(auth, provider);
+        return { success: false, redirectStarted: true };
+      } catch (err: any) {
+        if (typeof window !== 'undefined') {
+          window.sessionStorage.removeItem('livo_google_redirect_pending');
+        }
+        return { success: false, error: this.formatFirebaseAuthError(err, 'تعذر بدء تسجيل الدخول عبر Google') };
+      }
+    }
+
+    try {
+      const cred = await signInWithPopup(auth, provider);
+      return { success: true, user: cred.user };
+    } catch (err: any) {
+      const code = err?.code || '';
+      if (
+        (code === 'auth/popup-blocked' || code === 'auth/operation-not-supported-in-this-environment') &&
+        canUseRedirect
+      ) {
+        try {
+          if (typeof window !== 'undefined') {
+            window.sessionStorage.setItem('livo_google_redirect_pending', String(Date.now()));
+          }
+          await signInWithRedirect(auth, provider);
+          return { success: false, redirectStarted: true };
+        } catch (redirectErr: any) {
+          if (typeof window !== 'undefined') {
+            window.sessionStorage.removeItem('livo_google_redirect_pending');
+          }
+          return { success: false, error: this.formatFirebaseAuthError(redirectErr, 'تعذر فتح تسجيل الدخول عبر Google') };
+        }
+      }
+      console.warn('Google Auth error:', err);
+      return { success: false, error: this.formatFirebaseAuthError(err, 'تم إلغاء نافذة اختيار حساب Google') };
+    }
+  }
+
   /**
    * Admin Authentication with Firebase Auth
-   * Strictly authenticates the user with Firebase Authentication via signInWithEmailAndPassword
-   * No hardcoded passwords, no client-side role bypasses.
    */
   public async loginAdmin(email: string, pass: string): Promise<{ success: boolean; user?: FirebaseUser; error?: string }> {
-    const cleanEmail = email.trim().toLowerCase();
+    const cleanEmail = this.sanitizeEmail(email);
     const cleanPass = pass.trim();
 
     try {
@@ -1235,38 +1924,22 @@ export class FirebaseService {
   /**
    * Direct Google Sign-In for Admin / Owner
    */
-  public async loginAdminWithGoogle(): Promise<{ success: boolean; user?: FirebaseUser; error?: string }> {
-    try {
-      const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: 'select_account' });
-      await signInWithRedirect(auth, provider);
-      return { success: true };
-    } catch (err: any) {
-      console.warn('Google Auth popup error:', err);
-      return { success: false, error: this.formatFirebaseAuthError(err, 'تم إلغاء تسجيل الدخول عبر Google') };
-    }
+  public async loginAdminWithGoogle(preferRedirect = false): Promise<{ success: boolean; user?: FirebaseUser; redirectStarted?: boolean; error?: string }> {
+    return this.runGoogleAuthFlow(preferRedirect);
   }
 
   /**
    * Direct Google Sign-In for Customer with mandatory Account Picker
    */
-  public async loginCustomerWithGoogle(): Promise<{ success: boolean; user?: FirebaseUser; error?: string }> {
-    try {
-      const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: 'select_account' });
-      await signInWithRedirect(auth, provider);
-      return { success: true };
-    } catch (err: any) {
-      console.warn('Customer Google Sign-In error:', err);
-      return { success: false, error: this.formatFirebaseAuthError(err, 'تم إلغاء نافذة اختيار حساب Google') };
-    }
+  public async loginCustomerWithGoogle(preferRedirect = false): Promise<{ success: boolean; user?: FirebaseUser; redirectStarted?: boolean; error?: string }> {
+    return this.runGoogleAuthFlow(preferRedirect);
   }
 
   /**
    * Customer Sign-In via Email/Password in Firebase Auth
    */
   public async loginCustomerWithEmail(email: string, pass: string): Promise<{ success: boolean; user?: FirebaseUser; error?: string }> {
-    const cleanEmail = email.trim().toLowerCase();
+    const cleanEmail = this.sanitizeEmail(email);
     const cleanPass = pass.trim();
     try {
       const cred = await signInWithEmailAndPassword(auth, cleanEmail, cleanPass);
@@ -1280,7 +1953,7 @@ export class FirebaseService {
    * Customer Registration via Email/Password in Firebase Auth
    */
   public async registerCustomerWithEmail(email: string, pass: string, displayName?: string): Promise<{ success: boolean; user?: FirebaseUser; error?: string }> {
-    const cleanEmail = email.trim().toLowerCase();
+    const cleanEmail = this.sanitizeEmail(email);
     const cleanPass = pass.trim();
     try {
       const cred = await createUserWithEmailAndPassword(auth, cleanEmail, cleanPass);
@@ -1290,6 +1963,44 @@ export class FirebaseService {
       return { success: true, user: cred.user };
     } catch (err: any) {
       return { success: false, error: this.formatFirebaseAuthError(err, 'تعذر إنشاء الحساب عبر Firebase') };
+    }
+  }
+
+  /**
+   * Phone OTP Session Bridge: creates/signs into a deterministic Firebase Auth identity
+   * so Firestore Security Rules (request.auth != null) succeed reliably for Phone accounts.
+   */
+  public async authenticateWithPhoneSession(
+    cleanPhone: string,
+    displayName?: string
+  ): Promise<{ success: boolean; user?: FirebaseUser; error?: string }> {
+    const digits = cleanPhone.replace(/[^0-9]/g, '');
+    if (digits.length < 7) {
+      return { success: false, error: 'رقم الهاتف غير صالح' };
+    }
+    const syntheticEmail = `p${digits}@phone.livo.live`;
+    const deterministicPass = `LivoPhone#${digits}_Auth99`;
+
+    try {
+      const cred = await signInWithEmailAndPassword(auth, syntheticEmail, deterministicPass);
+      return { success: true, user: cred.user };
+    } catch (signInErr: any) {
+      try {
+        const reg = await createUserWithEmailAndPassword(auth, syntheticEmail, deterministicPass);
+        if (displayName && reg.user) {
+          await updateProfile(reg.user, { displayName: displayName.trim() }).catch(() => {});
+        }
+        return { success: true, user: reg.user };
+      } catch (regErr: any) {
+        // If email/password provider is restricted, fall back to Anonymous Firebase session so Firestore works
+        try {
+          const anon = await signInAnonymously(auth);
+          return { success: true, user: anon.user };
+        } catch {
+          console.warn('Phone Auth fallback failed:', signInErr?.code, regErr?.code);
+          return { success: false, error: 'تعذر تأسيس جلسة Firebase للهاتف' };
+        }
+      }
     }
   }
 
@@ -1307,6 +2018,10 @@ export class FirebaseService {
 
   public getCurrentAuthUid(): string | undefined {
     return auth.currentUser?.uid;
+  }
+
+  public getCurrentAuthEmail(): string | undefined {
+    return auth.currentUser?.email?.trim().toLowerCase() || undefined;
   }
 
   public onAuthStateChanged(callback: (user: FirebaseUser | null) => void): Unsubscribe {

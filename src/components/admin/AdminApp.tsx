@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Shield,
   Users,
@@ -50,7 +50,9 @@ import {
   Upload,
   Wand2,
   KeyRound,
-  Zap
+  Zap,
+  Mic,
+  Video
 } from 'lucide-react';
 import {
   UserProfile,
@@ -69,15 +71,19 @@ import {
   DirectMessage,
   CoinPackage,
   SupervisorRecord,
-  VoiceRoom
+  VoiceRoom,
+  SplashBannerConfig
 } from '../../types';
 import { livoStore } from '../../services/livoStore';
 import { firebaseService } from '../../services/firebase';
 import { LivoAdminAppIcon } from '../../assets/appIcons';
 import { AvatarWithFrame } from '../common/AvatarWithFrame';
-import { LivoVerifiedBadge, VerifiedBadgeColor, VerifiedBadgeShape } from '../common/LivoVerifiedBadge';
+import { LivoVerifiedBadge, VERIFIED_BADGE_COLORS, VerifiedBadgeColor, VerifiedBadgeShape } from '../common/LivoVerifiedBadge';
+import { UserNameWithBadges } from '../common/UserNameWithBadges';
+import { MagicCutoutModal } from '../common/MagicCutoutModal';
 import { ROYAL_FRAME_PRESETS, GLOW_COLOR_PRESETS } from '../../data/initialData';
 import { removeImageBackgroundToPng } from '../../utils/imageTransparency';
+import { compressImageForFirestore } from '../../utils/imageCompression';
 
 interface AdminAppProps {
   onLogoutAdmin?: () => void;
@@ -106,12 +112,19 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
 
   // Active Admin Section Navigation
   const [activeSection, setActiveSection] = useState<
-    'dashboard' | 'direct_support_hub' | 'inbox' | 'ads' | 'recharges' | 'payment_settings' | 'recharge_codes' | 'manual_coins' | 'pricing' | 'users' | 'cosmetics_studio' | 'agencies' | 'verifications' | 'withdrawals' | 'store_items' | 'official_room' | 'bans' | 'supervisors' | 'financial_logs'
+    'dashboard' | 'direct_support_hub' | 'inbox' | 'ads' | 'recharges' | 'payment_settings' | 'recharge_codes' | 'manual_coins' | 'pricing' | 'users' | 'cosmetics_studio' | 'agencies' | 'verifications' | 'withdrawals' | 'store_items' | 'rooms' | 'official_room' | 'bans' | 'supervisors' | 'financial_logs'
   >('dashboard');
 
   // Local state synced directly with livoStore & Firebase
-  const [users, setUsers] = useState<UserProfile[]>(livoStore.getUsers());
-  const [rooms, setRooms] = useState<VoiceRoom[]>(livoStore.getRooms());
+  const [users, setUsers] = useState<UserProfile[]>(livoStore.getGenuineUsers());
+  const usersRef = useRef<UserProfile[]>(users);
+  usersRef.current = users;
+  const lookedUpUidsRef = useRef<Set<string>>(new Set());
+  const [rooms, setRooms] = useState<VoiceRoom[]>(livoStore.getAllRoomsForAdmin());
+  const [roomsSearchQuery, setRoomsSearchQuery] = useState('');
+  const [isPurgingFakeRooms, setIsPurgingFakeRooms] = useState(false);
+  const [adminCutoutTarget, setAdminCutoutTarget] = useState<'gift' | 'frame' | 'custom_icon' | null>(null);
+  const [adminCutoutSource, setAdminCutoutSource] = useState<string | File | null>(null);
   const [recharges, setRecharges] = useState<RechargeRequest[]>(livoStore.getRechargeRequests());
   const [audits, setAudits] = useState<CoinAuditRecord[]>(livoStore.getCoinAudits());
   const [agencies, setAgencies] = useState<AgencyApplication[]>(livoStore.getAgencies());
@@ -127,8 +140,17 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
   const [coinPackagesList, setCoinPackagesList] = useState<CoinPackage[]>(livoStore.getCoinPackages());
   const [allMessages, setAllMessages] = useState<DirectMessage[]>(livoStore.getMessages());
 
-  // Users directory search
+  // Universal Search Queries across all Admin sections (supports UID 10000 - 100000+)
   const [usersDirectoryQuery, setUsersDirectoryQuery] = useState('');
+  const [rechargesSearchQuery, setRechargesSearchQuery] = useState('');
+  const [agenciesSearchQuery, setAgenciesSearchQuery] = useState('');
+  const [verificationsSearchQuery, setVerificationsSearchQuery] = useState('');
+  const [withdrawalsSearchQuery, setWithdrawalsSearchQuery] = useState('');
+  const [inboxSearchQuery, setInboxSearchQuery] = useState('');
+  const [logsSearchQuery, setLogsSearchQuery] = useState('');
+  const [supervisorsSearchQuery, setSupervisorsSearchQuery] = useState('');
+  const [blastRecipientQuery, setBlastRecipientQuery] = useState('');
+  const [isSearchingServer, setIsSearchingServer] = useState(false);
 
   // Direct Support Hub State
   const [supportSearchQuery, setSupportSearchQuery] = useState('');
@@ -168,6 +190,11 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
   const [newGiftImageUrl, setNewGiftImageUrl] = useState('');
   const [isProcessingGiftImage, setIsProcessingGiftImage] = useState(false);
   const [newGiftAnimation, setNewGiftAnimation] = useState<GiftItem['animationType']>('heart');
+  const [newGiftIsCard, setNewGiftIsCard] = useState(false);
+  const [newGiftCategory, setNewGiftCategory] = useState('ملكي');
+  const [giftAdminSearch, setGiftAdminSearch] = useState('');
+  const [giftAdminCategory, setGiftAdminCategory] = useState('الكل');
+  const [isSyncing200Gifts, setIsSyncing200Gifts] = useState(false);
 
   // Live Gift Blaster (ضرب وإرسال الهدايا للغرف)
   const [blastRoomId, setBlastRoomId] = useState('');
@@ -175,6 +202,8 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
   const [blastCount, setBlastCount] = useState<number>(5);
   const [blastRecipientUid, setBlastRecipientUid] = useState('');
   const [blastSenderName, setBlastSenderName] = useState('إدارة LIVO الملكية');
+  const [blastTargetAll, setBlastTargetAll] = useState(false);
+  const [blastCardMessage, setBlastCardMessage] = useState('');
 
   // VIP Cosmetics Studio (حصري للإدارة فقط)
   const [cosmeticSearchQuery, setCosmeticSearchQuery] = useState('');
@@ -217,6 +246,20 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
   const [newAdStartDate, setNewAdStartDate] = useState(new Date().toISOString().split('T')[0]);
   const [newAdEndDate, setNewAdEndDate] = useState(new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString().split('T')[0]);
   const [adDeleteConfirmId, setAdDeleteConfirmId] = useState<string | null>(null);
+  const [isUploadingAdImage, setIsUploadingAdImage] = useState(false);
+
+  // Admin 3s Fullscreen Splash Banners + UID Change + Fake User Cleanup
+  const [splashBanners, setSplashBanners] = useState<SplashBannerConfig[]>(livoStore.getSplashBanners());
+  const [splashTitle, setSplashTitle] = useState('');
+  const [splashDedication, setSplashDedication] = useState('');
+  const [splashSender, setSplashSender] = useState('إدارة LIVO الملكية');
+  const [splashRecipient, setSplashRecipient] = useState('');
+  const [splashImageUrl, setSplashImageUrl] = useState('');
+  const [isUploadingSplashImg, setIsUploadingSplashImg] = useState(false);
+  const [uidChangeTarget, setUidChangeTarget] = useState<UserProfile | null>(null);
+  const [uidChangeInput, setUidChangeInput] = useState('');
+  const [isChangingUid, setIsChangingUid] = useState(false);
+  const [isPurgingFakeUsers, setIsPurgingFakeUsers] = useState(false);
 
   // Toast notification
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -264,29 +307,54 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
   const [editingSupervisorId, setEditingSupervisorId] = useState<string | null>(null);
   const [editingSupervisorPerms, setEditingSupervisorPerms] = useState<string[]>([]);
 
-  // Listen to Firebase Auth state to maintain verified session
+  // Listen to Firebase Auth state & redirect flow to maintain verified session
   useEffect(() => {
     let latestFbUser: any = null;
+    let isMounted = true;
 
-    const evaluateAdminAuth = (fbUser: any) => {
+    const evaluateAdminAuth = async (fbUser: any) => {
+      if (!isMounted) return;
       if (!fbUser) {
         setIsAdminLoggedIn(false);
         setActiveAdminEmail('');
         localStorage.removeItem('livo_admin_session');
         return;
       }
-      const email = fbUser.email?.trim().toLowerCase() || '';
-      if (livoStore.isAuthorizedAdminEmail(email)) {
+      const email = livoStore.normalizeEmail(fbUser.email);
+      const authorized = await livoStore.verifyAdminAuthorizationAsync(email, fbUser.uid);
+      if (!isMounted) return;
+      if (authorized) {
         setIsAdminLoggedIn(true);
         setActiveAdminEmail(email);
+        setAuthError('');
         localStorage.setItem('livo_admin_session', 'true');
-        livoStore.syncFirebaseUser(fbUser);
+        await livoStore.syncFirebaseUserAsync(fbUser);
       } else {
         setIsAdminLoggedIn(false);
         setActiveAdminEmail('');
         localStorage.removeItem('livo_admin_session');
       }
     };
+
+    firebaseService.consumeGoogleRedirectResult().then(async (res) => {
+      if (!isMounted) return;
+      if (res.error) {
+        setAuthError(res.error);
+        return;
+      }
+      if (res.user) {
+        const email = livoStore.normalizeEmail(res.user.email);
+        const authorized = await livoStore.verifyAdminAuthorizationAsync(email, res.user.uid);
+        if (!isMounted) return;
+        if (!authorized) {
+          await firebaseService.logout();
+          setAuthError('هذا البريد غير مصرح له بدخول لوحة الإدارة (مقصور على المالك والمشرفين المعتمدين).');
+          return;
+        }
+        await evaluateAdminAuth(res.user);
+        showToast('تم تسجيل الدخول بنجاح كمسؤول للمنظومة عبر Google 🛡️');
+      }
+    });
 
     const unsubAuth = firebaseService.onAuthStateChanged((firebaseUser) => {
       latestFbUser = firebaseUser;
@@ -295,7 +363,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
 
     const unsubscribe = livoStore.subscribe(() => {
       setUsers([...livoStore.getGenuineUsers()]);
-      setRooms([...livoStore.getRooms()]);
+      setRooms([...livoStore.getAllRoomsForAdmin()]);
       setRecharges([...livoStore.getRechargeRequests()]);
       setAudits([...livoStore.getCoinAudits()]);
       setAgencies([...livoStore.getAgencies()]);
@@ -311,27 +379,117 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
       setCoinPackagesList([...livoStore.getCoinPackages()]);
       setSupervisors([...livoStore.getSupervisors()]);
       setAllMessages([...livoStore.getMessages()]);
+      setSplashBanners([...livoStore.getSplashBanners()]);
       if (latestFbUser) {
-        evaluateAdminAuth(latestFbUser);
+        const em = livoStore.normalizeEmail(latestFbUser.email);
+        if (livoStore.isAuthorizedAdminEmail(em)) {
+          setIsAdminLoggedIn(true);
+          setActiveAdminEmail((prev) => (prev === em ? prev : em));
+        } else {
+          livoStore.verifyAdminAuthorizationAsync(em, latestFbUser.uid).then((authorized) => {
+            if (!isMounted) return;
+            setIsAdminLoggedIn((prev) => (prev === authorized ? prev : authorized));
+            setActiveAdminEmail((prev) => {
+              const next = authorized ? em : '';
+              return prev === next ? prev : next;
+            });
+          });
+        }
       }
     });
 
     return () => {
+      isMounted = false;
       unsubAuth();
       unsubscribe();
     };
   }, []);
 
+  // Automatic server-side UID lookup across Firestore when admin types 5+ digits (10000 - 100000+)
+  const triggerServerUserLookup = async (rawQuery: string): Promise<UserProfile[]> => {
+    const clean = rawQuery.trim();
+    if (!clean) return [];
+    const local = livoStore.searchUsersByQuery(clean);
+    if (local.some((u) => u.uid === clean) || (!/^\d{4,8}$/.test(clean) && local.length > 0)) {
+      return local;
+    }
+    setIsSearchingServer(true);
+    try {
+      const found = await livoStore.lookupUserInFirestore(clean);
+      setUsers([...livoStore.getGenuineUsers()]);
+      return found;
+    } finally {
+      setIsSearchingServer(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isAdminLoggedIn) return;
+    const currentUsers = usersRef.current;
+    const candidates = [
+      usersDirectoryQuery,
+      supportSearchQuery,
+      cosmeticSearchQuery,
+      searchCoinsUid,
+      banSearchUid,
+      blastRecipientQuery,
+      rechargesSearchQuery,
+      agenciesSearchQuery,
+      verificationsSearchQuery,
+      withdrawalsSearchQuery,
+      inboxSearchQuery,
+      logsSearchQuery,
+      supervisorsSearchQuery
+    ]
+      .map((q) => q.trim())
+      .filter(
+        (q) =>
+          /^\d{5,8}$/.test(q) &&
+          !currentUsers.some((u) => u.uid === q) &&
+          !lookedUpUidsRef.current.has(q)
+      );
+
+    if (candidates.length === 0) return;
+    const uniqueCandidates = Array.from(new Set(candidates));
+    const timer = setTimeout(() => {
+      uniqueCandidates.forEach((uidQuery) => {
+        lookedUpUidsRef.current.add(uidQuery);
+        livoStore.lookupUserInFirestore(uidQuery).then((res) => {
+          if (res.length > 0) {
+            setUsers([...livoStore.getGenuineUsers()]);
+          }
+        });
+      });
+    }, 320);
+
+    return () => clearTimeout(timer);
+  }, [
+    isAdminLoggedIn,
+    usersDirectoryQuery,
+    supportSearchQuery,
+    cosmeticSearchQuery,
+    searchCoinsUid,
+    banSearchUid,
+    blastRecipientQuery,
+    rechargesSearchQuery,
+    agenciesSearchQuery,
+    verificationsSearchQuery,
+    withdrawalsSearchQuery,
+    inboxSearchQuery,
+    logsSearchQuery,
+    supervisorsSearchQuery
+  ]);
+
   // Admin Login with Firebase Auth and real server-side validation (Owner + Active Supervisors)
   const handleAdminLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError('');
+    setAuthInfo('');
     setIsLoggingIn(true);
 
-    const cleanEmail = adminUsername.trim().toLowerCase();
-
-    if (!livoStore.isAuthorizedAdminEmail(cleanEmail)) {
-      setAuthError('حساب الإدارة غير معتمد. يرجى الدخول بحساب المالك الرسمي أو مشرف مفعّل في المنظومة.');
+    const cleanEmail = livoStore.normalizeEmail(adminUsername);
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      setAuthError('يرجى إدخال البريد الإلكتروني بشكل صحيح.');
       setIsLoggingIn(false);
       return;
     }
@@ -339,10 +497,20 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
     try {
       const res = await firebaseService.loginAdmin(cleanEmail, adminPassword);
       if (res.success && res.user) {
+        const verifiedEmail = livoStore.normalizeEmail(res.user.email || cleanEmail);
+        const authorized = await livoStore.verifyAdminAuthorizationAsync(verifiedEmail, res.user.uid);
+        if (!authorized) {
+          await firebaseService.logout();
+          setIsAdminLoggedIn(false);
+          setActiveAdminEmail('');
+          localStorage.removeItem('livo_admin_session');
+          setAuthError('حساب الإدارة غير معتمد. يرجى الدخول بحساب المالك الرسمي أو مشرف مفعّل في المنظومة.');
+          return;
+        }
         setIsAdminLoggedIn(true);
-        setActiveAdminEmail(cleanEmail);
+        setActiveAdminEmail(verifiedEmail);
         localStorage.setItem('livo_admin_session', 'true');
-        livoStore.syncFirebaseUser(res.user);
+        await livoStore.syncFirebaseUserAsync(res.user);
         showToast('تم تسجيل الدخول بنجاح عبر Firebase Authentication 🛡️');
       } else {
         setAuthError(res.error || 'فشل التحقق من بيانات الدخول');
@@ -354,15 +522,38 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
     }
   };
 
-  // Google Login for Admin (Strictly checks authorized owner/supervisor email)
-  const handleGoogleLogin = async () => {
+  // Google Login for Admin (Safe Popup flow — avoids storage-partitioned redirect errors)
+  const adminRedirectTimerRef = useRef<number | null>(null);
+  useEffect(() => {
+    return () => {
+      if (adminRedirectTimerRef.current !== null) {
+        window.clearTimeout(adminRedirectTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleGoogleLogin = async (preferRedirect: boolean = false) => {
     setAuthError('');
+    setAuthInfo('');
     setIsLoggingIn(true);
+    let redirectInitiated = false;
     try {
-      const res = await firebaseService.loginAdminWithGoogle();
+      const res = await firebaseService.loginAdminWithGoogle(preferRedirect);
+      if (res.redirectStarted) {
+        redirectInitiated = true;
+        setAuthInfo('جاري التوجيه إلى صفحة Google الآمنة لتأكيد دخول الإدارة...');
+        if (adminRedirectTimerRef.current !== null) {
+          window.clearTimeout(adminRedirectTimerRef.current);
+        }
+        adminRedirectTimerRef.current = window.setTimeout(() => {
+          setIsLoggingIn(false);
+        }, 6000);
+        return;
+      }
       if (res.success && res.user) {
-        const email = res.user.email?.trim().toLowerCase() || '';
-        if (!livoStore.isAuthorizedAdminEmail(email)) {
+        const email = livoStore.normalizeEmail(res.user.email);
+        const authorized = await livoStore.verifyAdminAuthorizationAsync(email, res.user.uid);
+        if (!authorized) {
           await firebaseService.logout();
           setIsAdminLoggedIn(false);
           localStorage.removeItem('livo_admin_session');
@@ -372,7 +563,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
         setIsAdminLoggedIn(true);
         setActiveAdminEmail(email);
         localStorage.setItem('livo_admin_session', 'true');
-        livoStore.syncFirebaseUser(res.user);
+        await livoStore.syncFirebaseUserAsync(res.user);
         showToast('تم تسجيل الدخول بنجاح كمسؤول للمنظومة عبر Google 🛡️');
       } else {
         setAuthError(res.error || 'فشل تسجيل الدخول عبر Google');
@@ -380,7 +571,9 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
     } catch (e: any) {
       setAuthError(e?.message || 'حدث خطأ أثناء الاتصال بـ Google');
     } finally {
-      setIsLoggingIn(false);
+      if (!redirectInitiated) {
+        setIsLoggingIn(false);
+      }
     }
   };
 
@@ -427,8 +620,46 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
     setCosCustomIconAnimated(target.customIconAnimated !== false);
   };
 
-  // Recharges Handlers
-  const actorEmail = activeAdminEmail || 'livo.admin@gmail.com';
+  // Recharges & Actor Authority Helpers
+  const actorEmail = firebaseService.getCurrentAuthEmail() || activeAdminEmail || 'livo.admin@gmail.com';
+  const isOwnerSession = livoStore.isOwnerEmail(actorEmail);
+  const currentSupervisorRecord = !isOwnerSession && actorEmail
+    ? supervisors.find((s) => s.isActive && s.email.trim().toLowerCase() === actorEmail.trim().toLowerCase())
+    : undefined;
+
+  const canAccessSection = (sectionId: string): boolean => {
+    if (isOwnerSession) return true;
+    if (sectionId === 'dashboard') return true;
+    if (sectionId === 'supervisors') return false;
+    const permMap: Record<string, string> = {
+      direct_support_hub: 'support',
+      inbox: 'support',
+      ads: 'support',
+      recharges: 'recharges',
+      payment_settings: 'recharges',
+      recharge_codes: 'recharges',
+      manual_coins: 'recharges',
+      pricing: 'recharges',
+      financial_logs: 'recharges',
+      users: 'users',
+      cosmetics_studio: 'users',
+      agencies: 'agencies',
+      verifications: 'verifications',
+      withdrawals: 'withdrawals',
+      store_items: 'rooms',
+      rooms: 'rooms',
+      official_room: 'rooms',
+      bans: 'bans'
+    };
+    const reqPerm = permMap[sectionId];
+    return reqPerm ? Boolean(currentSupervisorRecord?.permissions?.includes(reqPerm)) : false;
+  };
+
+  useEffect(() => {
+    if (isAdminLoggedIn && !canAccessSection(activeSection)) {
+      setActiveSection('dashboard');
+    }
+  }, [isAdminLoggedIn, activeSection, actorEmail, supervisors.length]);
 
   const handleApproveRecharge = (reqId: string) => {
     const res = livoStore.approveRechargeRequest(reqId, actorEmail);
@@ -582,17 +813,32 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
   const unreadDirectMessagesCount = allMessages.filter(m => m.receiverUid === '10000' && m.status !== 'read').length;
   const unreadSupportCount = unreadDirectMessagesCount + pendingTicketsCount;
 
-  // Filtered Recharges List
+  // Filtered Recharges List (supports UID 10000 - 100000+ & phone/name search)
   const filteredRecharges = recharges.filter(r => {
-    if (rechargeFilter === 'all') return true;
-    return r.status === rechargeFilter;
+    if (rechargeFilter !== 'all' && r.status !== rechargeFilter) return false;
+    const q = rechargesSearchQuery.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      r.uid.toLowerCase().includes(q) ||
+      r.username.toLowerCase().includes(q) ||
+      r.orderNumber.toLowerCase().includes(q) ||
+      (r.payerPhone && r.payerPhone.toLowerCase().includes(q))
+    );
   });
 
-  // Filtered Support Tickets
+  // Filtered Support Tickets (supports UID 10000 - 100000+ search)
   const filteredTickets = tickets.filter(t => {
     if (ticketCategoryFilter !== 'all' && t.category !== ticketCategoryFilter) return false;
     if (ticketStatusFilter !== 'all' && t.status !== ticketStatusFilter) return false;
-    return true;
+    const q = inboxSearchQuery.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      t.uid.toLowerCase().includes(q) ||
+      t.username.toLowerCase().includes(q) ||
+      t.subject.toLowerCase().includes(q) ||
+      t.message.toLowerCase().includes(q) ||
+      t.id.toLowerCase().includes(q)
+    );
   });
 
   // Direct Support Hub Handlers
@@ -725,16 +971,25 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
     showToast('تم حذف كود الشحن بنجاح');
   };
 
-  // Gifts Handlers (Add + Edit + PNG upload with BG removal + Toggle Active + Delete)
+  // Gifts Handlers (Add + Edit + PNG upload with BG removal + Firestore-safe compression + Toggle Active + Delete)
   const handleUploadGiftImage = async (file: File) => {
     setIsProcessingGiftImage(true);
     try {
       const transparentPng = await removeImageBackgroundToPng(file, { maxSize: 320, tolerance: 34 });
-      let finalUrl = transparentPng;
+      const compressedPng = await compressImageForFirestore(transparentPng, {
+        preserveAlpha: true,
+        maxDim: 320,
+        maxBytes: 160_000
+      });
+      let finalUrl = compressedPng;
       try {
-        finalUrl = await firebaseService.uploadImage(`gifts/gift_${Date.now()}.png`, transparentPng);
+        finalUrl = await firebaseService.uploadImage(`gifts/gift_${Date.now()}.png`, compressedPng, {
+          preserveAlpha: true,
+          maxDim: 320,
+          maxBytes: 160_000
+        });
       } catch {
-        finalUrl = transparentPng;
+        finalUrl = compressedPng;
       }
       setNewGiftImageUrl(finalUrl);
       showToast('تم رفع صورة الهدية وتفريغ خلفيتها إلى PNG شفاف ✓');
@@ -759,8 +1014,9 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
       coins: parsedPrice,
       icon: newGiftIcon.trim() || '🎁',
       imageUrl: newGiftImageUrl.trim() || undefined,
-      category: existingGift?.category || 'popular',
+      category: newGiftCategory.trim() || existingGift?.category || 'ملكي',
       animationType: newGiftAnimation,
+      isCard: newGiftIsCard || newGiftAnimation === 'card',
       durationMs: existingGift?.durationMs || 3500,
       isActive: existingGift?.isActive ?? true,
       updatedAt: new Date().toISOString()
@@ -774,6 +1030,8 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
     setNewGiftIcon('🎁');
     setNewGiftImageUrl('');
     setNewGiftAnimation('heart');
+    setNewGiftIsCard(false);
+    setNewGiftCategory('ملكي');
   };
 
   const handleToggleGiftStatus = (gift: GiftItem) => {
@@ -793,7 +1051,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
   // Verifications Handlers
   const handleConfirmRejectVerification = () => {
     if (!rejectVerificationId) return;
-    livoStore.reviewVerificationRequest(rejectVerificationId, 'rejected', actorEmail);
+    livoStore.reviewVerificationRequest(rejectVerificationId, 'rejected', actorEmail, rejectVerificationReason);
     showToast('تم رفض طلب التوثيق وإشعار المستخدم');
     setRejectVerificationId(null);
     setRejectVerificationReason('');
@@ -802,7 +1060,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
   // Withdrawals Handlers
   const handleConfirmRejectWithdrawal = () => {
     if (!rejectWithdrawalId) return;
-    livoStore.reviewWithdrawalRequest(rejectWithdrawalId, 'rejected', undefined, actorEmail);
+    livoStore.reviewWithdrawalRequest(rejectWithdrawalId, 'rejected', undefined, actorEmail, rejectWithdrawalReason);
     showToast('تم رفض طلب السحب واسترجاع الكوينز لحساب المستخدم تلقائياً');
     setRejectWithdrawalId(null);
     setRejectWithdrawalReason('');
@@ -828,7 +1086,10 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
             <input
               type="email"
               value={adminUsername}
-              onChange={(e) => setAdminUsername(e.target.value)}
+              onChange={(e) => {
+                setAdminUsername(e.target.value);
+                if (authError) setAuthError('');
+              }}
               placeholder="livo.admin@gmail.com أو eslamfifty11@gmail.com"
               className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs text-gray-900 placeholder-gray-400 outline-none focus:border-[#FFE600] focus:ring-2 focus:ring-yellow-200 font-digits"
               required
@@ -850,7 +1111,10 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
             <input
               type="password"
               value={adminPassword}
-              onChange={(e) => setAdminPassword(e.target.value)}
+              onChange={(e) => {
+                setAdminPassword(e.target.value);
+                if (authError) setAuthError('');
+              }}
               placeholder="اكتب كلمة المرور"
               className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs text-gray-900 placeholder-gray-400 outline-none focus:border-[#FFE600] focus:ring-2 focus:ring-yellow-200 font-digits"
               required
@@ -883,7 +1147,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
           <div className="pt-3 border-t border-gray-100 space-y-2">
             <button
               type="button"
-              onClick={handleGoogleLogin}
+              onClick={() => handleGoogleLogin(false)}
               disabled={isLoggingIn}
               className="w-full py-2.5 bg-gray-900 hover:bg-black text-white font-bold text-xs rounded-xl shadow transition-all flex items-center justify-center gap-2"
             >
@@ -894,6 +1158,15 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                 <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
               </svg>
               <span>تسجيل الدخول السريع بحساب Google للمالك</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleGoogleLogin(true)}
+              disabled={isLoggingIn}
+              className="w-full py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2"
+            >
+              <span>تسجيل الدخول بصفحة Google كاملة (للموبايل ومتصفح Brave)</span>
             </button>
           </div>
         </form>
@@ -913,15 +1186,20 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
       )}
 
       {/* Admin Top Header */}
-      <div className="bg-white border-b border-gray-200 px-4 sm:px-6 py-3 flex items-center justify-between">
+      <div className="bg-white border-b border-gray-200 px-4 sm:px-6 py-3 flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-3">
           <LivoAdminAppIcon size={36} />
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <h1 className="font-black text-sm sm:text-base text-gray-900">منظومة LIVO — لوحة الإدارة الرسمية</h1>
               <span className="text-[10px] bg-[#FFE600] text-black px-2 py-0.5 rounded-md font-black">
-                Owner Authority Active
+                {isOwnerSession ? 'Owner Authority Active' : 'Supervisor Access Active'}
               </span>
+              {actorEmail && (
+                <span className="text-[10px] bg-gray-100 border border-gray-200 text-gray-800 px-2 py-0.5 rounded-md font-bold font-digits" dir="ltr">
+                  {actorEmail}
+                </span>
+              )}
             </div>
             <p className="text-[11px] text-gray-500">
               متصلة بقاعدة بيانات LIVO الموحدة والمزامنة اللحظية
@@ -956,234 +1234,287 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
             <span>الإحصائيات والمؤشرات</span>
           </button>
 
-          <button
-            onClick={() => setActiveSection('direct_support_hub')}
-            className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'direct_support_hub' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <MessageSquare className="w-4 h-4 text-emerald-600" />
-              <span>مركز الإدارة والدعم المباشر</span>
-            </div>
-            {unreadSupportCount > 0 && (
-              <span className="w-5 h-5 rounded-full bg-emerald-500 text-white font-digits text-[10px] flex items-center justify-center font-black animate-pulse">
-                {unreadSupportCount}
+          {canAccessSection('direct_support_hub') && (
+            <button
+              onClick={() => setActiveSection('direct_support_hub')}
+              className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeSection === 'direct_support_hub' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <MessageSquare className="w-4 h-4 text-emerald-600" />
+                <span>مركز الإدارة والدعم المباشر</span>
+              </div>
+              {unreadSupportCount > 0 && (
+                <span className="w-5 h-5 rounded-full bg-emerald-500 text-white font-digits text-[10px] flex items-center justify-center font-black animate-pulse">
+                  {unreadSupportCount}
+                </span>
+              )}
+            </button>
+          )}
+
+          {canAccessSection('inbox') && (
+            <button
+              onClick={() => setActiveSection('inbox')}
+              className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeSection === 'inbox' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <Inbox className="w-4 h-4 text-amber-600" />
+                <span>صندوق الوارد والشكاوى</span>
+              </div>
+              {pendingTicketsCount > 0 && (
+                <span className="w-5 h-5 rounded-full bg-red-500 text-white font-digits text-[10px] flex items-center justify-center font-black animate-pulse">
+                  {pendingTicketsCount}
+                </span>
+              )}
+            </button>
+          )}
+
+          {canAccessSection('ads') && (
+            <button
+              onClick={() => setActiveSection('ads')}
+              className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeSection === 'ads' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <Megaphone className="w-4 h-4 text-amber-600" />
+                <span>مركز إدارة الإعلانات</span>
+              </div>
+              {activeAdsCount > 0 && (
+                <span className="w-5 h-5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 font-digits text-[10px] flex items-center justify-center font-black">
+                  {activeAdsCount}
+                </span>
+              )}
+            </button>
+          )}
+
+          {canAccessSection('recharges') && (
+            <button
+              onClick={() => setActiveSection('recharges')}
+              className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeSection === 'recharges' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <CreditCard className="w-4 h-4" />
+                <span>طلبات الشحن</span>
+              </div>
+              {pendingRechargesCount > 0 && (
+                <span className="w-5 h-5 rounded-full bg-red-500 text-white font-digits text-[10px] flex items-center justify-center">
+                  {pendingRechargesCount}
+                </span>
+              )}
+            </button>
+          )}
+
+          {canAccessSection('payment_settings') && (
+            <button
+              onClick={() => setActiveSection('payment_settings')}
+              className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeSection === 'payment_settings' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <Wallet className="w-4 h-4 text-amber-600" />
+              <span>إعدادات الشحن ووسائل الدفع</span>
+            </button>
+          )}
+
+          {canAccessSection('recharge_codes') && (
+            <button
+              onClick={() => setActiveSection('recharge_codes')}
+              className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeSection === 'recharge_codes' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <QrCode className="w-4 h-4 text-pink-600" />
+              <span>أكواد الشحن والقسائم ({rechargeCodes.length})</span>
+            </button>
+          )}
+
+          {canAccessSection('manual_coins') && (
+            <button
+              onClick={() => setActiveSection('manual_coins')}
+              className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeSection === 'manual_coins' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <Coins className="w-4 h-4 text-amber-600" />
+              <span>شحن وتعديل رصيد UID</span>
+            </button>
+          )}
+
+          {canAccessSection('pricing') && (
+            <button
+              onClick={() => setActiveSection('pricing')}
+              className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeSection === 'pricing' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <BadgePercent className="w-4 h-4 text-emerald-600" />
+              <span>أسعار وباقات الكوينز</span>
+            </button>
+          )}
+
+          {canAccessSection('users') && (
+            <button
+              onClick={() => setActiveSection('users')}
+              className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeSection === 'users' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <Users className="w-4 h-4 text-blue-600" />
+              <span>الحسابات والمستخدمين ({users.length})</span>
+            </button>
+          )}
+
+          {canAccessSection('cosmetics_studio') && (
+            <button
+              onClick={() => setActiveSection('cosmetics_studio')}
+              className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeSection === 'cosmetics_studio' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <Crown className="w-4 h-4 text-amber-600" />
+              <span>استوديو الإطارات والتوثيق VIP</span>
+            </button>
+          )}
+
+          {canAccessSection('agencies') && (
+            <button
+              onClick={() => setActiveSection('agencies')}
+              className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeSection === 'agencies' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <Briefcase className="w-4 h-4 text-purple-600" />
+                <span>الوكالات والوكلاء</span>
+              </div>
+              {approvedAgenciesCount > 0 && (
+                <span className="w-5 h-5 rounded-full bg-purple-600 text-white font-digits text-[10px] flex items-center justify-center">
+                  {approvedAgenciesCount}
+                </span>
+              )}
+            </button>
+          )}
+
+          {canAccessSection('verifications') && (
+            <button
+              onClick={() => setActiveSection('verifications')}
+              className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeSection === 'verifications' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-blue-500" />
+                <span>التوثيق والشارات</span>
+              </div>
+              {verifications.filter(v => v.status === 'pending').length > 0 && (
+                <span className="w-5 h-5 rounded-full bg-blue-500 text-white font-digits text-[10px] flex items-center justify-center">
+                  {verifications.filter(v => v.status === 'pending').length}
+                </span>
+              )}
+            </button>
+          )}
+
+          {canAccessSection('withdrawals') && (
+            <button
+              onClick={() => setActiveSection('withdrawals')}
+              className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeSection === 'withdrawals' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <ArrowDownCircle className="w-4 h-4 text-emerald-600" />
+                <span>طلبات السحب</span>
+              </div>
+              {pendingWithdrawalsCount > 0 && (
+                <span className="w-5 h-5 rounded-full bg-emerald-500 text-white font-digits text-[10px] flex items-center justify-center">
+                  {pendingWithdrawalsCount}
+                </span>
+              )}
+            </button>
+          )}
+
+          {canAccessSection('store_items') && (
+            <button
+              onClick={() => setActiveSection('store_items')}
+              className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeSection === 'store_items' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <ShoppingBag className="w-4 h-4 text-pink-600" />
+              <span>المتجر والهدايا وضرب الغرف</span>
+            </button>
+          )}
+
+          {canAccessSection('rooms') && (
+            <button
+              onClick={() => setActiveSection('rooms')}
+              className={`flex items-center justify-between gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeSection === 'rooms' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <Mic className="w-4 h-4 text-purple-600" />
+                <span>إدارة الغرف والبثوث</span>
+              </div>
+              <span className="px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-800 font-digits text-[10px]">
+                {rooms.filter(r => !r.isOfficial && r.status === 'open').length}
               </span>
-            )}
-          </button>
+            </button>
+          )}
 
-          <button
-            onClick={() => setActiveSection('inbox')}
-            className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'inbox' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <Inbox className="w-4 h-4 text-amber-600" />
-              <span>صندوق الوارد والشكاوى</span>
-            </div>
-            {pendingTicketsCount > 0 && (
-              <span className="w-5 h-5 rounded-full bg-red-500 text-white font-digits text-[10px] flex items-center justify-center font-black animate-pulse">
-                {pendingTicketsCount}
-              </span>
-            )}
-          </button>
+          {canAccessSection('official_room') && (
+            <button
+              onClick={() => setActiveSection('official_room')}
+              className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeSection === 'official_room' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <Radio className="w-4 h-4 text-rose-600" />
+              <span>الغرفة الرسمية والإعلانات</span>
+            </button>
+          )}
 
-          <button
-            onClick={() => setActiveSection('ads')}
-            className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'ads' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <Megaphone className="w-4 h-4 text-amber-600" />
-              <span>مركز إدارة الإعلانات</span>
-            </div>
-            {activeAdsCount > 0 && (
-              <span className="w-5 h-5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 font-digits text-[10px] flex items-center justify-center font-black">
-                {activeAdsCount}
-              </span>
-            )}
-          </button>
+          {canAccessSection('bans') && (
+            <button
+              onClick={() => setActiveSection('bans')}
+              className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeSection === 'bans' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <Slash className="w-4 h-4 text-red-600" />
+              <span>إدارة الحظر والعقوبات</span>
+            </button>
+          )}
 
-          <button
-            onClick={() => setActiveSection('recharges')}
-            className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'recharges' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <CreditCard className="w-4 h-4" />
-              <span>طلبات الشحن</span>
-            </div>
-            {pendingRechargesCount > 0 && (
-              <span className="w-5 h-5 rounded-full bg-red-500 text-white font-digits text-[10px] flex items-center justify-center">
-                {pendingRechargesCount}
-              </span>
-            )}
-          </button>
+          {canAccessSection('supervisors') && (
+            <button
+              onClick={() => setActiveSection('supervisors')}
+              className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeSection === 'supervisors' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <ShieldCheck className="w-4 h-4 text-indigo-600" />
+              <span>صلاحيات المشرفين</span>
+            </button>
+          )}
 
-          <button
-            onClick={() => setActiveSection('payment_settings')}
-            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'payment_settings' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-            }`}
-          >
-            <Wallet className="w-4 h-4 text-amber-600" />
-            <span>إعدادات الشحن ووسائل الدفع</span>
-          </button>
-
-          <button
-            onClick={() => setActiveSection('recharge_codes')}
-            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'recharge_codes' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-            }`}
-          >
-            <QrCode className="w-4 h-4 text-pink-600" />
-            <span>أكواد الشحن والقسائم ({rechargeCodes.length})</span>
-          </button>
-
-          <button
-            onClick={() => setActiveSection('manual_coins')}
-            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'manual_coins' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-            }`}
-          >
-            <Coins className="w-4 h-4 text-amber-600" />
-            <span>شحن وتعديل رصيد UID</span>
-          </button>
-
-          <button
-            onClick={() => setActiveSection('pricing')}
-            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'pricing' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-            }`}
-          >
-            <BadgePercent className="w-4 h-4 text-emerald-600" />
-            <span>أسعار وباقات الكوينز</span>
-          </button>
-
-          <button
-            onClick={() => setActiveSection('users')}
-            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'users' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-            }`}
-          >
-            <Users className="w-4 h-4 text-blue-600" />
-            <span>الحسابات والمستخدمين ({users.length})</span>
-          </button>
-
-          <button
-            onClick={() => setActiveSection('cosmetics_studio')}
-            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'cosmetics_studio' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-            }`}
-          >
-            <Crown className="w-4 h-4 text-amber-600" />
-            <span>استوديو الإطارات والتوثيق VIP</span>
-          </button>
-
-          <button
-            onClick={() => setActiveSection('agencies')}
-            className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'agencies' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <Briefcase className="w-4 h-4 text-purple-600" />
-              <span>الوكالات والوكلاء</span>
-            </div>
-            {approvedAgenciesCount > 0 && (
-              <span className="w-5 h-5 rounded-full bg-purple-600 text-white font-digits text-[10px] flex items-center justify-center">
-                {approvedAgenciesCount}
-              </span>
-            )}
-          </button>
-
-          <button
-            onClick={() => setActiveSection('verifications')}
-            className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'verifications' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-blue-500" />
-              <span>التوثيق والشارات</span>
-            </div>
-            {verifications.filter(v => v.status === 'pending').length > 0 && (
-              <span className="w-5 h-5 rounded-full bg-blue-500 text-white font-digits text-[10px] flex items-center justify-center">
-                {verifications.filter(v => v.status === 'pending').length}
-              </span>
-            )}
-          </button>
-
-          <button
-            onClick={() => setActiveSection('withdrawals')}
-            className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'withdrawals' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <ArrowDownCircle className="w-4 h-4 text-emerald-600" />
-              <span>طلبات السحب</span>
-            </div>
-            {pendingWithdrawalsCount > 0 && (
-              <span className="w-5 h-5 rounded-full bg-emerald-500 text-white font-digits text-[10px] flex items-center justify-center">
-                {pendingWithdrawalsCount}
-              </span>
-            )}
-          </button>
-
-          <button
-            onClick={() => setActiveSection('store_items')}
-            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'store_items' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-            }`}
-          >
-            <ShoppingBag className="w-4 h-4 text-pink-600" />
-            <span>المتجر والهدايا وضرب الغرف</span>
-          </button>
-
-          <button
-            onClick={() => setActiveSection('official_room')}
-            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'official_room' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-            }`}
-          >
-            <Radio className="w-4 h-4 text-rose-600" />
-            <span>الغرفة الرسمية والإعلانات</span>
-          </button>
-
-          <button
-            onClick={() => setActiveSection('bans')}
-            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'bans' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-            }`}
-          >
-            <Slash className="w-4 h-4 text-red-600" />
-            <span>إدارة الحظر والعقوبات</span>
-          </button>
-
-          <button
-            onClick={() => setActiveSection('supervisors')}
-            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'supervisors' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-            }`}
-          >
-            <ShieldCheck className="w-4 h-4 text-indigo-600" />
-            <span>صلاحيات المشرفين</span>
-          </button>
-
-          <button
-            onClick={() => setActiveSection('financial_logs')}
-            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeSection === 'financial_logs' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-            }`}
-          >
-            <History className="w-4 h-4 text-gray-600" />
-            <span>السجل المالي الدائم</span>
-          </button>
+          {canAccessSection('financial_logs') && (
+            <button
+              onClick={() => setActiveSection('financial_logs')}
+              className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeSection === 'financial_logs' ? 'bg-[#FFE600] text-black font-black shadow-xs' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <History className="w-4 h-4 text-gray-600" />
+              <span>السجل المالي الدائم</span>
+            </button>
+          )}
         </div>
 
         {/* Content Area */}
@@ -1297,8 +1628,18 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                   </p>
                 </div>
 
-                {/* Filters */}
+                {/* Filters + Universal UID Search */}
                 <div className="flex flex-wrap items-center gap-2">
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 text-gray-400 absolute right-2.5 top-2" />
+                    <input
+                      type="text"
+                      value={inboxSearchQuery}
+                      onChange={(e) => setInboxSearchQuery(e.target.value)}
+                      placeholder="بحث بـ UID (10000-100000+) أو الاسم..."
+                      className="bg-white border border-gray-200 rounded-xl pr-8 pl-2.5 py-1.5 text-xs text-gray-900 placeholder-gray-400 outline-none focus:border-amber-500 font-digits w-52"
+                    />
+                  </div>
                   <select
                     value={ticketCategoryFilter}
                     onChange={(e: any) => setTicketCategoryFilter(e.target.value)}
@@ -1359,8 +1700,27 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                             />
                             <div>
                               <div className="flex items-center gap-1.5">
-                                <span className="font-bold text-xs text-gray-900">{ticket.username}</span>
-                                <span className="text-[10px] text-amber-700 font-digits font-bold">UID: {ticket.uid}</span>
+                                {(() => {
+                                  const ticketUser = livoStore.getUserByUid(ticket.uid);
+                                  return (
+                                    <UserNameWithBadges
+                                      displayName={ticketUser?.displayName || ticket.username}
+                                      nameGlowColor={ticketUser?.nameGlowColor}
+                                      isVerified={ticketUser?.isVerified}
+                                      verifiedBadgeColor={ticketUser?.verifiedBadgeColor}
+                                      verifiedBadgeShape={ticketUser?.verifiedBadgeShape}
+                                      verifiedBadgeGlow={ticketUser?.verifiedBadgeGlow}
+                                      customIconUrl={ticketUser?.customIconUrl}
+                                      customIconGlow={ticketUser?.customIconGlow}
+                                      customIconAnimated={ticketUser?.customIconAnimated}
+                                      customIconLabel={ticketUser?.customIconLabel}
+                                      badgeSize={13}
+                                      iconSize={16}
+                                      nameClassName="font-bold text-xs text-gray-900"
+                                    />
+                                  );
+                                })()}
+                                <span className="text-[10px] text-amber-700 font-digits font-bold shrink-0">UID: {ticket.uid}</span>
                               </div>
                               <span className="text-[10px] text-gray-400 block font-digits">
                                 {new Date(ticket.createdAt).toLocaleDateString('ar-EG')} - {new Date(ticket.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -1704,6 +2064,184 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                   ))
                 )}
               </div>
+
+              {/* Admin Fullscreen 3-Second Splash Greeting / Gift Banner */}
+              <div className="bg-white rounded-2xl border border-amber-300 shadow-sm p-4 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-gray-100">
+                  <div>
+                    <h3 className="text-sm font-black text-gray-900 flex items-center gap-1.5">
+                      <Sparkles className="w-4 h-4 text-amber-500" />
+                      <span>بانر الترحيب والإهداء بملء الشاشة (3 ثوانٍ عند فتح التطبيق)</span>
+                    </h3>
+                    <p className="text-[11px] text-gray-500 mt-0.5">
+                      صورة احتفالية تظهر 3 ثوانٍ عند دخول المستخدم للتطبيق كإهداء أو ترحيب رسمي من الإدارة
+                    </p>
+                  </div>
+                  <span className="text-[10px] font-bold bg-amber-100 text-amber-800 px-2.5 py-1 rounded-full shrink-0">
+                    {splashBanners.filter((b) => b.isActive).length} بانر نشط
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                  <input
+                    type="text"
+                    value={splashTitle}
+                    onChange={(e) => setSplashTitle(e.target.value)}
+                    placeholder="عنوان الترحيب أو الإهداء..."
+                    className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 outline-none focus:border-amber-500"
+                  />
+                  <input
+                    type="text"
+                    value={splashSender}
+                    onChange={(e) => setSplashSender(e.target.value)}
+                    placeholder="اسم المُهدي (مثال: إدارة LIVO)"
+                    className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 outline-none focus:border-amber-500"
+                  />
+                  <input
+                    type="text"
+                    value={splashRecipient}
+                    onChange={(e) => setSplashRecipient(e.target.value)}
+                    placeholder="المُهدى إليه (اختياري)"
+                    className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 outline-none focus:border-amber-500"
+                  />
+                  <input
+                    type="text"
+                    value={splashDedication}
+                    onChange={(e) => setSplashDedication(e.target.value)}
+                    placeholder="رسالة الإهداء أو الترحيب..."
+                    className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {splashImageUrl && (
+                    <img
+                      src={splashImageUrl}
+                      alt="Splash Preview"
+                      className="w-14 h-14 rounded-xl object-cover border border-amber-300 shrink-0"
+                    />
+                  )}
+                  <label className="cursor-pointer bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5">
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>{isUploadingSplashImg ? 'جاري رفع الصورة...' : 'رفع صورة البانر'}</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const f = e.target.files?.[0];
+                        e.target.value = '';
+                        if (!f) return;
+                        setIsUploadingSplashImg(true);
+                        try {
+                          const url = await firebaseService.uploadImage(`splash/splash_${Date.now()}.jpg`, f, {
+                            maxDim: 900,
+                            maxBytes: 220_000
+                          });
+                          setSplashImageUrl(url);
+                          showToast('تم رفع صورة البانر بنجاح ✓');
+                        } catch {
+                          const compressed = await compressImageForFirestore(f, { maxDim: 900, maxBytes: 220_000 });
+                          setSplashImageUrl(compressed);
+                          showToast('تم تجهيز صورة البانر ✓');
+                        } finally {
+                          setIsUploadingSplashImg(false);
+                        }
+                      }}
+                    />
+                  </label>
+                  <input
+                    type="text"
+                    value={splashImageUrl}
+                    onChange={(e) => setSplashImageUrl(e.target.value)}
+                    placeholder="أو الصق رابط صورة البانر هنا..."
+                    className="flex-1 min-w-[200px] bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!splashTitle.trim() || !splashImageUrl.trim()) {
+                        showToast('يرجى إدخال عنوان وصورة البانر أولاً');
+                        return;
+                      }
+                      livoStore.saveSplashBanner({
+                        id: `splash-${Date.now()}`,
+                        title: splashTitle.trim(),
+                        dedicationMessage: splashDedication.trim() || undefined,
+                        senderName: splashSender.trim() || 'إدارة LIVO',
+                        recipientName: splashRecipient.trim() || undefined,
+                        imageUrl: splashImageUrl.trim(),
+                        isActive: true,
+                        durationMs: 3000,
+                        createdAt: new Date().toISOString(),
+                        createdBy: actorEmail
+                      });
+                      setSplashTitle('');
+                      setSplashDedication('');
+                      setSplashRecipient('');
+                      setSplashImageUrl('');
+                      showToast('تم تفعيل بانر الدخول (3 ثوانٍ) بنجاح ✓');
+                    }}
+                    className="px-4 py-2 bg-[#FFE600] hover:bg-yellow-400 text-black font-black text-xs rounded-xl shadow-sm"
+                  >
+                    نشر وتفعيل البانر الآن ✨
+                  </button>
+                </div>
+
+                {splashBanners.length > 0 && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 pt-2">
+                    {splashBanners.map((sb) => (
+                      <div key={sb.id} className="rounded-xl border border-gray-200 bg-gray-50 overflow-hidden flex flex-col justify-between">
+                        <div className="flex items-center gap-3 p-2.5">
+                          <img src={sb.imageUrl} alt={sb.title} className="w-16 h-16 rounded-lg object-cover border border-gray-200 shrink-0" />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-black ${
+                                sb.isActive ? 'bg-emerald-500 text-white' : 'bg-gray-300 text-gray-700'
+                              }`}>
+                                {sb.isActive ? 'نشط الآن' : 'متوقف'}
+                              </span>
+                            </div>
+                            <h4 className="font-bold text-xs text-gray-900 truncate mt-1">{sb.title}</h4>
+                            {sb.dedicationMessage && (
+                              <p className="text-[10px] text-gray-600 line-clamp-1">{sb.dedicationMessage}</p>
+                            )}
+                            {(sb.senderName || sb.recipientName) && (
+                              <p className="text-[9px] text-amber-700 font-bold truncate mt-0.5">
+                                {sb.senderName ? `من: ${sb.senderName}` : ''} {sb.recipientName ? `• إلى: ${sb.recipientName}` : ''}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <div className="px-2.5 py-2 bg-white border-t border-gray-200 flex items-center justify-between gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              livoStore.saveSplashBanner({ ...sb, isActive: !sb.isActive });
+                              showToast(sb.isActive ? 'تم إيقاف البانر' : 'تم تفعيل البانر على واجهة المستخدم ✓');
+                            }}
+                            className={`flex-1 py-1 rounded-lg text-[11px] font-bold ${
+                              sb.isActive ? 'bg-amber-50 text-amber-800 border border-amber-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                            }`}
+                          >
+                            {sb.isActive ? 'إيقاف البانر' : 'تفعيل'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              livoStore.deleteSplashBanner(sb.id);
+                              showToast('تم حذف البانر');
+                            }}
+                            className="p-1.5 bg-red-50 text-red-600 rounded-lg border border-red-200 hover:bg-red-100"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -1718,7 +2256,18 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                   </p>
                 </div>
 
-                {/* Filter Tabs */}
+                {/* Filter Tabs + UID Search */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 text-gray-400 absolute right-2.5 top-2" />
+                    <input
+                      type="text"
+                      value={rechargesSearchQuery}
+                      onChange={(e) => setRechargesSearchQuery(e.target.value)}
+                      placeholder="بحث بـ UID (10000-100000+) أو الهاتف..."
+                      className="bg-white border border-gray-200 rounded-xl pr-8 pl-2.5 py-1.5 text-xs text-gray-900 placeholder-gray-400 outline-none focus:border-amber-500 font-digits w-56"
+                    />
+                  </div>
                 <div className="flex bg-white p-1 rounded-xl border border-gray-200">
                   <button
                     onClick={() => setRechargeFilter('pending')}
@@ -1752,6 +2301,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                   >
                     الكل ({recharges.length})
                   </button>
+                </div>
                 </div>
               </div>
 
@@ -1858,28 +2408,30 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
 
               <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm space-y-3">
                 <label className="block text-xs font-bold text-gray-700">
-                  ابحث عن المستخدم بالـ Public ID (5 أرقام) أو الاسم أو البريد:
+                  ابحث عن المستخدم بالـ Public ID (من 10000 إلى 100000+) أو الاسم أو البريد:
                 </label>
                 <div className="flex gap-2">
                   <input
                     type="text"
                     value={searchCoinsUid}
                     onChange={(e) => setSearchCoinsUid(e.target.value)}
-                    placeholder="أدخل معرّف Public ID أو الاسم..."
+                    placeholder="أدخل معرّف Public ID (مثال 10000 - 100000) أو الاسم..."
                     className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs font-digits text-gray-900 placeholder-gray-400 outline-none focus:border-amber-500"
                   />
                   <button
-                    onClick={() => {
-                      const matches = livoStore.searchUsersByQuery(searchCoinsUid);
+                    onClick={async () => {
+                      const matches = await triggerServerUserLookup(searchCoinsUid);
                       if (matches.length > 0) {
                         setSelectedUserForCoins(matches[0]);
                       } else {
                         showToast(`لم يتم العثور على أي مستخدم بالمعرف "${searchCoinsUid}"`);
                       }
                     }}
-                    className="bg-[#FFE600] hover:bg-yellow-400 text-black text-xs px-4 py-2 rounded-xl font-black shadow-sm"
+                    disabled={isSearchingServer}
+                    className="bg-[#FFE600] hover:bg-yellow-400 text-black text-xs px-4 py-2 rounded-xl font-black shadow-sm flex items-center gap-1"
                   >
-                    بحث
+                    {isSearchingServer ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null}
+                    <span>بحث شامل</span>
                   </button>
                 </div>
 
@@ -1899,20 +2451,27 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                             frameUrl={matchUser.equippedFrameUrl}
                             frameGlowColor={matchUser.frameGlowColor}
                             frameAnimated={matchUser.frameAnimated}
+                            customIconUrl={matchUser.customIconUrl}
+                            customIconGlow={matchUser.customIconGlow}
+                            customIconAnimated={matchUser.customIconAnimated}
                             sizePx={36}
                           />
                           <div className="min-w-0">
-                            <div className="flex items-center gap-1">
-                              <span className="font-bold text-xs text-gray-900 truncate">{matchUser.displayName}</span>
-                              {matchUser.isVerified && (
-                                <LivoVerifiedBadge
-                                  size={13}
-                                  color={matchUser.verifiedBadgeColor}
-                                  shape={matchUser.verifiedBadgeShape}
-                                  glow={matchUser.verifiedBadgeGlow}
-                                />
-                              )}
-                            </div>
+                            <UserNameWithBadges
+                              displayName={matchUser.displayName}
+                              nameGlowColor={matchUser.nameGlowColor}
+                              isVerified={matchUser.isVerified}
+                              verifiedBadgeColor={matchUser.verifiedBadgeColor}
+                              verifiedBadgeShape={matchUser.verifiedBadgeShape}
+                              verifiedBadgeGlow={matchUser.verifiedBadgeGlow}
+                              customIconUrl={matchUser.customIconUrl}
+                              customIconGlow={matchUser.customIconGlow}
+                              customIconAnimated={matchUser.customIconAnimated}
+                              customIconLabel={matchUser.customIconLabel}
+                              badgeSize={13}
+                              iconSize={16}
+                              nameClassName="font-bold text-xs text-gray-900"
+                            />
                             <span className="text-[10px] font-digits text-gray-500">UID: {matchUser.uid} • @{matchUser.username}</span>
                           </div>
                         </div>
@@ -1940,8 +2499,22 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                       />
                       <div>
                         <div className="flex items-center gap-2">
-                          <h4 className="font-bold text-sm text-gray-900">{selectedUserForCoins.displayName}</h4>
-                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#FFE600] text-black font-digits font-black">
+                          <UserNameWithBadges
+                            displayName={selectedUserForCoins.displayName}
+                            nameGlowColor={selectedUserForCoins.nameGlowColor}
+                            isVerified={selectedUserForCoins.isVerified}
+                            verifiedBadgeColor={selectedUserForCoins.verifiedBadgeColor}
+                            verifiedBadgeShape={selectedUserForCoins.verifiedBadgeShape}
+                            verifiedBadgeGlow={selectedUserForCoins.verifiedBadgeGlow}
+                            customIconUrl={selectedUserForCoins.customIconUrl}
+                            customIconGlow={selectedUserForCoins.customIconGlow}
+                            customIconAnimated={selectedUserForCoins.customIconAnimated}
+                            customIconLabel={selectedUserForCoins.customIconLabel}
+                            badgeSize={14}
+                            iconSize={18}
+                            nameClassName="font-bold text-sm text-gray-900"
+                          />
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#FFE600] text-black font-digits font-black shrink-0">
                             Lv.{selectedUserForCoins.level || 0}
                           </span>
                         </div>
@@ -2144,15 +2717,48 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                     كل مستخدم يمتلك UID فريد ثابت • حسابات حقيقية موثقة عبر Firebase بدون أي حسابات وهمية
                   </p>
                 </div>
-                <div className="relative w-full sm:w-72">
-                  <Search className="w-4 h-4 text-gray-400 absolute right-3 top-2.5" />
-                  <input
-                    type="text"
-                    value={usersDirectoryQuery}
-                    onChange={(e) => setUsersDirectoryQuery(e.target.value)}
-                    placeholder="ابحث بالاسم أو UID أو البريد..."
-                    className="w-full bg-white border border-gray-200 rounded-xl pr-9 pl-3 py-2 text-xs text-gray-900 placeholder-gray-400 outline-none focus:border-amber-500"
-                  />
+                <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                  <div className="relative flex-1 sm:w-72">
+                    <Search className="w-4 h-4 text-gray-400 absolute right-3 top-2.5" />
+                    <input
+                      type="text"
+                      value={usersDirectoryQuery}
+                      onChange={(e) => setUsersDirectoryQuery(e.target.value)}
+                      placeholder="ابحث بـ UID (10000 - 100000+) أو الاسم أو البريد..."
+                      className="w-full bg-white border border-gray-200 rounded-xl pr-9 pl-3 py-2 text-xs text-gray-900 placeholder-gray-400 outline-none focus:border-amber-500 font-digits"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const found = await triggerServerUserLookup(usersDirectoryQuery);
+                      if (found.length === 0 && usersDirectoryQuery.trim()) {
+                        showToast(`لم يتم العثور على حساب مطابق لـ "${usersDirectoryQuery}"`);
+                      }
+                    }}
+                    disabled={isSearchingServer}
+                    className="bg-[#FFE600] hover:bg-yellow-400 text-black font-black text-xs px-3 py-2 rounded-xl shrink-0 flex items-center gap-1"
+                  >
+                    {isSearchingServer ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+                    <span>بحث الخادم</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isPurgingFakeUsers}
+                    onClick={async () => {
+                      setIsPurgingFakeUsers(true);
+                      try {
+                        const res = await livoStore.purgeFakeUsersFromFirestore(actorEmail);
+                        showToast(res.message);
+                      } finally {
+                        setIsPurgingFakeUsers(false);
+                      }
+                    }}
+                    className="bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 font-bold text-xs px-3 py-2 rounded-xl shrink-0 flex items-center gap-1"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>{isPurgingFakeUsers ? 'جاري التنظيف...' : 'تنظيف الحسابات الوهمية'}</span>
+                  </button>
                 </div>
               </div>
 
@@ -2175,23 +2781,27 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                         sizePx={48}
                       />
                       <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <span className={`font-bold text-xs text-gray-900 truncate ${u.nameGlowColor && u.nameGlowColor !== 'none' ? `name-glow-${u.nameGlowColor}` : ''}`}>
-                            {u.displayName}
-                          </span>
-                          {u.isVerified && (
-                            <LivoVerifiedBadge
-                              size={14}
-                              color={u.verifiedBadgeColor}
-                              shape={u.verifiedBadgeShape}
-                              glow={u.verifiedBadgeGlow}
-                            />
-                          )}
-                        </div>
+                        <UserNameWithBadges
+                          displayName={u.displayName}
+                          nameGlowColor={u.nameGlowColor}
+                          isVerified={u.isVerified}
+                          verifiedBadgeColor={u.verifiedBadgeColor}
+                          verifiedBadgeShape={u.verifiedBadgeShape}
+                          verifiedBadgeGlow={u.verifiedBadgeGlow}
+                          customIconUrl={u.customIconUrl}
+                          customIconGlow={u.customIconGlow}
+                          customIconAnimated={u.customIconAnimated}
+                          customIconLabel={u.customIconLabel}
+                          agencyLabel={livoStore.getAgencyDisplayLabel(u)}
+                          agencyLabelBelow={true}
+                          badgeSize={14}
+                          iconSize={17}
+                          nameClassName="font-bold text-xs text-gray-900"
+                        />
                         <span className="text-[11px] text-gray-500 font-digits block truncate">
                           UID: <strong className="text-amber-700">{u.uid}</strong> • @{u.username}
                         </span>
-                        <div className="flex items-center gap-2 mt-1">
+                        <div className="flex items-center gap-2 mt-1 flex-wrap">
                           <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
                             u.role === 'owner'
                               ? 'bg-amber-100 text-amber-800'
@@ -2208,7 +2818,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                               : u.role === 'charging_agent'
                               ? 'وكيل شحن'
                               : u.role === 'distributor_agent'
-                              ? 'وكيل موزعين'
+                              ? 'وكيل مذيعين'
                               : u.role === 'agent'
                               ? 'وكيل معتمد'
                               : 'مستخدم عادي'}
@@ -2216,11 +2826,16 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                           <span className="text-[10px] text-gray-600 font-digits font-bold">
                             الرصيد: {u.coins.toLocaleString()}
                           </span>
+                          {u.canStealthRooms && (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800 text-amber-300 font-bold">
+                              دخول متخفي ✓
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-1.5 shrink-0">
+                    <div className="flex flex-wrap items-center gap-1.5 shrink-0">
                       <button
                         onClick={() => {
                           selectUserForCosmetics(u);
@@ -2232,6 +2847,36 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                         <Crown className="w-3.5 h-3.5" />
                         <span>VIP والتوثيق</span>
                       </button>
+                      {u.uid !== '10000' && u.role !== 'owner' && (
+                        <>
+                          <button
+                            onClick={() => {
+                              const res = livoStore.setUserStealthPermission(u.uid, !u.canStealthRooms, actorEmail);
+                              showToast(res.message);
+                            }}
+                            className={`text-[11px] font-bold px-2.5 py-1.5 rounded-xl border flex items-center gap-1 ${
+                              u.canStealthRooms
+                                ? 'bg-slate-800 text-amber-300 border-slate-700'
+                                : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+                            }`}
+                            title="منح أو سحب صلاحية الدخول المتخفي للغرف"
+                          >
+                            <EyeOff className="w-3.5 h-3.5" />
+                            <span>{u.canStealthRooms ? 'سحب التخفي' : 'منح تخفي'}</span>
+                          </button>
+                          <button
+                            onClick={() => {
+                              setUidChangeTarget(u);
+                              setUidChangeInput(u.uid);
+                            }}
+                            className="text-[11px] font-bold text-blue-700 hover:bg-blue-100 bg-blue-50 px-2.5 py-1.5 rounded-xl border border-blue-200 flex items-center gap-1"
+                            title="تغيير رقم UID العضو"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                            <span>تغيير UID</span>
+                          </button>
+                        </>
+                      )}
                       <button
                         onClick={() => {
                           setSelectedUserForCoins(u);
@@ -2265,15 +2910,24 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                 {/* User Picker Column */}
                 <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-3.5 flex flex-col space-y-3">
-                  <div className="relative">
-                    <Search className="w-4 h-4 text-gray-400 absolute right-3 top-2.5" />
-                    <input
-                      type="text"
-                      value={cosmeticSearchQuery}
-                      onChange={(e) => setCosmeticSearchQuery(e.target.value)}
-                      placeholder="ابحث بالـ UID أو الاسم لاختيار مستخدم..."
-                      className="w-full bg-gray-50 border border-gray-200 rounded-xl pr-9 pl-3 py-2 text-xs text-gray-900 placeholder-gray-400 outline-none focus:border-amber-500"
-                    />
+                  <div className="flex gap-1.5">
+                    <div className="relative flex-1">
+                      <Search className="w-4 h-4 text-gray-400 absolute right-3 top-2.5" />
+                      <input
+                        type="text"
+                        value={cosmeticSearchQuery}
+                        onChange={(e) => setCosmeticSearchQuery(e.target.value)}
+                        placeholder="ابحث بالـ UID (10000-100000+) أو الاسم..."
+                        className="w-full bg-gray-50 border border-gray-200 rounded-xl pr-9 pl-3 py-2 text-xs text-gray-900 placeholder-gray-400 outline-none focus:border-amber-500 font-digits"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => triggerServerUserLookup(cosmeticSearchQuery)}
+                      className="px-2.5 py-2 bg-[#FFE600] hover:bg-yellow-400 text-black text-[11px] font-black rounded-xl shrink-0"
+                    >
+                      بحث
+                    </button>
                   </div>
                   <div className="flex-1 overflow-y-auto max-h-[540px] space-y-1.5">
                     {livoStore.searchUsersByQuery(cosmeticSearchQuery).map((u) => {
@@ -2296,20 +2950,27 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                               frameUrl={u.equippedFrameUrl}
                               frameGlowColor={u.frameGlowColor}
                               frameAnimated={u.frameAnimated}
+                              customIconUrl={u.customIconUrl}
+                              customIconGlow={u.customIconGlow}
+                              customIconAnimated={u.customIconAnimated}
                               sizePx={40}
                             />
                             <div className="min-w-0">
-                              <div className="flex items-center gap-1">
-                                <span className="font-bold text-xs text-gray-900 truncate">{u.displayName}</span>
-                                {u.isVerified && (
-                                  <LivoVerifiedBadge
-                                    size={13}
-                                    color={u.verifiedBadgeColor}
-                                    shape={u.verifiedBadgeShape}
-                                    glow={u.verifiedBadgeGlow}
-                                  />
-                                )}
-                              </div>
+                              <UserNameWithBadges
+                                displayName={u.displayName}
+                                nameGlowColor={u.nameGlowColor}
+                                isVerified={u.isVerified}
+                                verifiedBadgeColor={u.verifiedBadgeColor}
+                                verifiedBadgeShape={u.verifiedBadgeShape}
+                                verifiedBadgeGlow={u.verifiedBadgeGlow}
+                                customIconUrl={u.customIconUrl}
+                                customIconGlow={u.customIconGlow}
+                                customIconAnimated={u.customIconAnimated}
+                                customIconLabel={u.customIconLabel}
+                                badgeSize={13}
+                                iconSize={16}
+                                nameClassName="font-bold text-xs text-gray-900"
+                              />
                               <span className="text-[10px] font-digits text-gray-500">UID: {u.uid}</span>
                             </div>
                           </div>
@@ -2339,18 +3000,21 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                             customIconAnimated={cosCustomIconAnimated}
                             sizePx={96}
                           />
-                          <div className="mt-2.5 flex items-center gap-1.5">
-                            <span className={`font-black text-sm text-white ${cosNameGlow !== 'none' ? `name-glow-${cosNameGlow}` : ''}`}>
-                              {cosmeticTargetUser.displayName}
-                            </span>
-                            {cosIsVerified && (
-                              <LivoVerifiedBadge
-                                size={16}
-                                color={cosBadgeColor}
-                                shape={cosBadgeShape}
-                                glow={cosBadgeGlow}
-                              />
-                            )}
+                          <div className="mt-2.5 max-w-full">
+                            <UserNameWithBadges
+                              displayName={cosmeticTargetUser.displayName}
+                              nameGlowColor={cosNameGlow}
+                              isVerified={cosIsVerified}
+                              verifiedBadgeColor={cosBadgeColor}
+                              verifiedBadgeShape={cosBadgeShape}
+                              verifiedBadgeGlow={cosBadgeGlow}
+                              customIconUrl={cosCustomIconUrl}
+                              customIconGlow={cosCustomIconGlow}
+                              customIconAnimated={cosCustomIconAnimated}
+                              badgeSize={16}
+                              iconSize={20}
+                              nameClassName="font-black text-sm text-white"
+                            />
                           </div>
                           <span className="text-[10px] text-amber-300 font-digits mt-0.5">UID: {cosmeticTargetUser.uid}</span>
                         </div>
@@ -2368,18 +3032,21 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                             customIconAnimated={cosCustomIconAnimated}
                             sizePx={96}
                           />
-                          <div className="mt-2.5 flex items-center gap-1.5">
-                            <span className={`font-black text-sm text-gray-900 ${cosNameGlow !== 'none' ? `name-glow-${cosNameGlow}` : ''}`}>
-                              {cosmeticTargetUser.displayName}
-                            </span>
-                            {cosIsVerified && (
-                              <LivoVerifiedBadge
-                                size={16}
-                                color={cosBadgeColor}
-                                shape={cosBadgeShape}
-                                glow={cosBadgeGlow}
-                              />
-                            )}
+                          <div className="mt-2.5 max-w-full">
+                            <UserNameWithBadges
+                              displayName={cosmeticTargetUser.displayName}
+                              nameGlowColor={cosNameGlow}
+                              isVerified={cosIsVerified}
+                              verifiedBadgeColor={cosBadgeColor}
+                              verifiedBadgeShape={cosBadgeShape}
+                              verifiedBadgeGlow={cosBadgeGlow}
+                              customIconUrl={cosCustomIconUrl}
+                              customIconGlow={cosCustomIconGlow}
+                              customIconAnimated={cosCustomIconAnimated}
+                              badgeSize={16}
+                              iconSize={20}
+                              nameClassName="font-black text-sm text-gray-900"
+                            />
                           </div>
                           <span className="text-[10px] text-gray-500 font-digits mt-0.5">UID: {cosmeticTargetUser.uid}</span>
                         </div>
@@ -2389,33 +3056,62 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                       <div className="space-y-2.5 pt-2 border-t border-gray-100">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <h4 className="text-xs font-black text-gray-900">1. الإطار الملكي (14 إطار مفرغ شفاف + رفع مخصص)</h4>
-                          <label className="cursor-pointer bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 px-3 py-1.5 rounded-xl text-[11px] font-bold flex items-center gap-1.5">
-                            <Upload className="w-3.5 h-3.5" />
-                            <span>{isProcessingCosmeticImg ? 'جاري تفريغ الخلفية...' : 'رفع إطار مخصص وتفريغ خلفيته'}</span>
-                            <input
-                              type="file"
-                              accept="image/*"
-                              className="hidden"
-                              onChange={async (e) => {
-                                const file = e.target.files?.[0];
-                                if (!file) return;
-                                setIsProcessingCosmeticImg(true);
-                                try {
-                                  const png = await removeImageBackgroundToPng(file, { maxSize: 400, tolerance: 34 });
-                                  let url = png;
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <label className="cursor-pointer bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 px-3 py-1.5 rounded-xl text-[11px] font-bold flex items-center gap-1.5">
+                              <Upload className="w-3.5 h-3.5" />
+                              <span>{isProcessingCosmeticImg ? 'جاري تفريغ الخلفية...' : 'رفع إطار وتفريغ تلقائي'}</span>
+                              <input
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                onChange={async (e) => {
+                                  const file = e.target.files?.[0];
+                                  e.target.value = '';
+                                  if (!file) return;
+                                  setIsProcessingCosmeticImg(true);
                                   try {
-                                    url = await firebaseService.uploadImage(`frames/frame_${Date.now()}.png`, png);
-                                  } catch {
-                                    url = png;
+                                    const png = await removeImageBackgroundToPng(file, { maxSize: 384, tolerance: 34 });
+                                    const compressed = await compressImageForFirestore(png, {
+                                      preserveAlpha: true,
+                                      maxDim: 384,
+                                      maxBytes: 180_000
+                                    });
+                                    let url = compressed;
+                                    try {
+                                      url = await firebaseService.uploadImage(`frames/frame_${Date.now()}.png`, compressed, {
+                                        preserveAlpha: true,
+                                        maxDim: 384,
+                                        maxBytes: 180_000
+                                      });
+                                    } catch {
+                                      url = compressed;
+                                    }
+                                    setCosFrameUrl(url);
+                                    showToast('تم تفريغ خلفية الإطار ورفعه بنجاح ✓');
+                                  } finally {
+                                    setIsProcessingCosmeticImg(false);
                                   }
-                                  setCosFrameUrl(url);
-                                  showToast('تم تفريغ خلفية الإطار ورفعه بنجاح ✓');
-                                } finally {
-                                  setIsProcessingCosmeticImg(false);
-                                }
-                              }}
-                            />
-                          </label>
+                                }}
+                              />
+                            </label>
+                            <label className="cursor-pointer bg-purple-50 hover:bg-purple-100 text-purple-800 border border-purple-200 px-3 py-1.5 rounded-xl text-[11px] font-bold flex items-center gap-1.5">
+                              <Wand2 className="w-3.5 h-3.5" />
+                              <span>قص سحري + ممحاة يدوية</span>
+                              <input
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                onChange={(e) => {
+                                  const f = e.target.files?.[0];
+                                  e.target.value = '';
+                                  if (f) {
+                                    setAdminCutoutTarget('frame');
+                                    setAdminCutoutSource(f);
+                                  }
+                                }}
+                              />
+                            </label>
+                          </div>
                         </div>
 
                         <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2">
@@ -2479,11 +3175,11 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                         </div>
                       </div>
 
-                      {/* 2. Custom Corner Fluttering Icon */}
+                      {/* 2. Custom Corner + Name Neon Icon */}
                       <div className="space-y-2.5 pt-2 border-t border-gray-100">
                         <div className="flex flex-wrap items-center justify-between gap-2">
-                          <h4 className="text-xs font-black text-gray-900">2. أيقونة VIP مرفرفة بجانب الصورة (PNG شفاف)</h4>
-                          <div className="flex items-center gap-2">
+                          <h4 className="text-xs font-black text-gray-900">2. أيقونة VIP مرفرفة على الاسم وبجانب الصورة (إضاءة نيون PNG شفاف)</h4>
+                          <div className="flex items-center gap-2 flex-wrap">
                             {cosCustomIconUrl && (
                               <button
                                 type="button"
@@ -2495,27 +3191,54 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                             )}
                             <label className="cursor-pointer bg-purple-50 hover:bg-purple-100 text-purple-800 border border-purple-200 px-3 py-1.5 rounded-xl text-[11px] font-bold flex items-center gap-1.5">
                               <Wand2 className="w-3.5 h-3.5" />
-                              <span>رفع صورة أيقونة وتفريغها تلقائياً</span>
+                              <span>رفع وتفريغ تلقائي</span>
                               <input
                                 type="file"
                                 accept="image/*"
                                 className="hidden"
                                 onChange={async (e) => {
                                   const file = e.target.files?.[0];
+                                  e.target.value = '';
                                   if (!file) return;
                                   setIsProcessingCosmeticImg(true);
                                   try {
                                     const png = await removeImageBackgroundToPng(file, { maxSize: 220, tolerance: 34 });
-                                    let url = png;
+                                    const compressed = await compressImageForFirestore(png, {
+                                      preserveAlpha: true,
+                                      maxDim: 220,
+                                      maxBytes: 140_000
+                                    });
+                                    let url = compressed;
                                     try {
-                                      url = await firebaseService.uploadImage(`icons/icon_${Date.now()}.png`, png);
+                                      url = await firebaseService.uploadImage(`icons/icon_${Date.now()}.png`, compressed, {
+                                        preserveAlpha: true,
+                                        maxDim: 220,
+                                        maxBytes: 140_000
+                                      });
                                     } catch {
-                                      url = png;
+                                      url = compressed;
                                     }
                                     setCosCustomIconUrl(url);
-                                    showToast('تم تفريغ خلفية الأيقونة بنجاح ✓');
+                                    showToast('تم تفريغ خلفية الأيقونة وتفعيل إضاءة النيون بنجاح ✓');
                                   } finally {
                                     setIsProcessingCosmeticImg(false);
+                                  }
+                                }}
+                              />
+                            </label>
+                            <label className="cursor-pointer bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 px-3 py-1.5 rounded-xl text-[11px] font-bold flex items-center gap-1.5">
+                              <Sparkles className="w-3.5 h-3.5" />
+                              <span>قص سحري + ممحاة يدوية</span>
+                              <input
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                onChange={(e) => {
+                                  const f = e.target.files?.[0];
+                                  e.target.value = '';
+                                  if (f) {
+                                    setAdminCutoutTarget('custom_icon');
+                                    setAdminCutoutSource(f);
                                   }
                                 }}
                               />
@@ -2569,18 +3292,17 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
 
                           <div className="grid grid-cols-2 gap-2">
                             <div>
-                              <label className="block text-[10px] font-bold text-gray-500 mb-1">لون الشارة:</label>
+                              <label className="block text-[10px] font-bold text-gray-500 mb-1">لون الشارة (12 لوناً متوهجاً):</label>
                               <select
                                 value={cosBadgeColor}
                                 onChange={(e) => setCosBadgeColor(e.target.value as VerifiedBadgeColor)}
                                 className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1.5 text-xs text-gray-900"
                               >
-                                <option value="blue">أزرق رسمي</option>
-                                <option value="gold">ذهبي ملكي</option>
-                                <option value="crimson">أحمر قرمزي</option>
-                                <option value="emerald">زمردي</option>
-                                <option value="purple">أرجواني VIP</option>
-                                <option value="cyan">سماوي نيون</option>
+                                {VERIFIED_BADGE_COLORS.map((c) => (
+                                  <option key={c.id} value={c.id}>
+                                    {c.label}
+                                  </option>
+                                ))}
                               </select>
                             </div>
                             <div>
@@ -2610,7 +3332,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                         </div>
 
                         <div className="space-y-2 bg-gray-50 p-3 rounded-xl border border-gray-200">
-                          <h4 className="text-xs font-black text-gray-900">4. إضاءة وتوهج الاسم في الغرف</h4>
+                          <h4 className="text-xs font-black text-gray-900">4. إضاءة وتوهج الاسم في الغرف (12 خيار نيون)</h4>
                           <div className="grid grid-cols-3 gap-1.5">
                             {[
                               { id: 'none', label: 'عادي' },
@@ -2619,6 +3341,11 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                               { id: 'crimson', label: 'قرمزي' },
                               { id: 'purple', label: 'أرجواني' },
                               { id: 'emerald', label: 'زمردي' },
+                              { id: 'pink', label: 'وردي نيون' },
+                              { id: 'orange', label: 'برتقالي ناري' },
+                              { id: 'lime', label: 'أخضر نيون' },
+                              { id: 'indigo', label: 'نيلي ساطع' },
+                              { id: 'silver', label: 'فضي بلاتيني' },
                               { id: 'rainbow', label: 'قوس قزح' }
                             ].map((opt) => (
                               <button
@@ -2683,42 +3410,83 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
           {/* SECTION 6: AGENCIES */}
           {activeSection === 'agencies' && (
             <div className="space-y-4">
-              <div>
-                <h2 className="text-lg font-black text-gray-900">إدارة الوكالات والوكلاء المعتمدين</h2>
-                <p className="text-xs text-gray-500">
-                  اعتماد طلبات الوكالات ومنح صلاحية الشحن المباشر للمستخدمين
-                </p>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-black text-gray-900">إدارة الوكالات والوكلاء المعتمدين</h2>
+                  <p className="text-xs text-gray-500">
+                    اعتماد طلبات الوكالات ومنح صلاحية الشحن المباشر للمستخدمين
+                  </p>
+                </div>
+                <div className="relative w-full sm:w-64">
+                  <Search className="w-3.5 h-3.5 text-gray-400 absolute right-3 top-2.5" />
+                  <input
+                    type="text"
+                    value={agenciesSearchQuery}
+                    onChange={(e) => setAgenciesSearchQuery(e.target.value)}
+                    placeholder="بحث بـ UID (10000-100000+) أو اسم الوكالة..."
+                    className="w-full bg-white border border-gray-200 rounded-xl pr-8 pl-3 py-2 text-xs text-gray-900 placeholder-gray-400 outline-none focus:border-amber-500 font-digits"
+                  />
+                </div>
               </div>
 
-              {agencies.length === 0 ? (
-                <div className="bg-white p-8 rounded-2xl border border-gray-200 text-center text-gray-400 text-xs">
-                  لا توجد طلبات وكالات حالياً
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {agencies.map((agency) => (
-                    <div
-                      key={agency.id}
-                      className="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4"
-                    >
-                      <div className="flex items-start gap-3">
-                        <img src={agency.userAvatar} alt="" className="w-12 h-12 rounded-full border border-gray-200 object-cover" />
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <h4 className="font-bold text-sm text-gray-900">{agency.agencyName}</h4>
-                            <span className="text-xs font-digits text-amber-700 font-bold">UID: {agency.uid}</span>
-                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                              agency.status === 'approved' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : agency.status === 'pending' ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-red-50 text-red-700 border border-red-200'
-                            }`}>
-                              {agency.status === 'approved' ? 'وكالة معتمدة' : agency.status === 'pending' ? 'قيد المراجعة' : 'مرفوضة'}
-                            </span>
+              {(() => {
+                const q = agenciesSearchQuery.trim().toLowerCase();
+                const filteredAgencies = q
+                  ? agencies.filter(
+                      (a) =>
+                        a.uid.toLowerCase().includes(q) ||
+                        a.agencyName.toLowerCase().includes(q) ||
+                        a.username.toLowerCase().includes(q) ||
+                        (a.phone && a.phone.toLowerCase().includes(q))
+                    )
+                  : agencies;
+                if (filteredAgencies.length === 0) {
+                  return (
+                    <div className="bg-white p-8 rounded-2xl border border-gray-200 text-center text-gray-400 text-xs">
+                      لا توجد طلبات وكالات مطابقة حالياً
+                    </div>
+                  );
+                }
+                return (
+                  <div className="space-y-3">
+                    {filteredAgencies.map((agency) => {
+                      const agencyUser = livoStore.getUserByUid(agency.uid);
+                      return (
+                        <div
+                          key={agency.id}
+                          className="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4"
+                        >
+                          <div className="flex items-start gap-3">
+                            <img src={agency.userAvatar} alt="" className="w-12 h-12 rounded-full border border-gray-200 object-cover" />
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <UserNameWithBadges
+                                  displayName={agency.agencyName}
+                                  nameGlowColor={agencyUser?.nameGlowColor}
+                                  isVerified={agencyUser?.isVerified}
+                                  verifiedBadgeColor={agencyUser?.verifiedBadgeColor}
+                                  verifiedBadgeShape={agencyUser?.verifiedBadgeShape}
+                                  verifiedBadgeGlow={agencyUser?.verifiedBadgeGlow}
+                                  customIconUrl={agencyUser?.customIconUrl}
+                                  customIconGlow={agencyUser?.customIconGlow}
+                                  customIconAnimated={agencyUser?.customIconAnimated}
+                                  badgeSize={14}
+                                  iconSize={17}
+                                  nameClassName="font-bold text-sm text-gray-900"
+                                />
+                                <span className="text-xs font-digits text-amber-700 font-bold">UID: {agency.uid}</span>
+                                <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                                  agency.status === 'approved' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : agency.status === 'pending' ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-red-50 text-red-700 border border-red-200'
+                                }`}>
+                                  {agency.status === 'approved' ? 'وكالة معتمدة' : agency.status === 'pending' ? 'قيد المراجعة' : 'مرفوضة'}
+                                </span>
+                              </div>
+                              <p className="text-xs text-gray-600 mt-0.5">
+                                النوع: {agency.agencyType === 'charging_agent' ? 'وكيل شحن' : 'وكيل موزعين'} • هاتف: {agency.phone}
+                              </p>
+                              <p className="text-[11px] text-gray-500 mt-1">{agency.experienceNotes}</p>
+                            </div>
                           </div>
-                          <p className="text-xs text-gray-600 mt-0.5">
-                            النوع: {agency.agencyType === 'charging_agent' ? 'وكيل شحن' : 'وكيل موزعين'} • هاتف: {agency.phone}
-                          </p>
-                          <p className="text-[11px] text-gray-500 mt-1">{agency.experienceNotes}</p>
-                        </div>
-                      </div>
 
                       <div className="flex items-center gap-2">
                         {agency.status === 'pending' ? (
@@ -2757,9 +3525,11 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                         ) : null}
                       </div>
                     </div>
-                  ))}
-                </div>
-              )}
+                    );
+                  })}
+                  </div>
+                );
+              })()}
             </div>
           )}
 
@@ -2776,15 +3546,24 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 min-h-[520px]">
                 {/* Left Panel: Search & Users / Threads List */}
                 <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-3 flex flex-col space-y-3">
-                  <div className="relative">
-                    <Search className="w-4 h-4 text-gray-400 absolute right-3 top-2.5" />
-                    <input
-                      type="text"
-                      value={supportSearchQuery}
-                      onChange={(e) => setSupportSearchQuery(e.target.value)}
-                      placeholder="ابحث بالـ UID أو الاسم أو الحساب..."
-                      className="w-full bg-gray-50 border border-gray-200 rounded-xl pr-9 pl-3 py-2 text-xs text-gray-900 placeholder-gray-400 outline-none focus:border-amber-500"
-                    />
+                  <div className="flex gap-1.5">
+                    <div className="relative flex-1">
+                      <Search className="w-4 h-4 text-gray-400 absolute right-3 top-2.5" />
+                      <input
+                        type="text"
+                        value={supportSearchQuery}
+                        onChange={(e) => setSupportSearchQuery(e.target.value)}
+                        placeholder="ابحث بالـ UID (10000-100000+) أو الاسم..."
+                        className="w-full bg-gray-50 border border-gray-200 rounded-xl pr-9 pl-3 py-2 text-xs text-gray-900 placeholder-gray-400 outline-none focus:border-amber-500 font-digits"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => triggerServerUserLookup(supportSearchQuery)}
+                      className="px-2.5 py-2 bg-[#FFE600] hover:bg-yellow-400 text-black text-[11px] font-black rounded-xl shrink-0"
+                    >
+                      بحث
+                    </button>
                   </div>
 
                   <div className="text-[11px] text-gray-700 font-bold px-1 flex items-center justify-between">
@@ -2816,12 +3595,33 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                             }`}
                           >
                             <div className="flex items-center gap-2.5 min-w-0">
-                              <AvatarWithFrame avatarUrl={u.avatar} displayName={u.displayName} frameUrl={u.equippedFrameUrl} sizePx={36} />
+                              <AvatarWithFrame
+                                avatarUrl={u.avatar}
+                                displayName={u.displayName}
+                                frameUrl={u.equippedFrameUrl}
+                                frameGlowColor={u.frameGlowColor}
+                                frameAnimated={u.frameAnimated}
+                                customIconUrl={u.customIconUrl}
+                                customIconGlow={u.customIconGlow}
+                                customIconAnimated={u.customIconAnimated}
+                                sizePx={36}
+                              />
                               <div className="min-w-0">
-                                <div className="flex items-center gap-1.5">
-                                  <span className="font-bold text-xs truncate text-gray-900">{u.displayName}</span>
-                                  {u.isVerified && <LivoVerifiedBadge size={13} color={u.verifiedBadgeColor} shape={u.verifiedBadgeShape} glow={u.verifiedBadgeGlow} />}
-                                </div>
+                                <UserNameWithBadges
+                                  displayName={u.displayName}
+                                  nameGlowColor={u.nameGlowColor}
+                                  isVerified={u.isVerified}
+                                  verifiedBadgeColor={u.verifiedBadgeColor}
+                                  verifiedBadgeShape={u.verifiedBadgeShape}
+                                  verifiedBadgeGlow={u.verifiedBadgeGlow}
+                                  customIconUrl={u.customIconUrl}
+                                  customIconGlow={u.customIconGlow}
+                                  customIconAnimated={u.customIconAnimated}
+                                  customIconLabel={u.customIconLabel}
+                                  badgeSize={13}
+                                  iconSize={16}
+                                  nameClassName="font-bold text-xs text-gray-900"
+                                />
                                 <span className="text-[10px] font-digits text-amber-700 block">UID: {u.uid}</span>
                                 {lastMsg && (
                                   <p className="text-[10px] text-gray-500 truncate mt-0.5">
@@ -2849,13 +3649,36 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                       {/* Chat Header */}
                       <div className="pb-3 border-b border-gray-100 flex items-center justify-between">
                         <div className="flex items-center gap-3">
-                          <AvatarWithFrame avatarUrl={selectedSupportUser.avatar} displayName={selectedSupportUser.displayName} frameUrl={selectedSupportUser.equippedFrameUrl} sizePx={42} />
+                          <AvatarWithFrame
+                            avatarUrl={selectedSupportUser.avatar}
+                            displayName={selectedSupportUser.displayName}
+                            frameUrl={selectedSupportUser.equippedFrameUrl}
+                            frameGlowColor={selectedSupportUser.frameGlowColor}
+                            frameAnimated={selectedSupportUser.frameAnimated}
+                            customIconUrl={selectedSupportUser.customIconUrl}
+                            customIconGlow={selectedSupportUser.customIconGlow}
+                            customIconAnimated={selectedSupportUser.customIconAnimated}
+                            sizePx={42}
+                          />
                           <div>
                             <div className="flex items-center gap-2">
-                              <h3 className="font-black text-sm text-gray-900">{selectedSupportUser.displayName}</h3>
-                              {selectedSupportUser.isVerified && <LivoVerifiedBadge size={14} color={selectedSupportUser.verifiedBadgeColor} shape={selectedSupportUser.verifiedBadgeShape} />}
+                              <UserNameWithBadges
+                                displayName={selectedSupportUser.displayName}
+                                nameGlowColor={selectedSupportUser.nameGlowColor}
+                                isVerified={selectedSupportUser.isVerified}
+                                verifiedBadgeColor={selectedSupportUser.verifiedBadgeColor}
+                                verifiedBadgeShape={selectedSupportUser.verifiedBadgeShape}
+                                verifiedBadgeGlow={selectedSupportUser.verifiedBadgeGlow}
+                                customIconUrl={selectedSupportUser.customIconUrl}
+                                customIconGlow={selectedSupportUser.customIconGlow}
+                                customIconAnimated={selectedSupportUser.customIconAnimated}
+                                customIconLabel={selectedSupportUser.customIconLabel}
+                                badgeSize={14}
+                                iconSize={18}
+                                nameClassName="font-black text-sm text-gray-900"
+                              />
                               {(selectedSupportUser.role === 'charging_agent' || selectedSupportUser.agencyType === 'charging_agent') && (
-                                <span className="text-[9px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-bold">⚡ وكيل شحن</span>
+                                <span className="text-[9px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-bold shrink-0">⚡ وكيل شحن</span>
                               )}
                             </div>
                             <span className="text-xs text-gray-500 font-digits">
@@ -3139,148 +3962,218 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
           {/* SECTION: BLUE VERIFICATIONS */}
           {activeSection === 'verifications' && (
             <div className="space-y-4">
-              <div>
-                <h2 className="text-lg font-black text-gray-900">طلبات التوثيق بالعلامة الزرقاء الرسمية</h2>
-                <p className="text-xs text-gray-500">
-                  مراجعة طلبات وإيصالات توثيق الحسابات بالعلامة الزرقاء الرسمية في الغرف والملف الشخصي
-                </p>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-black text-gray-900">طلبات التوثيق بالعلامة الزرقاء الرسمية</h2>
+                  <p className="text-xs text-gray-500">
+                    مراجعة طلبات وإيصالات توثيق الحسابات بالعلامة الزرقاء الرسمية في الغرف والملف الشخصي
+                  </p>
+                </div>
+                <div className="relative w-full sm:w-64">
+                  <Search className="w-3.5 h-3.5 text-gray-400 absolute right-3 top-2.5" />
+                  <input
+                    type="text"
+                    value={verificationsSearchQuery}
+                    onChange={(e) => setVerificationsSearchQuery(e.target.value)}
+                    placeholder="بحث بـ UID (10000-100000+) أو اسم الحساب..."
+                    className="w-full bg-white border border-gray-200 rounded-xl pr-8 pl-3 py-2 text-xs text-gray-900 placeholder-gray-400 outline-none focus:border-amber-500 font-digits"
+                  />
+                </div>
               </div>
 
-              {verifications.length === 0 ? (
-                <div className="bg-white p-8 rounded-2xl border border-gray-200 text-center text-gray-400 text-xs">
-                  لا توجد طلبات توثيق حالياً
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {verifications.map((req) => (
-                    <div
-                      key={req.id}
-                      className="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4"
-                    >
-                      <div className="flex items-start gap-3">
-                        <img src={req.userAvatar} alt="" className="w-12 h-12 rounded-full border border-gray-200 object-cover" />
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <h4 className="font-bold text-sm text-gray-900">@{req.username}</h4>
-                            <span className="text-xs font-digits text-amber-700 font-bold">UID: {req.uid}</span>
-                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                              req.status === 'approved' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : req.status === 'pending' ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-red-50 text-red-700 border border-red-200'
-                            }`}>
-                              {req.status === 'approved' ? 'موثق رسمياً' : req.status === 'pending' ? 'قيد المراجعة' : 'مرفوض'}
-                            </span>
-                          </div>
-                          <p className="text-xs text-gray-600 mt-1">
-                            المدة: <strong className="text-gray-900">{req.monthsCount} شهر</strong> • الرسوم: <strong className="text-amber-700 font-digits">{req.priceEGP?.toLocaleString()} ج.م</strong> • هاتف التحويل: {req.paymentPhone}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        {req.receiptUrl && (
-                          <button
-                            onClick={() => setZoomedVerificationReceiptUrl(req.receiptUrl)}
-                            className="bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs px-3 py-1.5 rounded-xl font-bold flex items-center gap-1"
-                          >
-                            <ZoomIn className="w-3.5 h-3.5" />
-                            <span>معاينة الإيصال</span>
-                          </button>
-                        )}
-
-                        {req.status === 'pending' && (
-                          <>
-                            <button
-                              onClick={() => {
-                                livoStore.reviewVerificationRequest(req.id, 'approved', actorEmail);
-                                showToast(`تم توثيق حساب @${req.username} بالعلامة الزرقاء بنجاح ✓`);
-                              }}
-                              className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3 py-1.5 rounded-xl font-bold flex items-center gap-1"
-                            >
-                              <Check className="w-3.5 h-3.5" />
-                              <span>موافقة وتوثيق</span>
-                            </button>
-                            <button
-                              onClick={() => {
-                                setRejectVerificationId(req.id);
-                              }}
-                              className="bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-xs px-3 py-1.5 rounded-xl font-bold"
-                            >
-                              رفض
-                            </button>
-                          </>
-                        )}
-                      </div>
+              {(() => {
+                const q = verificationsSearchQuery.trim().toLowerCase();
+                const filteredVerifications = q
+                  ? verifications.filter(
+                      (v) =>
+                        v.uid.toLowerCase().includes(q) ||
+                        v.username.toLowerCase().includes(q) ||
+                        (v.paymentPhone && v.paymentPhone.toLowerCase().includes(q))
+                    )
+                  : verifications;
+                if (filteredVerifications.length === 0) {
+                  return (
+                    <div className="bg-white p-8 rounded-2xl border border-gray-200 text-center text-gray-400 text-xs">
+                      لا توجد طلبات توثيق مطابقة حالياً
                     </div>
-                  ))}
-                </div>
-              )}
+                  );
+                }
+                return (
+                  <div className="space-y-3">
+                    {filteredVerifications.map((req) => {
+                      const reqUser = livoStore.getUserByUid(req.uid);
+                      return (
+                        <div
+                          key={req.id}
+                          className="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4"
+                        >
+                          <div className="flex items-start gap-3">
+                            <img src={req.userAvatar} alt="" className="w-12 h-12 rounded-full border border-gray-200 object-cover" />
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <UserNameWithBadges
+                                  displayName={reqUser?.displayName || `@${req.username}`}
+                                  nameGlowColor={reqUser?.nameGlowColor}
+                                  isVerified={reqUser?.isVerified}
+                                  verifiedBadgeColor={reqUser?.verifiedBadgeColor}
+                                  verifiedBadgeShape={reqUser?.verifiedBadgeShape}
+                                  verifiedBadgeGlow={reqUser?.verifiedBadgeGlow}
+                                  customIconUrl={reqUser?.customIconUrl}
+                                  customIconGlow={reqUser?.customIconGlow}
+                                  customIconAnimated={reqUser?.customIconAnimated}
+                                  badgeSize={14}
+                                  iconSize={17}
+                                  nameClassName="font-bold text-sm text-gray-900"
+                                />
+                                <span className="text-xs font-digits text-amber-700 font-bold">UID: {req.uid}</span>
+                                <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                                  req.status === 'approved' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : req.status === 'pending' ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-red-50 text-red-700 border border-red-200'
+                                }`}>
+                                  {req.status === 'approved' ? 'موثق رسمياً' : req.status === 'pending' ? 'قيد المراجعة' : 'مرفوض'}
+                                </span>
+                              </div>
+                              <p className="text-xs text-gray-600 mt-1">
+                                المدة: <strong className="text-gray-900">{req.monthsCount} شهر</strong> • الرسوم: <strong className="text-amber-700 font-digits">{req.priceEGP?.toLocaleString()} ج.م</strong> • هاتف التحويل: {req.paymentPhone}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            {req.receiptUrl && (
+                              <button
+                                onClick={() => setZoomedVerificationReceiptUrl(req.receiptUrl)}
+                                className="bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs px-3 py-1.5 rounded-xl font-bold flex items-center gap-1"
+                              >
+                                <ZoomIn className="w-3.5 h-3.5" />
+                                <span>معاينة الإيصال</span>
+                              </button>
+                            )}
+
+                            {req.status === 'pending' && (
+                              <>
+                                <button
+                                  onClick={() => {
+                                    livoStore.reviewVerificationRequest(req.id, 'approved', actorEmail);
+                                    showToast(`تم توثيق حساب @${req.username} بالعلامة الزرقاء بنجاح ✓`);
+                                  }}
+                                  className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3 py-1.5 rounded-xl font-bold flex items-center gap-1"
+                                >
+                                  <Check className="w-3.5 h-3.5" />
+                                  <span>موافقة وتوثيق</span>
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setRejectVerificationId(req.id);
+                                  }}
+                                  className="bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-xs px-3 py-1.5 rounded-xl font-bold"
+                                >
+                                  رفض
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
             </div>
           )}
 
           {/* SECTION: WITHDRAWALS */}
           {activeSection === 'withdrawals' && (
             <div className="space-y-4">
-              <div>
-                <h2 className="text-lg font-black text-gray-900">طلبات سحب الأرباح والتحويل النقدي</h2>
-                <p className="text-xs text-gray-500">
-                  مراجعة طلبات تحويل الكوينز إلى نقد عبر فودافون كاش أو إنستاباي (عند الرفض يسترجع المستخدم كوينزاته تلقائياً)
-                </p>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-black text-gray-900">طلبات سحب الأرباح والتحويل النقدي</h2>
+                  <p className="text-xs text-gray-500">
+                    مراجعة طلبات تحويل الكوينز إلى نقد عبر فودافون كاش أو إنستاباي (عند الرفض يسترجع المستخدم كوينزاته تلقائياً)
+                  </p>
+                </div>
+                <div className="relative w-full sm:w-64">
+                  <Search className="w-3.5 h-3.5 text-gray-400 absolute right-3 top-2.5" />
+                  <input
+                    type="text"
+                    value={withdrawalsSearchQuery}
+                    onChange={(e) => setWithdrawalsSearchQuery(e.target.value)}
+                    placeholder="بحث بـ UID (10000-100000+) أو رقم الحساب..."
+                    className="w-full bg-white border border-gray-200 rounded-xl pr-8 pl-3 py-2 text-xs text-gray-900 placeholder-gray-400 outline-none focus:border-amber-500 font-digits"
+                  />
+                </div>
               </div>
 
-              {withdrawals.length === 0 ? (
-                <div className="bg-white p-8 rounded-2xl border border-gray-200 text-center text-gray-400 text-xs">
-                  لا توجد طلبات سحب حالياً
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {withdrawals.map((req) => (
-                    <div
-                      key={req.id}
-                      className="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4"
-                    >
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h4 className="font-bold text-sm text-gray-900">طلب سحب #{req.id}</h4>
-                          <span className="text-xs font-digits text-amber-700 font-bold">UID: {req.uid}</span>
-                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                            req.status === 'approved' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : req.status === 'pending' ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-red-50 text-red-700 border border-red-200'
-                          }`}>
-                            {req.status === 'approved' ? 'تم الصرف والتحويل' : req.status === 'pending' ? 'قيد المراجعة' : 'مرفوض وتم استرجاع الكوينز'}
-                          </span>
-                        </div>
-                        <p className="text-xs text-gray-700 mt-1">
-                          المبلغ: <strong className="text-emerald-700 font-digits">{req.netPayoutEGP.toFixed(2)} ج.م</strong> مقابل ({req.totalCoins.toLocaleString()} كوينز)
-                        </p>
-                        <p className="text-[11px] text-gray-500 mt-0.5">
-                          الوسيلة: {req.paymentMethod === 'vodafone_cash' ? 'فودافون كاش' : req.paymentMethod === 'instapay' ? 'InstaPay' : 'تحويل بنكي'} • التفاصيل: {req.paymentDetails}
-                        </p>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        {req.status === 'pending' && (
-                          <>
-                            <button
-                              onClick={() => {
-                                livoStore.reviewWithdrawalRequest(req.id, 'approved', undefined, actorEmail);
-                                showToast(`تمت الموافقة على طلب سحب ${req.netPayoutEGP} ج.م بنجاح ✓`);
-                              }}
-                              className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3.5 py-1.5 rounded-xl font-bold flex items-center gap-1"
-                            >
-                              <Check className="w-3.5 h-3.5" />
-                              <span>اعتماد التحويل</span>
-                            </button>
-                            <button
-                              onClick={() => setRejectWithdrawalId(req.id)}
-                              className="bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-xs px-3 py-1.5 rounded-xl font-bold"
-                            >
-                              رفض وإرجاع الكوينز
-                            </button>
-                          </>
-                        )}
-                      </div>
+              {(() => {
+                const q = withdrawalsSearchQuery.trim().toLowerCase();
+                const filteredWithdrawals = q
+                  ? withdrawals.filter(
+                      (w) =>
+                        w.uid.toLowerCase().includes(q) ||
+                        w.username.toLowerCase().includes(q) ||
+                        w.id.toLowerCase().includes(q) ||
+                        w.paymentDetails.toLowerCase().includes(q)
+                    )
+                  : withdrawals;
+                if (filteredWithdrawals.length === 0) {
+                  return (
+                    <div className="bg-white p-8 rounded-2xl border border-gray-200 text-center text-gray-400 text-xs">
+                      لا توجد طلبات سحب مطابقة حالياً
                     </div>
-                  ))}
-                </div>
-              )}
+                  );
+                }
+                return (
+                  <div className="space-y-3">
+                    {filteredWithdrawals.map((req) => (
+                      <div
+                        key={req.id}
+                        className="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4"
+                      >
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h4 className="font-bold text-sm text-gray-900">طلب سحب #{req.id}</h4>
+                            <span className="text-xs font-digits text-amber-700 font-bold">UID: {req.uid}</span>
+                            <span className="text-xs text-gray-500">(@{req.username})</span>
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                              req.status === 'approved' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : req.status === 'pending' ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-red-50 text-red-700 border border-red-200'
+                            }`}>
+                              {req.status === 'approved' ? 'تم الصرف والتحويل' : req.status === 'pending' ? 'قيد المراجعة' : 'مرفوض وتم استرجاع الكوينز'}
+                            </span>
+                          </div>
+                          <p className="text-xs text-gray-700 mt-1">
+                            المبلغ: <strong className="text-emerald-700 font-digits">{req.netPayoutEGP.toFixed(2)} ج.م</strong> مقابل ({req.totalCoins.toLocaleString()} كوينز)
+                          </p>
+                          <p className="text-[11px] text-gray-500 mt-0.5">
+                            الوسيلة: {req.paymentMethod === 'vodafone_cash' ? 'فودافون كاش' : req.paymentMethod === 'instapay' ? 'InstaPay' : 'تحويل بنكي'} • التفاصيل: {req.paymentDetails}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          {req.status === 'pending' && (
+                            <>
+                              <button
+                                onClick={() => {
+                                  livoStore.reviewWithdrawalRequest(req.id, 'approved', undefined, actorEmail);
+                                  showToast(`تمت الموافقة على طلب سحب ${req.netPayoutEGP} ج.م بنجاح ✓`);
+                                }}
+                                className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3.5 py-1.5 rounded-xl font-bold flex items-center gap-1"
+                              >
+                                <Check className="w-3.5 h-3.5" />
+                                <span>اعتماد التحويل</span>
+                              </button>
+                              <button
+                                onClick={() => setRejectWithdrawalId(req.id)}
+                                className="bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-xs px-3 py-1.5 rounded-xl font-bold"
+                              >
+                                رفض وإرجاع الكوينز
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
           )}
 
@@ -3294,21 +4187,42 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                     إضافة وتعديل أسعار الهدايا وصور PNG الشفافة + منصة ضرب وإرسال الهدايا الطائرة مباشرة للغرف
                   </p>
                 </div>
-                <button
-                  onClick={() => {
-                    setEditGiftId(null);
-                    setNewGiftName('');
-                    setNewGiftPrice('');
-                    setNewGiftIcon('🎁');
-                    setNewGiftImageUrl('');
-                    setNewGiftAnimation('heart');
-                    setShowAddGiftModal(true);
-                  }}
-                  className="bg-[#FFE600] hover:bg-yellow-400 text-black font-black text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow-sm transition-all shrink-0"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>إضافة هدية جديدة للمتجر</span>
-                </button>
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    disabled={isSyncing200Gifts}
+                    onClick={async () => {
+                      setIsSyncing200Gifts(true);
+                      try {
+                        const res = await livoStore.syncInitial200GiftsToFirestore(actorEmail);
+                        showToast(res.message);
+                      } finally {
+                        setIsSyncing200Gifts(false);
+                      }
+                    }}
+                    className="bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 font-bold text-xs px-3 py-2 rounded-xl flex items-center gap-1.5"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isSyncing200Gifts ? 'animate-spin' : ''}`} />
+                    <span>{isSyncing200Gifts ? 'جاري المزامنة...' : 'مزامنة باقة 200+ هدية'}</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setEditGiftId(null);
+                      setNewGiftName('');
+                      setNewGiftPrice('');
+                      setNewGiftIcon('🎁');
+                      setNewGiftImageUrl('');
+                      setNewGiftAnimation('heart');
+                      setNewGiftIsCard(false);
+                      setNewGiftCategory('ملكي');
+                      setShowAddGiftModal(true);
+                    }}
+                    className="bg-[#FFE600] hover:bg-yellow-400 text-black font-black text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow-sm transition-all shrink-0"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>إضافة هدية جديدة للمتجر</span>
+                  </button>
+                </div>
               </div>
 
               {/* Live Room Gift Blaster (ضرب وإرسال الهدايا للغرف) */}
@@ -3371,14 +4285,21 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                   </div>
 
                   <div>
-                    <label className="block text-[10px] font-bold text-gray-500 mb-1">المستلم UID (اختياري):</label>
+                    <label className="block text-[10px] font-bold text-gray-500 mb-1">المستلم UID (بحث 10000 - 100000+):</label>
+                    <input
+                      type="text"
+                      value={blastRecipientQuery}
+                      onChange={(e) => setBlastRecipientQuery(e.target.value)}
+                      placeholder="ابحث بالـ UID أو الاسم..."
+                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-2.5 py-1.5 text-[11px] font-digits text-gray-900 mb-1"
+                    />
                     <select
                       value={blastRecipientUid}
                       onChange={(e) => setBlastRecipientUid(e.target.value)}
                       className="w-full bg-gray-50 border border-gray-200 rounded-xl px-2.5 py-2 text-xs text-gray-900"
                     >
                       <option value="">كافة الحضور / مالك الغرفة</option>
-                      {users.map((u) => (
+                      {(blastRecipientQuery.trim() ? livoStore.searchUsersByQuery(blastRecipientQuery) : users).map((u) => (
                         <option key={u.uid} value={u.uid}>
                           {u.displayName} (UID: {u.uid})
                         </option>
@@ -3398,6 +4319,26 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                   </div>
                 </div>
 
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                  <label className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-xs font-bold text-amber-900 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={blastTargetAll}
+                      onChange={(e) => setBlastTargetAll(e.target.checked)}
+                      className="rounded text-amber-600"
+                    />
+                    <span>إهداء وضرب لجميع المقاعد داخل الغرفة معاً (الكل)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={blastCardMessage}
+                    onChange={(e) => setBlastCardMessage(e.target.value)}
+                    placeholder="رسالة الكارت / الإهداء الظاهرة في الغرفة (اختياري)..."
+                    maxLength={80}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 outline-none focus:border-amber-500"
+                  />
+                </div>
+
                 <button
                   type="button"
                   onClick={() => {
@@ -3411,7 +4352,9 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                       roomId: targetRoomId,
                       giftId: targetGiftId,
                       count: blastCount,
-                      recipientUid: blastRecipientUid || undefined,
+                      recipientUid: blastTargetAll ? undefined : (blastRecipientUid || undefined),
+                      targetAll: blastTargetAll,
+                      cardMessage: blastCardMessage.trim() || undefined,
                       senderName: blastSenderName.trim() || 'إدارة LIVO الملكية',
                       adminEmail: actorEmail
                     });
@@ -3424,14 +4367,54 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                 </button>
               </div>
 
-              {/* Gifts Grid */}
-              <div className="space-y-2">
-                <h3 className="font-bold text-sm text-gray-900 flex items-center gap-2">
-                  <Gift className="w-4 h-4 text-amber-500" />
-                  <span>هدايا الغرف والمحادثات ({giftsList.length})</span>
-                </h3>
+              {/* Gifts Grid with Search & Categories */}
+              <div className="space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <h3 className="font-bold text-sm text-gray-900 flex items-center gap-2">
+                    <Gift className="w-4 h-4 text-amber-500" />
+                    <span>هدايا الغرف والمحادثات ({giftsList.length})</span>
+                  </h3>
+                  <div className="relative sm:w-64">
+                    <Search className="w-3.5 h-3.5 text-gray-400 absolute right-3 top-2.5" />
+                    <input
+                      type="text"
+                      value={giftAdminSearch}
+                      onChange={(e) => setGiftAdminSearch(e.target.value)}
+                      placeholder="ابحث في الـ 200+ هدية..."
+                      className="w-full bg-white border border-gray-200 rounded-xl pr-8 pl-3 py-1.5 text-xs text-gray-900 outline-none focus:border-amber-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+                  {['الكل', 'كروت إهداء', 'ملكي', 'حيوانات', 'سيارات وطائرات', 'حب', 'ألماس', 'حفلات'].map((cat) => (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setGiftAdminCategory(cat)}
+                      className={`px-3 py-1 rounded-full text-[11px] font-bold shrink-0 border transition-all ${
+                        giftAdminCategory === cat
+                          ? 'bg-[#FFE600] text-black border-amber-400 font-black'
+                          : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-                  {giftsList.map((gift) => (
+                  {giftsList
+                    .filter((g) => {
+                      const matchesCat =
+                        giftAdminCategory === 'الكل' ||
+                        (giftAdminCategory === 'كروت إهداء' && (g.isCard || g.category === 'كروت إهداء')) ||
+                        g.category === giftAdminCategory;
+                      const q = giftAdminSearch.trim().toLowerCase();
+                      const matchesQ = !q || g.name.toLowerCase().includes(q) || g.icon.includes(q);
+                      return matchesCat && matchesQ;
+                    })
+                    .map((gift) => (
                     <div
                       key={gift.id}
                       className={`bg-white p-3 rounded-2xl border shadow-sm flex flex-col items-center text-center justify-between relative ${
@@ -3457,6 +4440,8 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                               setNewGiftIcon(gift.icon);
                               setNewGiftImageUrl(gift.imageUrl || '');
                               setNewGiftAnimation(gift.animationType);
+                              setNewGiftIsCard(Boolean(gift.isCard));
+                              setNewGiftCategory(gift.category || 'ملكي');
                               setShowAddGiftModal(true);
                             }}
                             className="text-gray-500 hover:text-amber-600 p-1"
@@ -3478,12 +4463,12 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                       ) : (
                         <span className="text-4xl filter drop-shadow my-1">{gift.icon}</span>
                       )}
-                      <h4 className="font-bold text-xs text-gray-900 mt-1">{gift.name}</h4>
+                      <h4 className="font-bold text-xs text-gray-900 mt-1 line-clamp-1">{gift.name}</h4>
                       <span className="text-xs font-digits font-black text-amber-600 mt-0.5">
                         {gift.coins.toLocaleString()} كوينز
                       </span>
                       <span className="text-[9px] text-gray-400 mt-0.5">
-                        تأثير: {gift.animationType}
+                        {gift.isCard ? 'كارت كتابة 💌 • ' : ''}{gift.category || gift.animationType}
                       </span>
                     </div>
                   ))}
@@ -3512,6 +4497,176 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                     </div>
                   ))}
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* SECTION 7.5: GENUINE ROOMS & STREAMS MANAGEMENT */}
+          {activeSection === 'rooms' && (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-black text-gray-900">إدارة الغرف والبثوث الحقيقية</h2>
+                  <p className="text-xs text-gray-500">
+                    متابعة جميع الغرف الصوتية وبثوث الفيديو الحية، مع التنظيف التلقائي لأي غرف وهمية
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={isPurgingFakeRooms}
+                    onClick={async () => {
+                      setIsPurgingFakeRooms(true);
+                      try {
+                        const removed = await livoStore.purgeFakeRoomsFromFirestore();
+                        showToast(
+                          removed > 0
+                            ? `تم حذف ${removed} غرفة وهمية من قاعدة البيانات ✓`
+                            : 'قاعدة البيانات نظيفة تماماً — لا توجد غرف وهمية ✓'
+                        );
+                      } finally {
+                        setIsPurgingFakeRooms(false);
+                      }
+                    }}
+                    className="px-3.5 py-2 rounded-xl bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 font-black text-xs flex items-center gap-1.5"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>{isPurgingFakeRooms ? 'جاري الفحص...' : 'تنظيف الغرف الوهمية من Firebase'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setActiveSection('official_room')}
+                    className="px-3.5 py-2 rounded-xl bg-[#FFE600] hover:bg-yellow-400 text-black font-black text-xs"
+                  >
+                    إعدادات الغرفة الرسمية
+                  </button>
+                </div>
+              </div>
+
+              <div className="relative max-w-md">
+                <Search className="w-4 h-4 text-gray-400 absolute right-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={roomsSearchQuery}
+                  onChange={(e) => setRoomsSearchQuery(e.target.value)}
+                  placeholder="ابحث باسم الغرفة أو المالك أو UID..."
+                  className="w-full bg-white border border-gray-200 rounded-xl pr-9 pl-3 py-2 text-xs text-gray-900 outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {rooms
+                  .filter((r) => {
+                    if (!roomsSearchQuery.trim()) return true;
+                    const q = roomsSearchQuery.trim().toLowerCase();
+                    return (
+                      r.title.toLowerCase().includes(q) ||
+                      r.ownerName.toLowerCase().includes(q) ||
+                      r.ownerUid.toLowerCase().includes(q) ||
+                      r.id.toLowerCase().includes(q)
+                    );
+                  })
+                  .map((r) => {
+                    const activeSpeakers = (r.seats || []).filter((s) => Boolean(s.occupiedByUid)).length;
+                    return (
+                      <div
+                        key={r.id}
+                        className="bg-white rounded-2xl border border-gray-200 p-4 flex items-center justify-between gap-3 shadow-xs"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-12 h-12 rounded-2xl overflow-hidden bg-purple-950 border border-gray-200 shrink-0 relative">
+                            <img
+                              src={r.ownerAvatar || '/assets/livo/customer_icon.jpg'}
+                              alt={r.ownerName}
+                              className="w-full h-full object-cover"
+                            />
+                            <span
+                              className={`absolute bottom-0.5 right-0.5 w-2.5 h-2.5 rounded-full border border-white ${
+                                r.status === 'open' ? 'bg-emerald-500' : 'bg-gray-400'
+                              }`}
+                            />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <h4 className="font-black text-xs text-gray-900 truncate max-w-[180px]">{r.title}</h4>
+                              {r.isOfficial && (
+                                <span className="bg-[#FFE600] text-black text-[9px] font-black px-1.5 py-0.5 rounded-full">
+                                  رسمية
+                                </span>
+                              )}
+                              <span
+                                className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
+                                  r.roomType === 'live'
+                                    ? 'bg-rose-100 text-rose-700'
+                                    : 'bg-purple-100 text-purple-700'
+                                }`}
+                              >
+                                {r.roomType === 'live' ? 'بث فيديو' : 'غرفة صوتية'}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-gray-600 mt-0.5 truncate">
+                              المالك: <strong>{r.ownerName}</strong> (<span className="font-digits">{r.ownerUid}</span>)
+                            </p>
+                            <div className="flex items-center gap-3 text-[10px] text-gray-500 mt-1">
+                              <span>
+                                الحالة:{' '}
+                                <strong className={r.status === 'open' ? 'text-emerald-600' : 'text-gray-500'}>
+                                  {r.status === 'open' ? 'مفتوحة' : 'مغلقة'}
+                                </strong>
+                              </span>
+                              <span>المتحدثون: {activeSpeakers} / {r.seatCount || 12}</span>
+                              <span>الدردشة: {r.allChatDisabled ? 'مقفلة' : 'مفتوحة'}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              livoStore.toggleRoomAllChat(r.id);
+                              showToast(r.allChatDisabled ? 'تم فتح شات الغرفة 💬' : 'تم قفل شات الغرفة 🔒');
+                            }}
+                            className="px-3 py-1.5 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold text-[10px]"
+                          >
+                            {r.allChatDisabled ? 'فتح الشات' : 'قفل الشات'}
+                          </button>
+
+                          {r.isOfficial ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const nextSt = r.status === 'open' ? 'closed' : 'open';
+                                livoStore.setOfficialRoomStatus(nextSt, r.announcement);
+                                showToast(nextSt === 'open' ? 'تم فتح الغرفة الرسمية ✓' : 'تم إغلاق الغرفة الرسمية ✓');
+                              }}
+                              className={`px-3 py-1.5 rounded-xl font-black text-[10px] ${
+                                r.status === 'open'
+                                  ? 'bg-red-100 text-red-700 hover:bg-red-200'
+                                  : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                              }`}
+                            >
+                              {r.status === 'open' ? 'إغلاق الرسمية' : 'فتح الرسمية'}
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                livoStore.closeAndRemoveRoom(r.id);
+                                showToast(`تم إغلاق وحذف غرفة (${r.title}) ✓`);
+                              }}
+                              className="px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-black text-[10px] flex items-center gap-1 justify-center"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              <span>إغلاق وحذف</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
               </div>
             </div>
           )}
@@ -3585,22 +4740,23 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
               <form onSubmit={handleExecuteBan} className="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm space-y-3">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">ابحث عن المستخدم بالـ UID أو الاسم:</label>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1">ابحث عن المستخدم بالـ UID (10000 - 100000+) أو الاسم:</label>
                     <div className="flex gap-2">
                       <input
                         type="text"
                         value={banSearchUid}
                         onChange={(e) => setBanSearchUid(e.target.value)}
                         placeholder="أدخل معرّف UID أو الاسم"
-                        className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-3 py-1.5 text-xs text-gray-900"
+                        className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-3 py-1.5 text-xs font-digits text-gray-900"
                       />
                       <button
                         type="button"
-                        onClick={() => {
-                          const matches = livoStore.searchUsersByQuery(banSearchUid);
+                        onClick={async () => {
+                          const matches = await triggerServerUserLookup(banSearchUid);
                           if (matches.length > 0) setSelectedUserForBan(matches[0]);
                           else showToast('المستخدم غير موجود');
                         }}
+                        disabled={isSearchingServer}
                         className="bg-[#FFE600] hover:bg-yellow-400 text-black px-3 py-1.5 text-xs rounded-xl font-black"
                       >
                         تحديد
@@ -3615,8 +4771,21 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                             onClick={() => setSelectedUserForBan(u)}
                             className="w-full px-2.5 py-1.5 flex items-center justify-between text-right hover:bg-amber-50 text-xs"
                           >
-                            <span className="font-bold text-gray-900">{u.displayName}</span>
-                            <span className="font-digits text-amber-700">UID: {u.uid}</span>
+                            <UserNameWithBadges
+                              displayName={u.displayName}
+                              nameGlowColor={u.nameGlowColor}
+                              isVerified={u.isVerified}
+                              verifiedBadgeColor={u.verifiedBadgeColor}
+                              verifiedBadgeShape={u.verifiedBadgeShape}
+                              verifiedBadgeGlow={u.verifiedBadgeGlow}
+                              customIconUrl={u.customIconUrl}
+                              customIconGlow={u.customIconGlow}
+                              customIconAnimated={u.customIconAnimated}
+                              badgeSize={13}
+                              iconSize={16}
+                              nameClassName="font-bold text-gray-900"
+                            />
+                            <span className="font-digits text-amber-700 shrink-0">UID: {u.uid}</span>
                           </button>
                         ))}
                       </div>
@@ -3624,9 +4793,35 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                   </div>
 
                   {selectedUserForBan && (
-                    <div className="flex items-center gap-2 bg-gray-50 p-2 rounded-xl border border-gray-200 self-start">
-                      <img src={selectedUserForBan.avatar} alt="" className="w-8 h-8 rounded-full object-cover" />
-                      <span className="text-xs font-bold text-gray-900">{selectedUserForBan.displayName} (UID: {selectedUserForBan.uid})</span>
+                    <div className="flex items-center gap-2.5 bg-gray-50 p-2.5 rounded-xl border border-gray-200 self-start">
+                      <AvatarWithFrame
+                        avatarUrl={selectedUserForBan.avatar}
+                        displayName={selectedUserForBan.displayName}
+                        frameUrl={selectedUserForBan.equippedFrameUrl}
+                        frameGlowColor={selectedUserForBan.frameGlowColor}
+                        frameAnimated={selectedUserForBan.frameAnimated}
+                        customIconUrl={selectedUserForBan.customIconUrl}
+                        customIconGlow={selectedUserForBan.customIconGlow}
+                        customIconAnimated={selectedUserForBan.customIconAnimated}
+                        sizePx={36}
+                      />
+                      <div className="min-w-0">
+                        <UserNameWithBadges
+                          displayName={selectedUserForBan.displayName}
+                          nameGlowColor={selectedUserForBan.nameGlowColor}
+                          isVerified={selectedUserForBan.isVerified}
+                          verifiedBadgeColor={selectedUserForBan.verifiedBadgeColor}
+                          verifiedBadgeShape={selectedUserForBan.verifiedBadgeShape}
+                          verifiedBadgeGlow={selectedUserForBan.verifiedBadgeGlow}
+                          customIconUrl={selectedUserForBan.customIconUrl}
+                          customIconGlow={selectedUserForBan.customIconGlow}
+                          customIconAnimated={selectedUserForBan.customIconAnimated}
+                          badgeSize={13}
+                          iconSize={16}
+                          nameClassName="text-xs font-bold text-gray-900"
+                        />
+                        <span className="text-[10px] font-digits text-amber-700 font-bold block">UID: {selectedUserForBan.uid}</span>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -3645,16 +4840,31 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                     </select>
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">المدة:</label>
-                    <select
-                      value={banDuration}
-                      onChange={(e) => setBanDuration(e.target.value as any)}
-                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-2.5 py-1.5 text-xs text-gray-900"
-                    >
-                      <option value="temporary">مؤقت (7 أيام)</option>
-                      <option value="permanent">دائم نهائي</option>
-                    </select>
+                  <div className="flex gap-2">
+                    <div className="flex-1">
+                      <label className="block text-xs font-semibold text-gray-700 mb-1">المدة:</label>
+                      <select
+                        value={banDuration}
+                        onChange={(e) => setBanDuration(e.target.value as any)}
+                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-2.5 py-1.5 text-xs text-gray-900"
+                      >
+                        <option value="temporary">مؤقت (أيام محددة)</option>
+                        <option value="permanent">دائم نهائي</option>
+                      </select>
+                    </div>
+                    {banDuration === 'temporary' && (
+                      <div className="w-24">
+                        <label className="block text-xs font-semibold text-gray-700 mb-1">عدد الأيام:</label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={365}
+                          value={banDays}
+                          onChange={(e) => setBanDays(e.target.value)}
+                          className="w-full bg-gray-50 border border-gray-200 rounded-xl px-2.5 py-1.5 text-xs font-digits text-gray-900"
+                        />
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -3686,38 +4896,51 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                     لا يوجد مستخدمون محظورون حالياً
                   </div>
                 ) : (
-                  bans.map(b => (
-                    <div
-                      key={b.id}
-                      className={`p-3.5 rounded-2xl border shadow-sm flex items-center justify-between ${
-                        b.status === 'active' ? 'bg-red-50/70 border-red-200' : 'bg-white border-gray-200 opacity-80'
-                      }`}
-                    >
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-xs text-gray-900">{b.username}</span>
-                          <span className="font-digits text-xs text-amber-700 font-bold">UID: {b.uid}</span>
-                          <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${
-                            b.status === 'active' ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'
-                          }`}>
-                            {b.status === 'active' ? 'حظر نشط' : 'تم رفع الحظر'}
-                          </span>
+                  bans.map(b => {
+                    const banTypeLabel =
+                      b.banType === 'device' ? 'حظر الجهاز' : b.banType === 'both' ? 'الحساب والجهاز' : 'حظر الحساب';
+                    const durationLabel =
+                      b.duration === 'permanent'
+                        ? 'دائم نهائي'
+                        : `مؤقت (${b.durationDays || 7} يوم)`;
+                    return (
+                      <div
+                        key={b.id}
+                        className={`p-3.5 rounded-2xl border shadow-sm flex items-center justify-between gap-2 ${
+                          b.status === 'active' ? 'bg-red-50/70 border-red-200' : 'bg-white border-gray-200 opacity-80'
+                        }`}
+                      >
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-bold text-xs text-gray-900">{b.username}</span>
+                            <span className="font-digits text-xs text-amber-700 font-bold">UID: {b.uid}</span>
+                            <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${
+                              b.status === 'active' ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'
+                            }`}>
+                              {b.status === 'active' ? 'حظر نشط' : 'تم رفع الحظر'}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-gray-600 mt-1">
+                            النوع: {banTypeLabel} • المدة: {durationLabel} • السبب: {b.reason}
+                          </p>
+                          {b.status === 'unbanned' && b.unbanReason && (
+                            <p className="text-[10px] text-emerald-700 mt-0.5">
+                              سبب فك الحظر: {b.unbanReason}
+                            </p>
+                          )}
                         </div>
-                        <p className="text-[11px] text-gray-600 mt-1">
-                          نوع: {b.banType} • المدة: {b.duration} • السبب: {b.reason}
-                        </p>
-                      </div>
 
-                      {b.status === 'active' && (
-                        <button
-                          onClick={() => setUnbanModalRecord(b)}
-                          className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3 py-1.5 rounded-xl"
-                        >
-                          فك الحظر
-                        </button>
-                      )}
-                    </div>
-                  ))
+                        {b.status === 'active' && (
+                          <button
+                            onClick={() => setUnbanModalRecord(b)}
+                            className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3 py-1.5 rounded-xl shrink-0"
+                          >
+                            فك الحظر
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })
                 )}
               </div>
             </div>
@@ -3735,13 +4958,31 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
 
               <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm space-y-3">
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  <input
-                    type="text"
-                    value={newSupervisorUid}
-                    onChange={(e) => setNewSupervisorUid(e.target.value)}
-                    placeholder="UID المستخدم (اختياري)"
-                    className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 font-digits outline-none focus:border-amber-500"
-                  />
+                  <div className="flex gap-1.5">
+                    <input
+                      type="text"
+                      value={newSupervisorUid}
+                      onChange={(e) => setNewSupervisorUid(e.target.value)}
+                      placeholder="UID (10000-100000+)"
+                      className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 font-digits outline-none focus:border-amber-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const found = await triggerServerUserLookup(newSupervisorUid);
+                        if (found[0]) {
+                          setNewSupervisorName(found[0].displayName);
+                          if (found[0].email) setNewSupervisorEmail(found[0].email);
+                          showToast(`تم جلب بيانات ${found[0].displayName} ✓`);
+                        } else {
+                          showToast('لم يتم العثور على المستخدم بهذا المعرّف');
+                        }
+                      }}
+                      className="px-2.5 py-2 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-800 rounded-xl text-[11px] font-bold shrink-0"
+                    >
+                      جلب
+                    </button>
+                  </div>
                   <input
                     type="text"
                     value={newSupervisorName}
@@ -3810,13 +5051,36 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                 </button>
               </div>
 
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-gray-400 absolute right-3 top-2.5" />
+                <input
+                  type="text"
+                  value={supervisorsSearchQuery}
+                  onChange={(e) => setSupervisorsSearchQuery(e.target.value)}
+                  placeholder="بحث في المشرفين بالـ UID (10000-100000+) أو الاسم أو البريد..."
+                  className="w-full bg-white border border-gray-200 rounded-xl pr-8 pl-3 py-2 text-xs text-gray-900 placeholder-gray-400 outline-none focus:border-amber-500 font-digits"
+                />
+              </div>
+
               <div className="space-y-2.5">
-                {supervisors.length === 0 ? (
-                  <div className="bg-white p-6 rounded-2xl border border-gray-200 text-center text-xs text-gray-400">
-                    لا يوجد مشرفون مضافون حالياً
-                  </div>
-                ) : (
-                  supervisors.map((s) => (
+                {(() => {
+                  const q = supervisorsSearchQuery.trim().toLowerCase();
+                  const filteredSups = q
+                    ? supervisors.filter(
+                        (s) =>
+                          (s.uid && s.uid.toLowerCase().includes(q)) ||
+                          s.name.toLowerCase().includes(q) ||
+                          s.email.toLowerCase().includes(q)
+                      )
+                    : supervisors;
+                  if (filteredSups.length === 0) {
+                    return (
+                      <div className="bg-white p-6 rounded-2xl border border-gray-200 text-center text-xs text-gray-400">
+                        لا يوجد مشرفون مطابقون حالياً
+                      </div>
+                    );
+                  }
+                  return filteredSups.map((s) => (
                     <div key={s.id} className="bg-white p-3.5 rounded-2xl border border-gray-200 shadow-sm space-y-2.5">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div>
@@ -3919,8 +5183,8 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                         </div>
                       )}
                     </div>
-                  ))
-                )}
+                  ));
+                })()}
               </div>
             </div>
           )}
@@ -3928,20 +5192,46 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
           {/* SECTION 11: FINANCIAL AUDIT LOGS */}
           {activeSection === 'financial_logs' && (
             <div className="space-y-4">
-              <div>
-                <h2 className="text-lg font-black text-gray-900">السجل المالي الدائم</h2>
-                <p className="text-xs text-gray-500">
-                  سجل غير قابل للتعديل أو الحذف لجميع عمليات الشحن والخصم والإدارة
-                </p>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-black text-gray-900">السجل المالي الدائم</h2>
+                  <p className="text-xs text-gray-500">
+                    سجل غير قابل للتعديل أو الحذف لجميع عمليات الشحن والخصم والإدارة
+                  </p>
+                </div>
+                <div className="relative w-full sm:w-64">
+                  <Search className="w-3.5 h-3.5 text-gray-400 absolute right-3 top-2.5" />
+                  <input
+                    type="text"
+                    value={logsSearchQuery}
+                    onChange={(e) => setLogsSearchQuery(e.target.value)}
+                    placeholder="بحث بـ UID (10000-100000+) أو السبب..."
+                    className="w-full bg-white border border-gray-200 rounded-xl pr-8 pl-3 py-2 text-xs text-gray-900 placeholder-gray-400 outline-none focus:border-amber-500 font-digits"
+                  />
+                </div>
               </div>
 
-              {audits.length === 0 ? (
-                <div className="bg-white p-6 rounded-2xl border border-gray-200 text-center text-xs text-gray-400">
-                  لا توجد عمليات مسجلة حتى الآن
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {audits.map(item => (
+              {(() => {
+                const q = logsSearchQuery.trim().toLowerCase();
+                const filteredAudits = q
+                  ? audits.filter(
+                      (item) =>
+                        item.uid.toLowerCase().includes(q) ||
+                        item.username.toLowerCase().includes(q) ||
+                        item.reason.toLowerCase().includes(q) ||
+                        item.performedBy.toLowerCase().includes(q)
+                    )
+                  : audits;
+                if (filteredAudits.length === 0) {
+                  return (
+                    <div className="bg-white p-6 rounded-2xl border border-gray-200 text-center text-xs text-gray-400">
+                      لا توجد عمليات مطابقة حالياً
+                    </div>
+                  );
+                }
+                return (
+                  <div className="space-y-2">
+                    {filteredAudits.map(item => (
                     <div
                       key={item.id}
                       className="bg-white p-3 rounded-xl border border-gray-200 shadow-sm flex items-center justify-between text-xs"
@@ -3967,8 +5257,9 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                       </div>
                     </div>
                   ))}
-                </div>
-              )}
+                  </div>
+                );
+              })()}
             </div>
           )}
 
@@ -4128,12 +5419,47 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">رابط صورة البانر (URL):</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-gray-700">رابط أو رفع صورة البانر:</label>
+                  <label className="cursor-pointer bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 px-2.5 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1">
+                    <Upload className="w-3 h-3" />
+                    <span>{isUploadingAdImage ? 'جاري الضغط والرفع...' : 'رفع من الجهاز'}</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        setIsUploadingAdImage(true);
+                        try {
+                          const url = await firebaseService.uploadImage(`ads/ad_${Date.now()}.jpg`, file, {
+                            maxDim: 1200,
+                            quality: 0.78,
+                            maxBytes: 240_000
+                          });
+                          setNewAdImageUrl(url);
+                          showToast('تم رفع وضغط صورة الإعلان بنجاح ✓');
+                        } catch {
+                          const compressed = await compressImageForFirestore(file, {
+                            maxDim: 1200,
+                            quality: 0.78,
+                            maxBytes: 240_000
+                          });
+                          setNewAdImageUrl(compressed);
+                          showToast('تم تجهيز صورة الإعلان بنجاح ✓');
+                        } finally {
+                          setIsUploadingAdImage(false);
+                        }
+                      }}
+                    />
+                  </label>
+                </div>
                 <input
-                  type="url"
+                  type="text"
                   value={newAdImageUrl}
                   onChange={(e) => setNewAdImageUrl(e.target.value)}
-                  placeholder="https://images.unsplash.com/photo-..."
+                  placeholder="https://images.unsplash.com/photo-... أو ارفع صورة من الجهاز"
                   className="w-full bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-xs text-gray-900 font-digits outline-none focus:border-amber-500"
                   required
                 />
@@ -4503,8 +5829,8 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">صورة الهدية PNG (تفريغ الخلفية تلقائياً):</label>
-                <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl p-2">
+                <label className="block text-xs font-semibold text-gray-700 mb-1">صورة الهدية PNG (تفريغ تلقائي أو قص سحري يدوي):</label>
+                <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl p-2 flex-wrap">
                   {newGiftImageUrl ? (
                     <div className="relative w-12 h-12 rounded-xl bg-[#180829] flex items-center justify-center shrink-0 p-1">
                       <img src={newGiftImageUrl} alt="Gift" className="w-10 h-10 object-contain" />
@@ -4519,14 +5845,32 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                   ) : null}
                   <label className="flex-1 cursor-pointer bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 px-3 py-2 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1.5">
                     <Upload className="w-3.5 h-3.5" />
-                    <span>{isProcessingGiftImage ? 'جاري تفريغ الخلفية...' : 'رفع صورة الهدية (PNG شفاف)'}</span>
+                    <span>{isProcessingGiftImage ? 'جاري التفريغ...' : 'رفع وتفريغ تلقائي'}</span>
                     <input
                       type="file"
                       accept="image/*"
                       className="hidden"
                       onChange={(e) => {
                         const f = e.target.files?.[0];
+                        e.target.value = '';
                         if (f) handleUploadGiftImage(f);
+                      }}
+                    />
+                  </label>
+                  <label className="cursor-pointer bg-purple-50 hover:bg-purple-100 text-purple-800 border border-purple-200 px-2.5 py-2 rounded-xl text-[11px] font-bold flex items-center gap-1">
+                    <Wand2 className="w-3.5 h-3.5" />
+                    <span>قص يدوي</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        e.target.value = '';
+                        if (f) {
+                          setAdminCutoutTarget('gift');
+                          setAdminCutoutSource(f);
+                        }
                       }}
                     />
                   </label>
@@ -4571,23 +5915,56 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">نوع التأثير في الغرفة:</label>
-                <select
-                  value={newGiftAnimation}
-                  onChange={(e) => setNewGiftAnimation(e.target.value as GiftItem['animationType'])}
-                  className="w-full bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-xs text-gray-900 outline-none"
-                >
-                  <option value="heart">قلب متوهج (Heart)</option>
-                  <option value="rose">وردة (Rose)</option>
-                  <option value="diamond">ألماسة متلألئة (Diamond)</option>
-                  <option value="rocket">صاروخ ناري (Rocket)</option>
-                  <option value="lion">أسد ذهبي يزأر (Lion Roar)</option>
-                  <option value="car">سيارة رياضية فاخرة (Supercar)</option>
-                  <option value="dragon">تنين أسطوري (Dragon Flight)</option>
-                  <option value="castle">قصر ملكي (Castle)</option>
-                </select>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">الفئة:</label>
+                  <select
+                    value={newGiftCategory}
+                    onChange={(e) => setNewGiftCategory(e.target.value)}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-xs text-gray-900 outline-none"
+                  >
+                    <option value="ملكي">ملكي</option>
+                    <option value="كروت إهداء">كروت إهداء</option>
+                    <option value="حيوانات">حيوانات</option>
+                    <option value="سيارات وطائرات">سيارات وطائرات</option>
+                    <option value="حب">حب</option>
+                    <option value="ألماس">ألماس</option>
+                    <option value="حفلات">حفلات</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">نوع التأثير:</label>
+                  <select
+                    value={newGiftAnimation}
+                    onChange={(e) => setNewGiftAnimation(e.target.value as GiftItem['animationType'])}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-xs text-gray-900 outline-none"
+                  >
+                    <option value="heart">قلب متوهج (Heart)</option>
+                    <option value="rose">وردة (Rose)</option>
+                    <option value="diamond">ألماسة متلألئة (Diamond)</option>
+                    <option value="rocket">صاروخ ناري (Rocket)</option>
+                    <option value="lion">أسد ذهبي يمشي بالشاشة (Lion Walk)</option>
+                    <option value="car">سيارة رياضية فاخرة (Supercar)</option>
+                    <option value="ship">يخت / سفينة فاخرة (Ship)</option>
+                    <option value="dragon">تنين أسطوري (Dragon Flight)</option>
+                    <option value="castle">قصر ملكي (Castle)</option>
+                    <option value="crown">تاج ملكي (Crown)</option>
+                    <option value="wings">أجنحة ضوئية (Wings)</option>
+                    <option value="fireworks">ألعاب نارية (Fireworks)</option>
+                    <option value="card">كارت إهداء بالكتابة (Gift Card)</option>
+                  </select>
+                </div>
               </div>
+
+              <label className="flex items-center gap-2 bg-purple-50 border border-purple-200 rounded-xl px-3 py-2 text-xs font-bold text-purple-900 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={newGiftIsCard || newGiftAnimation === 'card'}
+                  onChange={(e) => setNewGiftIsCard(e.target.checked)}
+                  className="rounded text-purple-600"
+                />
+                <span>تفعيل الكتابة على الهدية (كارت إهداء يظهر بالكلام) 💌</span>
+              </label>
 
               <div className="flex items-center gap-2 pt-2">
                 <button
@@ -4793,6 +6170,118 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onLogoutAdmin }) => {
         </div>
       )}
 
+      <MagicCutoutModal
+        isOpen={Boolean(adminCutoutTarget && adminCutoutSource)}
+        initialImage={adminCutoutSource}
+        title={
+          adminCutoutTarget === 'frame'
+            ? 'قص وتنظيف الإطار الملكي (PNG شفاف)'
+            : adminCutoutTarget === 'gift'
+            ? 'قص وتنظيف صورة الهدية (PNG شفاف)'
+            : 'قص وتنظيف أيقونة الاسم والملف (PNG شفاف)'
+        }
+        maxOutputDim={adminCutoutTarget === 'custom_icon' ? 220 : 384}
+        maxBytes={adminCutoutTarget === 'custom_icon' ? 140_000 : 180_000}
+        onClose={() => {
+          setAdminCutoutTarget(null);
+          setAdminCutoutSource(null);
+        }}
+        onApply={async (transparentPng) => {
+          const target = adminCutoutTarget;
+          if (!target) return;
+          try {
+            let finalUrl = transparentPng;
+            try {
+              const pathPrefix = target === 'frame' ? 'frames/frame' : target === 'gift' ? 'gifts/gift' : 'icons/icon';
+              finalUrl = await firebaseService.uploadImage(`${pathPrefix}_${Date.now()}.png`, transparentPng, {
+                preserveAlpha: true,
+                maxDim: target === 'custom_icon' ? 220 : 384,
+                maxBytes: target === 'custom_icon' ? 140_000 : 180_000
+              });
+            } catch {
+              finalUrl = transparentPng;
+            }
+            if (target === 'frame') {
+              setCosFrameUrl(finalUrl);
+              showToast('تم تفريغ خلفية الإطار وتجهيزه للحفظ ✓');
+            } else if (target === 'custom_icon') {
+              setCosCustomIconUrl(finalUrl);
+              showToast('تم تفريغ خلفية الأيقونة — اضغط اعتماد التخصيصات للحفظ ✓');
+            } else if (target === 'gift') {
+              setNewGiftImageUrl(finalUrl);
+              showToast('تم تفريغ صورة الهدية بنجاح ✓');
+            }
+          } catch {
+            showToast('تعذر حفظ الصورة المفرغة');
+          }
+        }}
+      />
+
+      {/* MODAL: ADMIN CHANGE USER UID */}
+      {uidChangeTarget && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-sm rounded-2xl border border-gray-200 shadow-2xl p-5 space-y-4 text-gray-900">
+            <div className="flex items-center justify-between pb-2 border-b border-gray-100">
+              <h3 className="font-bold text-sm text-gray-900">تغيير معرّف (UID) العضو</h3>
+              <button
+                onClick={() => setUidChangeTarget(null)}
+                className="text-gray-400 hover:text-gray-700"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="space-y-2 text-xs">
+              <p className="text-gray-600">
+                العضو: <strong className="text-gray-900">{uidChangeTarget.displayName}</strong>
+              </p>
+              <p className="text-gray-500 font-digits">
+                الـ UID الحالي: <strong>{uidChangeTarget.uid}</strong>
+              </p>
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">الـ UID الجديد (4 إلى 24 حرف أو رقم إنجليزي):</label>
+                <input
+                  type="text"
+                  value={uidChangeInput}
+                  onChange={(e) => setUidChangeInput(e.target.value)}
+                  placeholder="مثال: 77777"
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-sm font-digits text-gray-900 outline-none focus:border-amber-500"
+                />
+              </div>
+              <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-xl p-2">
+                يتم ترحيل بيانات العضو ورصيده وغرفه تلقائياً للمعرّف الجديد دون فقدان الحساب.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={isChangingUid}
+                onClick={async () => {
+                  setIsChangingUid(true);
+                  try {
+                    const res = await livoStore.adminChangeUserUid(uidChangeTarget.uid, uidChangeInput, actorEmail);
+                    showToast(res.message);
+                    if (res.success) {
+                      setUidChangeTarget(null);
+                    }
+                  } finally {
+                    setIsChangingUid(false);
+                  }
+                }}
+                className="flex-1 py-2.5 bg-[#FFE600] hover:bg-yellow-400 text-black font-black text-xs rounded-xl shadow-sm"
+              >
+                {isChangingUid ? 'جاري التغيير...' : 'تأكيد تغيير الـ UID ✓'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setUidChangeTarget(null)}
+                className="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-xs rounded-xl"
+              >
+                إلغاء
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

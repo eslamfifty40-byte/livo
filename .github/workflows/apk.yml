@@ -17,56 +17,81 @@ jobs:
             appid: com.livo.client
             icon: livo.icon.png
             mode: customer
-          - name: admin #
-            appname: Livo Admin #
-            appid: com.livo.admin #
-            icon: livoadmin.icon.png #
-            mode: admin #
+          - name: admin
+            appname: Livo Admin
+            appid: com.livo.admin
+            icon: livoadmin.icon.png
+            mode: admin
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
       - run: sudo apt-get update -y && sudo apt-get install -y imagemagick
       - run: npm install --legacy-peer-deps
-      - run: npm install --no-save --legacy-peer-deps @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6
+      - run: npm install --legacy-peer-deps @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6 @capacitor-firebase/authentication@6
       - name: Build web
-        run: if [ "$VITE_APP_MODE" = "admin" ]; then cp admin.html index.html; fi; npm run build
+        run: |
+          if [ "$VITE_APP_MODE" = "admin" ]; then cp admin.html index.html; fi
+          npx tsc --noEmit
+          npm run build
+          rm -rf dist/assets/aistudio
+          find dist/assets/livo -name 'Screenshot_*' -delete || true
         env:
           VITE_APP_MODE: ${{ matrix.mode }}
+          NODE_OPTIONS: --max-old-space-size=4096
       - name: Build APK
         run: |
-          rm -f capacitor.config.ts; rm -f capacitor.config.ts; echo '{"appId":"${{ matrix.appid }}","appName":"${{ matrix.appname }}","webDir":"dist"}' > capacitor.config.json
+          if [ -n "$ANDROID_HOME" ] && [ -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
+            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
+            "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-34" "build-tools;34.0.0" || true
+          fi
+          rm -rf android
+          rm -f capacitor.config.ts
+          printf '{"appId":"%s","appName":"%s","webDir":"dist","server":{"androidScheme":"https"},"android":{"allowMixedContent":false,"captureInput":true},"plugins":{"FirebaseAuthentication":{"skipNativeAuth":true,"providers":["google.com"]}}}\n' "${{ matrix.appid }}" "${{ matrix.appname }}" > capacitor.config.json
           npx cap add android
+          node -e '
+            const fs = require("fs");
+            const p = "android/app/src/main/AndroidManifest.xml";
+            let xml = fs.readFileSync(p, "utf8");
+            const perms = [
+              "android.permission.RECORD_AUDIO",
+              "android.permission.CAMERA",
+              "android.permission.MODIFY_AUDIO_SETTINGS",
+              "android.permission.ACCESS_FINE_LOCATION",
+              "android.permission.ACCESS_COARSE_LOCATION",
+              "android.permission.READ_MEDIA_IMAGES"
+            ].filter(perm => !xml.includes(perm))
+             .map(perm => `    <uses-permission android:name="${perm}" />`)
+             .join("\n");
+            if (perms) {
+              xml = xml.replace("<application", perms + "\n    <application");
+              fs.writeFileSync(p, xml);
+            }
+          '
+          IM_CMD=$(command -v magick || command -v convert)
           for d in "mdpi 48" "hdpi 72" "xhdpi 96" "xxhdpi 144" "xxxhdpi 192"; do
             set -- $d
             mkdir -p android/app/src/main/res/mipmap-$1
             for n in ic_launcher ic_launcher_round; do
-              convert "${{ matrix.icon }}" -resize $2x$2 -gravity center -background none -extent $2x$2 android/app/src/main/res/mipmap-$1/$n.png
+              "$IM_CMD" "${{ matrix.icon }}" -resize $2x$2 -gravity center -background none -extent $2x$2 android/app/src/main/res/mipmap-$1/$n.png
             done
           done
-          rm -rf android/app/src/main/res/mipmap-anydpi-v26
-          rm -f android/app/src/main/res/mipmap-*/ic_launcher_foreground.png
+          rm -rf android/app/src/main/res/mipmap-anydpi* || true
+          rm -f android/app/src/main/res/mipmap-*/ic_launcher_foreground.png android/app/src/main/res/mipmap-*/ic_launcher_background.png || true
+          GS=$(ls google-services/*${{ matrix.name }}*.json 2>/dev/null | head -1); [ -n "$GS" ] || GS=$(ls google-services/*.json | head -1); echo "google-services: $GS"; cp "$GS" android/app/google-services.json
+          mkdir -p ~/.android; cp livo-debug.keystore ~/.android/debug.keystore
           npx cap sync android
-          cd android && chmod +x gradlew && ./gradlew assembleDebug
+          cd android && chmod +x gradlew && ./gradlew assembleDebug --no-daemon --stacktrace
           cp app/build/outputs/apk/debug/app-debug.apk ../livo-${{ matrix.name }}.apk
-      - uses: actions/upload-artifact@v4
-        with:
-          name: livo-${{ matrix.name }}
-          path: livo-${{ matrix.name }}.apk
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: out
-          merge-multiple: true
-      - name: Publish release
+      - name: Publish to release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "build-${{ github.run_number }}" out/*.apk --repo "${{ github.repository }}" --title "Build ${{ github.run_number }}"
+        run: |
+          TAG="build-${{ github.run_number }}"
+          gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1 || gh release create "$TAG" --repo "${{ github.repository }}" --title "LIVO Build ${{ github.run_number }}" --notes "Client + Admin APKs" || true
+          gh release upload "$TAG" livo-${{ matrix.name }}.apk --repo "${{ github.repository }}" --clobber

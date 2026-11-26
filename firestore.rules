@@ -2,20 +2,66 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // Global Default-Deny Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- AUTH & IDENTITY PRIMITIVES ---
     function isAuthenticated() {
-      return request.auth != null;
+      return request.auth != null && request.auth.uid != null;
     }
 
     function isOwner() {
       return isAuthenticated() && (
-        request.auth.token.email == 'livo.admin@gmail.com' ||
-        request.auth.token.email == 'eslamfifty11@gmail.com' ||
-        request.auth.token.role == 'owner'
+        (
+          request.auth.token.email_verified == true &&
+          request.auth.token.email is string &&
+          request.auth.token.email.lower() in ['livo.admin@gmail.com', 'eslamfifty11@gmail.com']
+        ) ||
+        request.auth.token.get('role', '') == 'owner' ||
+        (
+          exists(/databases/$(database)/documents/users/10000) &&
+          get(/databases/$(database)/documents/users/10000).data.get('role', '') == 'owner' &&
+          get(/databases/$(database)/documents/users/10000).data.get('authUid', '') == request.auth.uid
+        ) ||
+        (
+          exists(/databases/$(database)/documents/staff_auth/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/staff_auth/$(request.auth.uid)).data.get('role', '') == 'owner' &&
+          get(/databases/$(database)/documents/staff_auth/$(request.auth.uid)).data.get('isActive', false) == true
+        )
       );
     }
 
     function isAdminOrSupervisor() {
-      return isOwner() || (isAuthenticated() && request.auth.token.role == 'supervisor');
+      return isOwner() || (
+        isAuthenticated() && (
+          request.auth.token.get('role', '') == 'supervisor' ||
+          (
+            exists(/databases/$(database)/documents/staff_auth/$(request.auth.uid)) &&
+            get(/databases/$(database)/documents/staff_auth/$(request.auth.uid)).data.get('isActive', false) == true
+          ) ||
+          (
+            request.auth.token.email_verified == true &&
+            request.auth.token.email is string &&
+            exists(/databases/$(database)/documents/staff_auth/$(request.auth.token.email.lower())) &&
+            get(/databases/$(database)/documents/staff_auth/$(request.auth.token.email.lower())).data.get('isActive', false) == true
+          )
+        )
+      );
+    }
+
+    // --- VALIDATION PRIMITIVES ---
+    function isValidDocId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-\\.@]+$');
+    }
+
+    function isStrMax(val, maxLen) {
+      return val is string && val.size() <= maxLen;
+    }
+
+    function isNonEmptyStrMax(val, maxLen) {
+      return val is string && val.size() >= 1 && val.size() <= maxLen;
     }
 
     function validRole(role) {
@@ -38,34 +84,135 @@ service cloud.firestore {
       ];
     }
 
-    // Users Collection (keyed by 5-digit LIVO UID, bound via authUid == request.auth.uid)
+    function isValidUserCreate(data, userId) {
+      return isNonEmptyStrMax(data.uid, 32) &&
+        data.uid == userId &&
+        data.authUid == request.auth.uid &&
+        data.role == 'user' &&
+        data.coins is number &&
+        data.coins == 0 &&
+        data.get('diamonds', 0) is number &&
+        data.get('diamonds', 0) == 0 &&
+        data.isVerified == false &&
+        !data.keys().hasAny(adminCosmeticKeys()) &&
+        !data.keys().hasAny(['canChargeUsers', 'canStealthRooms', 'agencyBadgeLabel', 'isBanned', 'banDetails', 'verifiedUntil', 'agencyType', 'agencyName', 'agentBalance']);
+    }
+
+    function isValidRechargeReq(data) {
+      return isNonEmptyStrMax(data.uid, 32) &&
+        data.packageCoins is number &&
+        data.packageCoins > 0 &&
+        data.amountEGP is number &&
+        data.amountEGP > 0 &&
+        isStrMax(data.payerPhone, 32) &&
+        isStrMax(data.receiptUrl, 750000) &&
+        data.status in ['pending', 'approved', 'rejected'];
+    }
+
+    function isValidAgency(data) {
+      return isNonEmptyStrMax(data.uid, 32) &&
+        isNonEmptyStrMax(data.agencyName, 120) &&
+        data.agencyType in ['charging_agent', 'distributors_agent'] &&
+        data.status in ['pending', 'approved', 'rejected'] &&
+        data.canChargeUsers is bool;
+    }
+
+    function isValidVerification(data) {
+      return isNonEmptyStrMax(data.uid, 32) &&
+        data.monthsCount is number &&
+        data.monthsCount >= 1 &&
+        data.monthsCount <= 36 &&
+        data.priceEGP is number &&
+        data.priceEGP > 0 &&
+        isStrMax(data.receiptUrl, 750000) &&
+        data.status in ['pending', 'approved', 'rejected'];
+    }
+
+    function isValidWithdrawal(data) {
+      return isNonEmptyStrMax(data.uid, 32) &&
+        data.totalCoins is number &&
+        data.totalCoins > 0 &&
+        data.netPayoutEGP is number &&
+        data.netPayoutEGP >= 0 &&
+        isNonEmptyStrMax(data.paymentDetails, 200) &&
+        data.status in ['pending', 'approved', 'rejected'];
+    }
+
+    function isValidTicket(data) {
+      return isNonEmptyStrMax(data.uid, 32) &&
+        isNonEmptyStrMax(data.subject, 200) &&
+        isNonEmptyStrMax(data.message, 3000) &&
+        data.status in ['pending', 'in_progress', 'resolved', 'closed'];
+    }
+
+    function isValidVideo(data) {
+      return isNonEmptyStrMax(data.id, 64) &&
+        isNonEmptyStrMax(data.authorUid, 32) &&
+        isNonEmptyStrMax(data.videoUrl, 900000) &&
+        isStrMax(data.get('caption', ''), 600);
+    }
+
+    function isValidRoom(data) {
+      return isNonEmptyStrMax(data.get('id', ''), 64) &&
+        isNonEmptyStrMax(data.get('title', ''), 200) &&
+        isNonEmptyStrMax(data.get('ownerUid', ''), 64) &&
+        data.get('status', '') in ['open', 'closed', 'locked_by_admin'] &&
+        data.get('isOfficial', false) is bool;
+    }
+
+    // 1. Users Collection (keyed by LIVO UID, bound via authUid == request.auth.uid)
     match /users/{userId} {
       allow read: if isAuthenticated();
 
-      allow create: if isOwner() || (
-        isAuthenticated() &&
-        request.resource.data.uid is string &&
-        request.resource.data.authUid == request.auth.uid &&
-        request.resource.data.role == 'user' &&
-        request.resource.data.coins == 0 &&
-        request.resource.data.isVerified == false &&
-        !request.resource.data.keys().hasAny(adminCosmeticKeys())
+      allow create: if isValidDocId(userId) && (
+        isOwner() ||
+        (isAdminOrSupervisor() && request.resource.data.get('role', 'user') != 'owner') ||
+        (isAuthenticated() && isValidUserCreate(request.resource.data, userId))
       );
 
-      allow update: if isOwner() || (
-        isAuthenticated() &&
-        validRole(request.resource.data.role) &&
-        request.resource.data.role == resource.data.role &&
-        request.resource.data.isVerified == resource.data.isVerified &&
-        request.resource.data.coins is number &&
-        request.resource.data.coins >= 0 &&
-        !request.resource.data.diff(resource.data).affectedKeys().hasAny(adminCosmeticKeys())
+      allow update: if isValidDocId(userId) && (
+        isAdminOrSupervisor() ||
+        (
+          isAuthenticated() &&
+          validRole(request.resource.data.get('role', 'user')) &&
+          request.resource.data.get('role', 'user') == resource.data.get('role', 'user') &&
+          request.resource.data.uid == resource.data.uid &&
+          request.resource.data.get('isVerified', false) == resource.data.get('isVerified', false) &&
+          request.resource.data.get('verifiedUntil', '') == resource.data.get('verifiedUntil', '') &&
+          request.resource.data.get('canChargeUsers', false) == resource.data.get('canChargeUsers', false) &&
+          request.resource.data.get('canStealthRooms', false) == resource.data.get('canStealthRooms', false) &&
+          request.resource.data.get('agencyBadgeLabel', '') == resource.data.get('agencyBadgeLabel', '') &&
+          request.resource.data.get('isBanned', false) == resource.data.get('isBanned', false) &&
+          request.resource.data.coins is number &&
+          request.resource.data.coins >= 0 &&
+          request.resource.data.get('diamonds', 0) is number &&
+          request.resource.data.get('diamonds', 0) >= 0 &&
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(adminCosmeticKeys()) &&
+          (
+            resource.data.get('authUid', '') == request.auth.uid ||
+            (
+              resource.data.get('authUid', '') == '' &&
+              resource.data.get('role', 'user') == 'user' &&
+              request.resource.data.get('authUid', '') == request.auth.uid
+            ) ||
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'followersCount',
+              'diamonds',
+              'coins',
+              'eligibleRechargedCoins',
+              'agentBalance'
+            ])
+          )
+        )
       );
 
-      allow delete: if isOwner();
+      allow delete: if isValidDocId(userId) && (
+        isOwner() ||
+        (isAdminOrSupervisor() && resource.data.get('role', 'user') != 'owner')
+      );
     }
 
-    // Direct Private Messages (bound via senderAuthUid / receiverAuthUid)
+    // 2. Direct Private Messages (bound via senderAuthUid / receiverAuthUid)
     match /messages/{messageId} {
       allow read: if isAuthenticated() && (
         isOwner() ||
@@ -75,30 +222,39 @@ service cloud.firestore {
         resource.data.receiverUid == request.auth.uid
       );
 
-      allow create: if isAuthenticated() &&
-        request.resource.data.senderUid is string &&
-        request.resource.data.receiverUid is string &&
-        request.resource.data.content is string &&
-        request.resource.data.content.size() <= 4000 &&
+      allow create: if isValidDocId(messageId) &&
+        isAuthenticated() &&
+        isNonEmptyStrMax(request.resource.data.senderUid, 32) &&
+        isNonEmptyStrMax(request.resource.data.receiverUid, 32) &&
+        isStrMax(request.resource.data.content, 4000) &&
         (
           isOwner() ||
           request.resource.data.senderAuthUid == request.auth.uid ||
-          request.resource.data.senderUid == request.auth.uid
+          request.resource.data.senderUid == request.auth.uid ||
+          (
+            request.resource.data.senderUid == '10000' &&
+            request.resource.data.receiverAuthUid == request.auth.uid
+          )
         );
 
-      allow update: if isAuthenticated() && (
+      allow update: if isValidDocId(messageId) && isAuthenticated() && (
         isOwner() ||
-        resource.data.receiverAuthUid == request.auth.uid ||
-        resource.data.senderAuthUid == request.auth.uid
+        (
+          (
+            resource.data.receiverAuthUid == request.auth.uid ||
+            resource.data.senderAuthUid == request.auth.uid
+          ) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'readAt'])
+        )
       );
 
-      allow delete: if isOwner() || (
-        isAuthenticated() &&
-        resource.data.senderAuthUid == request.auth.uid
+      allow delete: if isValidDocId(messageId) && (
+        isOwner() ||
+        (isAuthenticated() && resource.data.senderAuthUid == request.auth.uid)
       );
     }
 
-    // Message Requests (pending / accepted / rejected / suspended)
+    // 3. Message Requests (pending / accepted / rejected / suspended)
     match /message_requests/{requestId} {
       allow read: if isAuthenticated() && (
         isOwner() ||
@@ -106,163 +262,476 @@ service cloud.firestore {
         resource.data.receiverAuthUid == request.auth.uid
       );
 
-      allow create: if isAuthenticated() &&
-        request.resource.data.senderUid is string &&
-        request.resource.data.receiverUid is string &&
-        request.resource.data.introMessage is string &&
-        request.resource.data.introMessage.size() <= 1000 &&
+      allow create: if isValidDocId(requestId) &&
+        isAuthenticated() &&
+        isNonEmptyStrMax(request.resource.data.senderUid, 32) &&
+        isNonEmptyStrMax(request.resource.data.receiverUid, 32) &&
+        isStrMax(request.resource.data.introMessage, 1000) &&
         request.resource.data.status in ['pending', 'accepted', 'rejected', 'suspended'] &&
         (
           isOwner() ||
           request.resource.data.senderAuthUid == request.auth.uid
         );
 
-      allow update: if isAuthenticated() &&
+      allow update: if isValidDocId(requestId) &&
+        isAuthenticated() &&
         request.resource.data.status in ['pending', 'accepted', 'rejected', 'suspended'] &&
         (
           isOwner() ||
-          resource.data.senderAuthUid == request.auth.uid ||
-          resource.data.receiverAuthUid == request.auth.uid
+          (
+            (
+              resource.data.senderAuthUid == request.auth.uid ||
+              resource.data.receiverAuthUid == request.auth.uid
+            ) &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt', 'introMessage'])
+          )
         );
 
-      allow delete: if isOwner();
+      allow delete: if isValidDocId(requestId) && isOwner();
     }
 
-    // Voice Rooms & Official Room
+    // 4. Voice Rooms & Official Room
     match /rooms/{roomId} {
       allow read: if true;
-      allow create, update: if isAuthenticated();
-      allow delete: if isOwner() || (
+
+      allow create: if isValidDocId(roomId) &&
         isAuthenticated() &&
-        resource.data.isOfficial == false
+        isValidRoom(request.resource.data) &&
+        request.resource.data.get('id', '') == roomId &&
+        (
+          isAdminOrSupervisor() ||
+          request.resource.data.get('isOfficial', false) == false ||
+          (
+            roomId == 'room-official-livo' &&
+            request.resource.data.get('ownerUid', '') == '10000' &&
+            request.resource.data.get('isOfficial', false) == true
+          )
+        );
+
+      allow update: if isValidDocId(roomId) &&
+        isAuthenticated() &&
+        isValidRoom(request.resource.data) &&
+        request.resource.data.get('id', '') == roomId &&
+        (
+          isAdminOrSupervisor() ||
+          (
+            roomId == 'room-official-livo' &&
+            request.resource.data.get('ownerUid', '') == '10000' &&
+            request.resource.data.get('isOfficial', false) == true &&
+            resource.data.get('ownerUid', '10000') in ['', '10000']
+          ) ||
+          (
+            (
+              resource.data.get('ownerUid', '') == '' ||
+              request.resource.data.get('ownerUid', '') == resource.data.get('ownerUid', '')
+            ) &&
+            request.resource.data.get('isOfficial', false) == resource.data.get('isOfficial', false)
+          )
+        );
+
+      allow delete: if isValidDocId(roomId) && (
+        isOwner() ||
+        (
+          isAuthenticated() &&
+          resource.data.get('isOfficial', false) == false &&
+          (
+            isAdminOrSupervisor() ||
+            resource.data.get('ownerAuthUid', '') == request.auth.uid ||
+            (
+              resource.data.get('ownerUid', '') is string &&
+              resource.data.ownerUid.size() > 0 &&
+              exists(/databases/$(database)/documents/users/$(resource.data.ownerUid)) &&
+              get(/databases/$(database)/documents/users/$(resource.data.ownerUid)).data.get('authUid', '') == request.auth.uid
+            )
+          )
+        )
       );
     }
 
-    // Recharge Requests Collection
+    // 5. Recharge Requests Collection
     match /recharge_requests/{requestId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated() &&
+
+      allow create: if isValidDocId(requestId) &&
+        isAuthenticated() &&
         request.resource.data.status == 'pending' &&
-        request.resource.data.receiptUrl is string;
-      allow update: if isAdminOrSupervisor();
+        isValidRechargeReq(request.resource.data);
+
+      allow update: if isValidDocId(requestId) &&
+        isAdminOrSupervisor() &&
+        isValidRechargeReq(request.resource.data);
+
       allow delete: if false;
     }
 
-    // Financial Audit Logs
+    // 6. Financial Audit Logs (append-only immutable ledger)
     match /coin_audits/{auditId} {
-      allow read: if isAdminOrSupervisor() || isAuthenticated();
-      allow create: if isAuthenticated();
+      allow read: if isAuthenticated();
+
+      allow create: if isValidDocId(auditId) &&
+        isAuthenticated() &&
+        isNonEmptyStrMax(request.resource.data.uid, 32) &&
+        request.resource.data.coinsChange is number &&
+        isStrMax(request.resource.data.reason, 500);
+
       allow update, delete: if false;
     }
 
-    // Ban Records
+    // 7. Ban Records
     match /bans/{banId} {
       allow read: if isAuthenticated();
-      allow create, update: if isAdminOrSupervisor() || isOwner();
+
+      allow create, update: if isValidDocId(banId) &&
+        isAdminOrSupervisor() &&
+        (
+          isNonEmptyStrMax(request.resource.data.get('uid', ''), 32) ||
+          isNonEmptyStrMax(request.resource.data.get('targetUid', ''), 32)
+        ) &&
+        request.resource.data.get('status', 'active') in ['active', 'unbanned'] &&
+        isStrMax(request.resource.data.get('reason', ''), 500);
+
       allow delete: if false;
     }
 
-    // Agency Applications
+    // 8. Agency Applications
     match /agencies/{agencyId} {
-      allow read, create: if isAuthenticated();
-      allow update: if isAdminOrSupervisor() || isAuthenticated();
-      allow delete: if isOwner();
+      allow read: if isAuthenticated();
+
+      allow create: if isValidDocId(agencyId) &&
+        isAuthenticated() &&
+        isValidAgency(request.resource.data) &&
+        request.resource.data.status == 'pending' &&
+        request.resource.data.canChargeUsers == false;
+
+      allow update: if isValidDocId(agencyId) &&
+        isValidAgency(request.resource.data) &&
+        (
+          isAdminOrSupervisor() ||
+          (
+            isAuthenticated() &&
+            resource.data.status == 'approved' &&
+            request.resource.data.status == 'approved' &&
+            request.resource.data.canChargeUsers == resource.data.canChargeUsers &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'totalSalesEGP',
+              'commissionEarnedEGP',
+              'membersCount'
+            ])
+          )
+        );
+
+      allow delete: if isValidDocId(agencyId) && isOwner();
     }
 
-    // Blue Verification Requests
+    // 9. Blue Verification Requests
     match /verifications/{verId} {
-      allow read, create: if isAuthenticated();
-      allow update: if isAdminOrSupervisor() || isOwner();
-      allow delete: if isOwner();
+      allow read: if isAuthenticated();
+
+      allow create: if isValidDocId(verId) &&
+        isAuthenticated() &&
+        isValidVerification(request.resource.data) &&
+        request.resource.data.status == 'pending';
+
+      allow update: if isValidDocId(verId) &&
+        isAdminOrSupervisor() &&
+        isValidVerification(request.resource.data);
+
+      allow delete: if isValidDocId(verId) && isOwner();
     }
 
-    // Withdrawal Requests
+    // 10. Withdrawal Requests
     match /withdrawals/{wthId} {
-      allow read, create: if isAuthenticated();
-      allow update: if isAdminOrSupervisor() || isOwner();
+      allow read: if isAuthenticated();
+
+      allow create: if isValidDocId(wthId) &&
+        isAuthenticated() &&
+        isValidWithdrawal(request.resource.data) &&
+        request.resource.data.status == 'pending';
+
+      allow update: if isValidDocId(wthId) &&
+        isAdminOrSupervisor() &&
+        isValidWithdrawal(request.resource.data);
+
       allow delete: if false;
     }
 
-    // Advertisements Collection
+    // 11. Advertisements Collection
     match /advertisements/{adId} {
       allow read: if true;
-      allow create, delete: if isAdminOrSupervisor();
-      allow update: if isAuthenticated();
+
+      allow create: if isValidDocId(adId) &&
+        isAdminOrSupervisor() &&
+        isNonEmptyStrMax(request.resource.data.title, 160);
+
+      allow update: if isValidDocId(adId) && (
+        isAdminOrSupervisor() ||
+        (
+          isAuthenticated() &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['viewsCount', 'clicksCount']) &&
+          request.resource.data.get('viewsCount', 0) is number &&
+          request.resource.data.get('clicksCount', 0) is number
+        )
+      );
+
+      allow delete: if isValidDocId(adId) && isAdminOrSupervisor();
     }
 
-    // Central Support Tickets
+    // 12. Central Support Tickets
     match /support_tickets/{ticketId} {
-      allow read, create: if isAuthenticated();
-      allow update: if isAdminOrSupervisor() || isOwner();
-      allow delete: if isOwner();
+      allow read: if isAuthenticated();
+
+      allow create: if isValidDocId(ticketId) &&
+        isAuthenticated() &&
+        isValidTicket(request.resource.data) &&
+        request.resource.data.status == 'pending';
+
+      allow update: if isValidDocId(ticketId) &&
+        isAdminOrSupervisor() &&
+        isValidTicket(request.resource.data);
+
+      allow delete: if isValidDocId(ticketId) && isOwner();
     }
 
-    // Payment Methods Collection
+    // 13. Payment Methods, Gifts, Store Items, Coin Packages, Level Configs (Admin-managed Catalogs)
     match /payment_methods/{methodId} {
       allow read: if true;
-      allow create, update, delete: if isAdminOrSupervisor();
+      allow create, update, delete: if isValidDocId(methodId) && isAdminOrSupervisor();
     }
 
-    // Animated Gifts Collection
     match /gifts/{giftId} {
       allow read: if true;
-      allow create, update, delete: if isAdminOrSupervisor();
+      allow create, update, delete: if isValidDocId(giftId) && isAdminOrSupervisor();
     }
 
-    // Store Items Collection
     match /store_items/{itemId} {
       allow read: if true;
-      allow create, update, delete: if isAdminOrSupervisor();
+      allow create, update, delete: if isValidDocId(itemId) && isAdminOrSupervisor();
     }
 
-    // Recharge Voucher Codes
-    match /recharge_codes/{codeId} {
-      allow read: if isAuthenticated();
-      allow create, delete: if isAdminOrSupervisor();
-      allow update: if isAuthenticated();
-    }
-
-    // Coin Packages
     match /coin_packages/{pkgId} {
       allow read: if true;
-      allow create, update, delete: if isAdminOrSupervisor();
+      allow create, update, delete: if isValidDocId(pkgId) && isAdminOrSupervisor();
     }
 
-    // Supervisors Management
-    match /supervisors/{supId} {
-      allow read: if isAuthenticated();
-      allow create, update, delete: if isOwner();
-    }
-
-    // Genuine User Videos
-    match /videos/{videoId} {
-      allow read: if true;
-      allow create, update: if isAuthenticated();
-      allow delete: if isAuthenticated();
-    }
-
-    // Level Configs & Promotions
     match /level_configs/{levelId} {
       allow read: if true;
-      allow create, update, delete: if isAdminOrSupervisor();
+      allow create, update, delete: if isValidDocId(levelId) && isAdminOrSupervisor();
     }
 
+    // 14. Recharge Voucher Codes
+    match /recharge_codes/{codeId} {
+      allow read: if isAuthenticated();
+      allow create, delete: if isValidDocId(codeId) && isAdminOrSupervisor();
+
+      allow update: if isValidDocId(codeId) && (
+        isAdminOrSupervisor() ||
+        (
+          isAuthenticated() &&
+          resource.data.status == 'active' &&
+          request.resource.data.code == resource.data.code &&
+          request.resource.data.coins == resource.data.coins &&
+          request.resource.data.maxUses == resource.data.maxUses &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'usedCount',
+            'usedByUids',
+            'status',
+            'usedAt'
+          ])
+        )
+      );
+    }
+
+    // 15. Supervisors Management (Owner-only writes)
+    match /supervisors/{supId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isValidDocId(supId) && isOwner();
+    }
+
+    // 16. Genuine User Videos
+    match /videos/{videoId} {
+      allow read: if true;
+
+      allow create: if isValidDocId(videoId) &&
+        isAuthenticated() &&
+        isValidVideo(request.resource.data) &&
+        (
+          isAdminOrSupervisor() ||
+          request.resource.data.get('authorAuthUid', '') == request.auth.uid ||
+          (
+            exists(/databases/$(database)/documents/users/$(request.resource.data.authorUid)) &&
+            get(/databases/$(database)/documents/users/$(request.resource.data.authorUid)).data.get('authUid', '') == request.auth.uid
+          )
+        );
+
+      allow update: if isValidDocId(videoId) &&
+        isAuthenticated() &&
+        isValidVideo(request.resource.data) &&
+        (
+          isAdminOrSupervisor() ||
+          (
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likesCount', 'commentsCount']) &&
+            request.resource.data.get('likesCount', 0) is number &&
+            request.resource.data.get('commentsCount', 0) is number
+          )
+        );
+
+      allow delete: if isValidDocId(videoId) && (
+        isAdminOrSupervisor() ||
+        (
+          isAuthenticated() &&
+          (
+            resource.data.get('authorAuthUid', '') == request.auth.uid ||
+            (
+              resource.data.get('authorUid', '') is string &&
+              resource.data.authorUid.size() > 0 &&
+              exists(/databases/$(database)/documents/users/$(resource.data.authorUid)) &&
+              get(/databases/$(database)/documents/users/$(resource.data.authorUid)).data.get('authUid', '') == request.auth.uid
+            )
+          )
+        )
+      );
+    }
+
+    // 17. Level Promotions Audit
     match /level_promotions/{promoId} {
-      allow read, create: if isAuthenticated();
-      allow update, delete: if isOwner();
+      allow read: if isAuthenticated();
+
+      allow create: if isValidDocId(promoId) &&
+        isAuthenticated() &&
+        isNonEmptyStrMax(request.resource.data.uid, 32) &&
+        request.resource.data.newLevel is number &&
+        request.resource.data.newLevel >= 0 &&
+        request.resource.data.newLevel <= 50;
+
+      allow update, delete: if isValidDocId(promoId) && isOwner();
     }
 
-    // Distributors & Agent Transfers
+    // 18. Distributors & Agent Transfers
     match /distributors/{distId} {
-      allow read, create, update, delete: if isAuthenticated();
+      allow read: if isAuthenticated();
+
+      allow create, update: if isValidDocId(distId) &&
+        isAuthenticated() &&
+        isNonEmptyStrMax(request.resource.data.agentUid, 32) &&
+        isNonEmptyStrMax(request.resource.data.distributorName, 120) &&
+        (
+          isAdminOrSupervisor() ||
+          (
+            exists(/databases/$(database)/documents/users/$(request.resource.data.agentUid)) &&
+            get(/databases/$(database)/documents/users/$(request.resource.data.agentUid)).data.get('authUid', '') == request.auth.uid
+          )
+        );
+
+      allow delete: if isValidDocId(distId) && (
+        isAdminOrSupervisor() ||
+        (
+          isAuthenticated() &&
+          resource.data.get('agentUid', '') is string &&
+          resource.data.agentUid.size() > 0 &&
+          exists(/databases/$(database)/documents/users/$(resource.data.agentUid)) &&
+          get(/databases/$(database)/documents/users/$(resource.data.agentUid)).data.get('authUid', '') == request.auth.uid
+        )
+      );
     }
 
     match /agent_transfers/{transferId} {
-      allow read, create: if isAuthenticated();
+      allow read: if isAuthenticated();
+
+      allow create: if isValidDocId(transferId) &&
+        isAuthenticated() &&
+        isNonEmptyStrMax(request.resource.data.agentUid, 32) &&
+        isNonEmptyStrMax(request.resource.data.targetUid, 32) &&
+        request.resource.data.coinsAmount is number &&
+        request.resource.data.coinsAmount > 0 &&
+        (
+          isAdminOrSupervisor() ||
+          (
+            exists(/databases/$(database)/documents/users/$(request.resource.data.agentUid)) &&
+            get(/databases/$(database)/documents/users/$(request.resource.data.agentUid)).data.get('authUid', '') == request.auth.uid
+          )
+        );
+
       allow update, delete: if false;
     }
 
-    // Connection health check doc
+    // 19. Staff Auth Role Registry (Owner-managed for supervisors & verified staff)
+    match /staff_auth/{staffAuthUid} {
+      allow read: if isAuthenticated() && (
+        request.auth.uid == staffAuthUid ||
+        (request.auth.token.email is string && request.auth.token.email.lower() == staffAuthUid) ||
+        isOwner()
+      );
+      allow create, update, delete: if isValidDocId(staffAuthUid) && isOwner();
+    }
+
+    // 20. Gift Support Logs (Room Cup & Daily/Weekly/Monthly Supporters Leaderboard)
+    match /gift_logs/{logId} {
+      allow read: if true;
+
+      allow create: if isValidDocId(logId) &&
+        isAuthenticated() &&
+        isNonEmptyStrMax(request.resource.data.roomId, 64) &&
+        isNonEmptyStrMax(request.resource.data.senderUid, 32) &&
+        isNonEmptyStrMax(request.resource.data.recipientUid, 32) &&
+        request.resource.data.coinsTotal is number &&
+        request.resource.data.coinsTotal > 0;
+
+      allow update, delete: if isValidDocId(logId) && isAdminOrSupervisor();
+    }
+
+    // 21. Admin 3-Second Fullscreen Splash Greeting / Gift Banners
+    match /splash_banners/{bannerId} {
+      allow read: if true;
+
+      allow create, update: if isValidDocId(bannerId) &&
+        isAdminOrSupervisor() &&
+        isNonEmptyStrMax(request.resource.data.title, 160) &&
+        isNonEmptyStrMax(request.resource.data.imageUrl, 600000);
+
+      allow delete: if isValidDocId(bannerId) && isAdminOrSupervisor();
+    }
+
+    // 22. Real-Time In-App Notifications
+    match /notifications/{notifId} {
+      allow read: if isAuthenticated();
+
+      allow create: if isValidDocId(notifId) &&
+        isAuthenticated() &&
+        isNonEmptyStrMax(request.resource.data.uid, 32) &&
+        isNonEmptyStrMax(request.resource.data.title, 160) &&
+        isStrMax(request.resource.data.body, 500) &&
+        (
+          isAdminOrSupervisor() ||
+          request.resource.data.get('type', 'system') != 'recharge_approved'
+        );
+
+      allow update: if isValidDocId(notifId) && (
+        isAdminOrSupervisor() ||
+        (
+          isAuthenticated() &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead'])
+        )
+      );
+
+      allow delete: if isValidDocId(notifId) && isAdminOrSupervisor();
+    }
+
+    // 23. WebRTC Live Voice Room Signaling
+    match /room_rtc_signals/{signalId} {
+      allow read: if isAuthenticated();
+
+      allow create: if isValidDocId(signalId) &&
+        isAuthenticated() &&
+        isNonEmptyStrMax(request.resource.data.roomId, 64) &&
+        isNonEmptyStrMax(request.resource.data.fromUid, 32) &&
+        isNonEmptyStrMax(request.resource.data.toUid, 32) &&
+        request.resource.data.type in ['offer', 'answer', 'candidate', 'presence'];
+
+      allow update: if false;
+      allow delete: if isValidDocId(signalId) && isAuthenticated();
+    }
+
+    // 24. Connection health check doc
     match /test/{docId} {
       allow read: if true;
     }

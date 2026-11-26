@@ -71,7 +71,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     المالك
                   </span>
                 )}
-                {user.role === 'agent' && (
+                {(user.role === 'charging_agent' || user.role === 'distributor_agent' || user.role === 'agent') && (
                   <span className="text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/40 px-1.5 py-0.5 rounded font-bold">
                     {user.agencyName || 'وكيل معتمد'}
                   </span>
@@ -125,7 +125,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           <div className="w-px h-6 bg-purple-900/60" />
           <div>
             <span className="font-digits font-extrabold text-sm text-amber-400 block">
-              Level 18
+              Lv.{user.level || 0}
             </span>
             <span className="text-[10px] text-purple-400">المستوى</span>
           </div>

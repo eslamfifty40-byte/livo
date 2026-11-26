@@ -38,15 +38,15 @@ export const AvatarWithFrame: React.FC<AvatarWithFrameProps> = ({
   const innerSize = hasFrame ? Math.round(sizePx * 0.64) : sizePx;
   const glowStyle =
     frameGlowColor && frameGlowColor !== 'none'
-      ? `drop-shadow(0 0 ${Math.max(4, Math.round(sizePx * 0.11))}px ${frameGlowColor})`
+      ? `drop-shadow(0 0 ${Math.max(5, Math.round(sizePx * 0.11))}px ${frameGlowColor}) drop-shadow(0 0 ${Math.max(10, Math.round(sizePx * 0.18))}px ${frameGlowColor})`
       : undefined;
 
   const iconGlowStyle =
     customIconGlow && customIconGlow !== 'none'
-      ? `drop-shadow(0 0 6px ${customIconGlow})`
-      : 'drop-shadow(0 2px 4px rgba(0,0,0,0.45))';
+      ? `drop-shadow(0 0 5px ${customIconGlow}) drop-shadow(0 0 11px ${customIconGlow})`
+      : 'drop-shadow(0 2px 5px rgba(0,0,0,0.5))';
 
-  const iconBadgeSize = Math.max(18, Math.round(sizePx * 0.34));
+  const iconBadgeSize = Math.max(20, Math.round(sizePx * 0.36));
 
   return (
     <div

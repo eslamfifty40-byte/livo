@@ -112,17 +112,195 @@ export const VERIFICATION_PLANS = [
   { months: 12, priceEGP: 1100, saveTag: 'أفضل قيمة' },
 ];
 
-// Interactive live stream animated gifts
-export const INITIAL_GIFTS: GiftItem[] = [
-  { id: 'gift-lion', name: 'الأسد الذهبي', coins: 5000, icon: '🦁', animationType: 'lion', durationMs: 4000 },
-  { id: 'gift-car', name: 'سيارة سوبر سبورت', coins: 2000, icon: '🏎️', animationType: 'car', durationMs: 3500 },
-  { id: 'gift-dragon', name: 'التنين الأسطوري', coins: 1000, icon: '🐉', animationType: 'dragon', durationMs: 3500 },
-  { id: 'gift-castle', name: 'القصر الملكي', coins: 800, icon: '🏰', animationType: 'castle', durationMs: 3000 },
-  { id: 'gift-rocket', name: 'الصاروخ الفضائي', coins: 500, icon: '🚀', animationType: 'rocket', durationMs: 2500 },
-  { id: 'gift-diamond', name: 'ألماسة فاخرة', coins: 200, icon: '💎', animationType: 'diamond', durationMs: 2000 },
-  { id: 'gift-rose', name: 'وردة حمراء', coins: 20, icon: '🌹', animationType: 'rose', durationMs: 1500 },
-  { id: 'gift-heart', name: 'قلب نيون', coins: 10, icon: '💖', animationType: 'heart', durationMs: 1200 },
+// Interactive live stream animated gifts (8 core + 200 expanded catalog gifts = 208 gifts)
+const CORE_INITIAL_GIFTS: GiftItem[] = [
+  { id: 'gift-lion', name: 'الأسد الذهبي', coins: 5000, icon: '🦁', animationType: 'lion', durationMs: 4000, category: 'حيوانات' },
+  { id: 'gift-car', name: 'سيارة سوبر سبورت', coins: 2000, icon: '🏎️', animationType: 'car', durationMs: 3500, category: 'سيارات وطائرات' },
+  { id: 'gift-dragon', name: 'التنين الأسطوري', coins: 1000, icon: '🐉', animationType: 'dragon', durationMs: 3500, category: 'حيوانات' },
+  { id: 'gift-castle', name: 'القصر الملكي', coins: 800, icon: '🏰', animationType: 'castle', durationMs: 3000, category: 'ملكي' },
+  { id: 'gift-rocket', name: 'الصاروخ الفضائي', coins: 500, icon: '🚀', animationType: 'rocket', durationMs: 2500, category: 'سيارات وطائرات' },
+  { id: 'gift-diamond', name: 'ألماسة فاخرة', coins: 200, icon: '💎', animationType: 'diamond', durationMs: 2000, category: 'ألماس' },
+  { id: 'gift-rose', name: 'وردة حمراء', coins: 20, icon: '🌹', animationType: 'rose', durationMs: 1500, category: 'حب' },
+  { id: 'gift-heart', name: 'قلب نيون', coins: 10, icon: '💖', animationType: 'heart', durationMs: 1200, category: 'حب' },
 ];
+
+const EXPANDED_GIFT_TEMPLATES: Array<{
+  name: string;
+  coins: number;
+  icon: string;
+  animationType: GiftItem['animationType'];
+  category: string;
+  isCard?: boolean;
+}> = [
+  // كروت إهداء قابلة للكتابة (Gift Cards)
+  { name: 'كارت محبة ذهبي', coins: 50, icon: '💌', animationType: 'card', category: 'كروت إهداء', isCard: true },
+  { name: 'كارت تهنئة ملكي', coins: 150, icon: '🪪', animationType: 'card', category: 'كروت إهداء', isCard: true },
+  { name: 'كارت دعوة VIP', coins: 300, icon: '🎟️', animationType: 'card', category: 'كروت إهداء', isCard: true },
+  { name: 'كارت إهداء الماس', coins: 500, icon: '💳', animationType: 'card', category: 'كروت إهداء', isCard: true },
+  { name: 'كارت شكر فاخر', coins: 80, icon: '📜', animationType: 'card', category: 'كروت إهداء', isCard: true },
+  { name: 'كارت حب ورومانسية', coins: 120, icon: '💝', animationType: 'card', category: 'كروت إهداء', isCard: true },
+  { name: 'كارت صداقة أبدية', coins: 60, icon: '🧧', animationType: 'card', category: 'كروت إهداء', isCard: true },
+  { name: 'كارت نجم الغرفة', coins: 400, icon: '🎫', animationType: 'card', category: 'كروت إهداء', isCard: true },
+  { name: 'كارت الأسطورة', coins: 1200, icon: '🏅', animationType: 'card', category: 'كروت إهداء', isCard: true },
+  { name: 'كارت عيد ميلاد سعيد', coins: 100, icon: '🎂', animationType: 'card', category: 'كروت إهداء', isCard: true },
+  // حيوانات (Animals)
+  { name: 'الأسد الملك المتجول', coins: 6500, icon: '🦁', animationType: 'lion', category: 'حيوانات' },
+  { name: 'نمر ملكي ذهبي', coins: 3200, icon: '🐯', animationType: 'lion', category: 'حيوانات' },
+  { name: 'صقر الصحراء الحر', coins: 1800, icon: '🦅', animationType: 'wings', category: 'حيوانات' },
+  { name: 'حصان عربي أصيل', coins: 2400, icon: '🐎', animationType: 'lion', category: 'حيوانات' },
+  { name: 'طاووس الألوان الملكي', coins: 900, icon: '🦚', animationType: 'wings', category: 'حيوانات' },
+  { name: 'فهد السرعة', coins: 2100, icon: '🐆', animationType: 'lion', category: 'حيوانات' },
+  { name: 'فراشة الكريستال', coins: 45, icon: '🦋', animationType: 'wings', category: 'حيوانات' },
+  { name: 'دولفين المحيط', coins: 280, icon: '🐬', animationType: 'ship', category: 'حيوانات' },
+  { name: 'باندا لطيف', coins: 95, icon: '🐼', animationType: 'heart', category: 'حيوانات' },
+  { name: 'وحيد القرن الفضي', coins: 1400, icon: '🦄', animationType: 'wings', category: 'حيوانات' },
+  { name: 'ذئب الليل', coins: 1600, icon: '🐺', animationType: 'lion', category: 'حيوانات' },
+  { name: 'تنين النار الأحمر', coins: 4200, icon: '🐲', animationType: 'dragon', category: 'حيوانات' },
+  { name: 'بجعة بيضاء', coins: 220, icon: '🦢', animationType: 'wings', category: 'حيوانات' },
+  { name: 'طائر الفينيق', coins: 5500, icon: '🐦‍🔥', animationType: 'dragon', category: 'حيوانات' },
+  { name: 'غزال ملكي', coins: 650, icon: '🦌', animationType: 'lion', category: 'حيوانات' },
+  { name: 'أرنوب لطيف', coins: 15, icon: '🐰', animationType: 'heart', category: 'حيوانات' },
+  { name: 'قطة مدللة', coins: 25, icon: '🐱', animationType: 'heart', category: 'حيوانات' },
+  { name: 'دب محبة', coins: 35, icon: '🧸', animationType: 'heart', category: 'حيوانات' },
+  { name: 'حوت أزرق عملاق', coins: 3800, icon: '🐋', animationType: 'ship', category: 'حيوانات' },
+  { name: 'تمساح النيل', coins: 750, icon: '🐊', animationType: 'dragon', category: 'حيوانات' },
+  // سيارات وطائرات ويخوت (Cars, Jets, Ships)
+  { name: 'لامبورغيني ذهبية', coins: 4500, icon: '🏎️', animationType: 'car', category: 'سيارات وطائرات' },
+  { name: 'رولز رويس فانتوم', coins: 6000, icon: '🚘', animationType: 'car', category: 'سيارات وطائرات' },
+  { name: 'طائرة خاصة VIP', coins: 8500, icon: '🛩️', animationType: 'rocket', category: 'سيارات وطائرات' },
+  { name: 'طائرة كونكورد', coins: 12000, icon: '✈️', animationType: 'rocket', category: 'سيارات وطائرات' },
+  { name: 'يخت ملكي فاخر', coins: 7500, icon: '🛥️', animationType: 'ship', category: 'سيارات وطائرات' },
+  { name: 'سفينة القراصنة', coins: 3500, icon: '⛵', animationType: 'ship', category: 'سيارات وطائرات' },
+  { name: 'دراجة نارية رياضية', coins: 1100, icon: '🏍️', animationType: 'car', category: 'سيارات وطائرات' },
+  { name: 'هليكوبتر رئاسية', coins: 5200, icon: '🚁', animationType: 'rocket', category: 'سيارات وطائرات' },
+  { name: 'مكوك فضائي ذهبي', coins: 9900, icon: '🛸', animationType: 'rocket', category: 'سيارات وطائرات' },
+  { name: 'سيارة فيراري حمراء', coins: 4000, icon: '🚗', animationType: 'car', category: 'سيارات وطائرات' },
+  { name: 'جيب صحراوي فاخر', coins: 2200, icon: '🚙', animationType: 'car', category: 'سيارات وطائرات' },
+  { name: 'قطار سريع ملكي', coins: 2900, icon: '🚄', animationType: 'car', category: 'سيارات وطائرات' },
+  { name: 'كبسولة الفضاء', coins: 4800, icon: '🛰️', animationType: 'rocket', category: 'سيارات وطائرات' },
+  { name: 'سفينة كروز العملاقة', coins: 15000, icon: '🛳️', animationType: 'ship', category: 'سيارات وطائرات' },
+  { name: 'جيت سكي بحري', coins: 650, icon: '🚤', animationType: 'ship', category: 'سيارات وطائرات' },
+  // ملكي وتيجان وقصور (Royal)
+  { name: 'التاج الإمبراطوري', coins: 3000, icon: '👑', animationType: 'crown', category: 'ملكي' },
+  { name: 'عرش الملوك', coins: 10000, icon: '🪑', animationType: 'castle', category: 'ملكي' },
+  { name: 'قصر الأحلام المضيء', coins: 18000, icon: '🏯', animationType: 'castle', category: 'ملكي' },
+  { name: 'جزيرة الماس الخاصة', coins: 25000, icon: '🏝️', animationType: 'castle', category: 'ملكي' },
+  { name: 'عصا السحر الملكية', coins: 550, icon: '🪄', animationType: 'fireworks', category: 'ملكي' },
+  { name: 'كأس البطولة الذهبي', coins: 1500, icon: '🏆', animationType: 'crown', category: 'ملكي' },
+  { name: 'درع الحماية الملكي', coins: 850, icon: '🛡️', animationType: 'crown', category: 'ملكي' },
+  { name: 'سيف الفارس الذهبي', coins: 1250, icon: '⚔️', animationType: 'crown', category: 'ملكي' },
+  { name: 'ميدالية الأبطال', coins: 420, icon: '🥇', animationType: 'crown', category: 'ملكي' },
+  { name: 'أجنحة الملاك الذهبية', coins: 2600, icon: '🪽', animationType: 'wings', category: 'ملكي' },
+  { name: 'برج النجوم', coins: 7200, icon: '🗼', animationType: 'castle', category: 'ملكي' },
+  { name: 'عربة السندريلا', coins: 4300, icon: '🎠', animationType: 'castle', category: 'ملكي' },
+  { name: 'صندوق الكنز', coins: 1900, icon: '🧰', animationType: 'diamond', category: 'ملكي' },
+  { name: 'مفتاح القصر', coins: 380, icon: '🗝️', animationType: 'crown', category: 'ملكي' },
+  { name: 'ساعة رولكس ذهبية', coins: 2700, icon: '⌚', animationType: 'crown', category: 'ملكي' },
+  // حب ورومانسية (Romance)
+  { name: 'باقة ورد ملكية', coins: 90, icon: '💐', animationType: 'rose', category: 'حب' },
+  { name: 'خاتم الماس والزواج', coins: 1500, icon: '💍', animationType: 'diamond', category: 'حب' },
+  { name: 'قلبان متعانقان', coins: 180, icon: '💞', animationType: 'heart', category: 'حب' },
+  { name: 'سهم كيوبيد', coins: 260, icon: '💘', animationType: 'heart', category: 'حب' },
+  { name: 'وردة التوليب الوردية', coins: 25, icon: '🌷', animationType: 'rose', category: 'حب' },
+  { name: 'زهرة الكرز اليابانية', coins: 35, icon: '🌸', animationType: 'rose', category: 'حب' },
+  { name: 'أحمر الشفاه الفاخر', coins: 75, icon: '💄', animationType: 'heart', category: 'حب' },
+  { name: 'قبلة حب ساخنة', coins: 55, icon: '💋', animationType: 'heart', category: 'حب' },
+  { name: 'عطر باريس الفاخر', coins: 340, icon: '🧴', animationType: 'diamond', category: 'حب' },
+  { name: 'فستان سهرة ملكي', coins: 890, icon: '👗', animationType: 'wings', category: 'حب' },
+  { name: 'قلادة اللؤلؤ', coins: 460, icon: '📿', animationType: 'diamond', category: 'حب' },
+  { name: 'قلب مشتعل', coins: 310, icon: '❤️‍🔥', animationType: 'heart', category: 'حب' },
+  { name: 'شمس المحبة', coins: 110, icon: '🌻', animationType: 'rose', category: 'حب' },
+  { name: 'إكليل الزهور', coins: 190, icon: '🌺', animationType: 'rose', category: 'حب' },
+  { name: 'صندوق الشوكولاتة', coins: 65, icon: '🍫', animationType: 'heart', category: 'حب' },
+  // ألماس وجواهر (Gems)
+  { name: 'جوهرة السفير الزرقاء', coins: 1300, icon: '💠', animationType: 'diamond', category: 'ألماس' },
+  { name: 'كريستالة السماء', coins: 620, icon: '🔮', animationType: 'diamond', category: 'ألماس' },
+  { name: 'سبائك الذهب الخالص', coins: 3400, icon: '🪙', animationType: 'diamond', category: 'ألماس' },
+  { name: 'حقيبة الأموال', coins: 2500, icon: '💰', animationType: 'fireworks', category: 'ألماس' },
+  { name: 'ورقة الدولار الذهبية', coins: 490, icon: '💵', animationType: 'fireworks', category: 'ألماس' },
+  { name: 'نجمة المجرة', coins: 700, icon: '🌟', animationType: 'fireworks', category: 'ألماس' },
+  { name: 'شهاب السماء', coins: 1150, icon: '☄️', animationType: 'rocket', category: 'ألماس' },
+  { name: 'هلال الذهب', coins: 350, icon: '🌙', animationType: 'crown', category: 'ألماس' },
+  { name: 'قوس قزح السحري', coins: 410, icon: '🌈', animationType: 'wings', category: 'ألماس' },
+  { name: 'ندفة ثلج كريستالية', coins: 85, icon: '❄️', animationType: 'diamond', category: 'ألماس' },
+  // حفلات وموسيقى ومشروبات (Party & Music)
+  { name: 'ألعاب نارية عملاقة', coins: 2200, icon: '🎆', animationType: 'fireworks', category: 'حفلات' },
+  { name: 'بريق الاحتفال', coins: 130, icon: '🎇', animationType: 'fireworks', category: 'حفلات' },
+  { name: 'انفجار السعادة', coins: 90, icon: '🎉', animationType: 'fireworks', category: 'حفلات' },
+  { name: 'كرة الديسكو المضيئة', coins: 450, icon: '🪩', animationType: 'fireworks', category: 'حفلات' },
+  { name: 'مايكروفون النجوم الذهبي', coins: 580, icon: '🎤', animationType: 'crown', category: 'حفلات' },
+  { name: 'جيتار الروك', coins: 390, icon: '🎸', animationType: 'fireworks', category: 'حفلات' },
+  { name: 'بيانو الحفلات الملكي', coins: 1450, icon: '🎹', animationType: 'castle', category: 'حفلات' },
+  { name: 'سماعات الدي جي', coins: 240, icon: '🎧', animationType: 'fireworks', category: 'حفلات' },
+  { name: 'كوب عصير ملكي', coins: 15, icon: '🍹', animationType: 'heart', category: 'حفلات' },
+  { name: 'قهوة الصباح', coins: 5, icon: '☕', animationType: 'heart', category: 'حفلات' },
+  { name: 'آيس كريم الصيف', coins: 12, icon: '🍦', animationType: 'heart', category: 'حفلات' },
+  { name: 'كب كيك الحفلة', coins: 18, icon: '🧁', animationType: 'heart', category: 'حفلات' },
+  { name: 'دونات حلوة', coins: 10, icon: '🍩', animationType: 'heart', category: 'حفلات' },
+  { name: 'برغر السهرة', coins: 30, icon: '🍔', animationType: 'heart', category: 'حفلات' },
+  { name: 'بيتزا الأصدقاء', coins: 40, icon: '🍕', animationType: 'heart', category: 'حفلات' },
+  { name: 'سوشي فاخر', coins: 80, icon: '🍣', animationType: 'heart', category: 'حفلات' },
+  { name: 'طقم بالونات ملونة', coins: 50, icon: '🎈', animationType: 'fireworks', category: 'حفلات' },
+  { name: 'كأس احتفال فاخر', coins: 160, icon: '🥂', animationType: 'fireworks', category: 'حفلات' },
+  { name: 'ساكسفون الجاز', coins: 330, icon: '🎷', animationType: 'fireworks', category: 'حفلات' },
+  { name: 'طبلة الحفلات', coins: 210, icon: '🥁', animationType: 'fireworks', category: 'حفلات' },
+];
+
+const EXTRA_THEMES: Array<{
+  prefix: string;
+  suffixes: string[];
+  icon: string;
+  animationType: GiftItem['animationType'];
+  category: string;
+  baseCoins: number;
+  isCard?: boolean;
+}> = [
+  { prefix: 'كارت', suffixes: ['الوفاء', 'الإخلاص', 'النجومية', 'الأمراء', 'الليل', 'القمر', 'الشمس', 'الفخامة', 'السعادة', 'الورد'], icon: '💌', animationType: 'card', category: 'كروت إهداء', baseCoins: 95, isCard: true },
+  { prefix: 'تاج', suffixes: ['السلطان', 'الملكة', 'الفجر', 'الماس', 'الزمرد', 'الذهب', 'الياقوت', 'اللؤلؤ', 'السحاب', 'العظمة'], icon: '👑', animationType: 'crown', category: 'ملكي', baseCoins: 650 },
+  { prefix: 'أسد', suffixes: ['العرين', 'القوة', 'الهيبة', 'الفخر', 'الصحراء', 'النار', 'الجليد', 'الأطلس', 'الشجاعة', 'الأبيض'], icon: '🦁', animationType: 'lion', category: 'حيوانات', baseCoins: 3100 },
+  { prefix: 'سيارة', suffixes: ['البرق', 'الأحلام', 'الملياردير', 'السباق', 'بوغاتي', 'ماكلارين', 'بورش', 'مرسيدس', 'بنتلي', 'تيسلا'], icon: '🏎️', animationType: 'car', category: 'سيارات وطائرات', baseCoins: 2400 },
+  { prefix: 'يخت', suffixes: ['الفيلا', 'الأمواج', 'دبي', 'المحيط', 'الأميرات', 'الشمس', 'الكاريبي', 'الذهب', 'الفيروز', 'المرجان'], icon: '🛥️', animationType: 'ship', category: 'سيارات وطائرات', baseCoins: 4200 },
+  { prefix: 'قصر', suffixes: ['السلاطين', 'الورود', 'الثلج', 'السماء', 'الرمال', 'القمر', 'النجوم', 'العقيق', 'المرمر', 'الأمل'], icon: '🏰', animationType: 'castle', category: 'ملكي', baseCoins: 3600 },
+  { prefix: 'ألماسة', suffixes: ['القلب', 'البرق', 'العسل', 'الليل', 'البحر', 'النور', 'الفرح', 'الأمل', 'الحلم', 'المجد'], icon: '💎', animationType: 'diamond', category: 'ألماس', baseCoins: 290 },
+  { prefix: 'وردة', suffixes: ['الصباح', 'المساء', 'العشق', 'الياسمين', 'الجوري', 'القرنفل', 'الأوركيد', 'النرجس', 'الندى', 'الربيع'], icon: '🌹', animationType: 'rose', category: 'حب', baseCoins: 35 },
+  { prefix: 'صاروخ', suffixes: ['النصر', 'الفضاء', 'المجرة', 'الشهاب', 'القمر', 'البرق', 'الرياح', 'الحماس', 'الطاقة', 'الإبداع'], icon: '🚀', animationType: 'rocket', category: 'سيارات وطائرات', baseCoins: 780 },
+  { prefix: 'قلب', suffixes: ['الذهب', 'الفضة', 'الألماس', 'الوفاء', 'الحنين', 'الأمان', 'الشوق', 'النبض', 'الورد', 'الفرح'], icon: '💖', animationType: 'heart', category: 'حب', baseCoins: 55 },
+];
+
+const BUILT_200_GIFTS: GiftItem[] = (() => {
+  const list: GiftItem[] = EXPANDED_GIFT_TEMPLATES.map((t, idx) => ({
+    id: `gift-pack-${idx + 1}`,
+    name: t.name,
+    coins: t.coins,
+    icon: t.icon,
+    animationType: t.animationType,
+    durationMs: t.animationType === 'lion' ? 3800 : t.isCard ? 3600 : t.coins >= 1000 ? 3400 : 2200,
+    category: t.category,
+    isCard: Boolean(t.isCard),
+    isActive: true
+  }));
+  let extraCounter = list.length + 1;
+  for (const grp of EXTRA_THEMES) {
+    for (let sIdx = 0; sIdx < grp.suffixes.length && list.length < 200; sIdx++) {
+      const price = Math.max(10, Math.round((grp.baseCoins + sIdx * Math.max(15, Math.round(grp.baseCoins * 0.12))) / 5) * 5);
+      list.push({
+        id: `gift-pack-${extraCounter}`,
+        name: `${grp.prefix} ${grp.suffixes[sIdx]}`,
+        coins: price,
+        icon: grp.icon,
+        animationType: grp.animationType,
+        durationMs: grp.animationType === 'lion' ? 3800 : grp.isCard ? 3600 : price >= 1000 ? 3400 : 2300,
+        category: grp.category,
+        isCard: Boolean(grp.isCard),
+        isActive: true
+      });
+      extraCounter += 1;
+    }
+  }
+  return list.slice(0, 200);
+})();
+
+export const INITIAL_GIFTS: GiftItem[] = [...CORE_INITIAL_GIFTS, ...BUILT_200_GIFTS];
 
 // Store Frames & Entrance Effects
 export const INITIAL_STORE_ITEMS: StoreItem[] = [
@@ -258,8 +436,12 @@ export const GLOW_COLOR_PRESETS = [
   { id: 'none', label: 'بدون توهج', value: 'none', swatch: '#9ca3af' },
   { id: 'rgba(250, 204, 21, 0.95)', label: 'ذهبي مشع', value: 'rgba(250, 204, 21, 0.95)', swatch: '#facc15' },
   { id: 'rgba(56, 189, 248, 0.95)', label: 'سماوي نيون', value: 'rgba(56, 189, 248, 0.95)', swatch: '#38bdf8' },
+  { id: 'rgba(236, 72, 153, 0.95)', label: 'وردي نيون', value: 'rgba(236, 72, 153, 0.95)', swatch: '#ec4899' },
   { id: 'rgba(239, 68, 68, 0.95)', label: 'أحمر ملكي', value: 'rgba(239, 68, 68, 0.95)', swatch: '#ef4444' },
+  { id: 'rgba(249, 115, 22, 0.95)', label: 'برتقالي ناري', value: 'rgba(249, 115, 22, 0.95)', swatch: '#f97316' },
   { id: 'rgba(168, 85, 247, 0.95)', label: 'أرجواني فاخر', value: 'rgba(168, 85, 247, 0.95)', swatch: '#a855f7' },
-  { id: 'rgba(16, 185, 129, 0.95)', label: 'زمردي متلألئ', value: 'rgba(16, 185, 129, 0.95)', swatch: '#10b981' }
+  { id: 'rgba(16, 185, 129, 0.95)', label: 'زمردي متلألئ', value: 'rgba(16, 185, 129, 0.95)', swatch: '#10b981' },
+  { id: 'rgba(132, 204, 22, 0.95)', label: 'ليموني نيون', value: 'rgba(132, 204, 22, 0.95)', swatch: '#84cc16' },
+  { id: 'rgba(241, 245, 249, 0.95)', label: 'بلاتيني ساطع', value: 'rgba(241, 245, 249, 0.95)', swatch: '#e2e8f0' }
 ];
 

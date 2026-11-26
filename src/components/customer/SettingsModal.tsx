@@ -22,8 +22,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [showBlockedModal, setShowBlockedModal] = useState(false);
-  const [publicBroadcast, setPublicBroadcast] = useState(true);
-  const [privateProfileOnly, setPrivateProfileOnly] = useState(false);
+  const publicBroadcast = user.publicBroadcast !== false;
+  const privateProfileOnly = Boolean(user.privateProfileOnly);
 
   if (!isOpen) return null;
 
@@ -107,8 +107,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           <div
             onClick={() => {
               const next = !publicBroadcast;
-              setPublicBroadcast(next);
-              showToast(next ? 'تم تفعيل إخطار البث العام ✓' : 'تم إيقاف إخطار البث العام');
+              livoStore.updateUserProfile(user.uid, { publicBroadcast: next });
+              showToast(next ? 'تم تفعيل إخطار البث العام وحفظه ✓' : 'تم إيقاف إخطار البث العام وحفظه ✓');
             }}
             className="px-5 py-3.5 flex items-center justify-between hover:bg-gray-50 cursor-pointer"
           >
@@ -123,8 +123,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           <div
             onClick={() => {
               const next = !privateProfileOnly;
-              setPrivateProfileOnly(next);
-              showToast(next ? 'الخصوصية: الظهور للأصدقاء فقط' : 'الخصوصية: الظهور للجميع في LIVO');
+              livoStore.updateUserProfile(user.uid, { privateProfileOnly: next });
+              showToast(next ? 'الخصوصية: الظهور للأصدقاء فقط ✓' : 'الخصوصية: الظهور للجميع في LIVO ✓');
             }}
             className="px-5 py-3.5 flex items-center justify-between hover:bg-gray-50 cursor-pointer"
           >

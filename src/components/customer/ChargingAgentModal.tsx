@@ -28,26 +28,29 @@ export const ChargingAgentModal: React.FC<ChargingAgentModalProps> = ({
   const agentBalance = agent.agentBalance !== undefined ? agent.agentBalance : agent.coins;
   const transferHistory = livoStore.getAgentTransfers(agent.uid);
 
-  const handleSearchUser = (e?: React.FormEvent) => {
+  const handleSearchUser = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setSearchError('');
     setFeedback(null);
     setTargetUser(null);
 
-    const clean = searchQuery.trim().toLowerCase();
+    const clean = searchQuery.trim();
     if (!clean) {
       setSearchError('يرجى إدخال معرّف المستخدم (ID)');
       return;
     }
 
     setIsSearching(true);
-    setTimeout(() => {
-      setIsSearching(false);
-      const found = livoStore.getUsers().find(
-        u => u.uid === clean ||
-             u.authUid === clean ||
-             u.username.toLowerCase() === clean
-      );
+    try {
+      const results = await livoStore.lookupUserInFirestore(clean, { excludeOwners: true });
+      const lowerClean = clean.toLowerCase();
+      const found =
+        results.find(
+          (u) =>
+            u.uid === clean ||
+            u.authUid === clean ||
+            u.username.toLowerCase() === lowerClean
+        ) || results[0];
 
       if (!found) {
         setSearchError(`لم يتم العثور على أي مستخدم بالمعرف "${searchQuery}"`);
@@ -56,7 +59,9 @@ export const ChargingAgentModal: React.FC<ChargingAgentModalProps> = ({
       } else {
         setTargetUser(found);
       }
-    }, 250);
+    } finally {
+      setIsSearching(false);
+    }
   };
 
   const handleExecuteTransfer = (e: React.FormEvent) => {

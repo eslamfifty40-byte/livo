@@ -17,6 +17,9 @@ import {
 } from 'lucide-react';
 import { UserProfile } from '../../types';
 import { livoStore } from '../../services/livoStore';
+import { AvatarWithFrame } from '../common/AvatarWithFrame';
+import { UserNameWithBadges } from '../common/UserNameWithBadges';
+import { compressImageForFirestore } from '../../utils/imageCompression';
 
 interface PrivateMessagesViewProps {
   currentUser: UserProfile;
@@ -50,7 +53,7 @@ export const PrivateMessagesView: React.FC<PrivateMessagesViewProps> = ({ curren
 
   const blockedSet = new Set(currentUser?.blockedUids || []);
   const threads = livoStore.getChatThreads(currentUser?.uid);
-  const allUsers = livoStore.getGenuineUsers().filter(
+  const allUsers = livoStore.getCustomerUsers().filter(
     u => u.uid !== currentUser?.uid && !blockedSet.has(u.uid)
   );
 
@@ -104,15 +107,20 @@ export const PrivateMessagesView: React.FC<PrivateMessagesViewProps> = ({ curren
     }, 800);
   };
 
-  const handleImageFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file || !activePartner || !canChatWithPartner) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const base64 = reader.result as string;
-      handleSendMessage({ preventDefault: () => {} } as React.FormEvent, 'image', base64);
-    };
-    reader.readAsDataURL(file);
+    try {
+      const compressed = await compressImageForFirestore(file, {
+        maxDim: 900,
+        quality: 0.78,
+        maxBytes: 220_000
+      });
+      handleSendMessage({ preventDefault: () => {} } as React.FormEvent, 'image', compressed);
+    } catch {
+      showToast('تعذر ضغط الصورة المرفقة');
+    }
   };
 
   const handleSendRequest = (e: React.FormEvent) => {
@@ -145,21 +153,34 @@ export const PrivateMessagesView: React.FC<PrivateMessagesViewProps> = ({ curren
               >
                 <ArrowRight className="w-4 h-4" />
               </button>
-              <div className="relative">
-                <img
-                  src={activePartner.avatar}
-                  alt={activePartner.displayName}
-                  className="w-9 h-9 rounded-full object-cover border border-purple-500"
+              <AvatarWithFrame
+                sizePx={40}
+                avatarUrl={activePartner.avatar}
+                displayName={activePartner.displayName}
+                frameUrl={activePartner.equippedFrameUrl}
+                frameGlowColor={activePartner.frameGlowColor}
+                frameAnimated={activePartner.frameAnimated}
+                customIconUrl={activePartner.customIconUrl}
+                customIconGlow={activePartner.customIconGlow}
+                customIconAnimated={activePartner.customIconAnimated}
+              />
+              <div className="min-w-0">
+                <UserNameWithBadges
+                  displayName={activePartner.displayName}
+                  nameGlowColor={activePartner.nameGlowColor}
+                  isVerified={activePartner.isVerified}
+                  verifiedBadgeColor={activePartner.verifiedBadgeColor}
+                  verifiedBadgeShape={activePartner.verifiedBadgeShape}
+                  verifiedBadgeGlow={activePartner.verifiedBadgeGlow}
+                  customIconUrl={activePartner.customIconUrl}
+                  customIconGlow={activePartner.customIconGlow}
+                  customIconAnimated={activePartner.customIconAnimated}
+                  customIconLabel={activePartner.customIconLabel}
+                  badgeSize={14}
+                  iconSize={18}
+                  nameClassName="font-bold text-xs text-white"
                 />
-                {activePartner.isVerified && (
-                  <span className="absolute -bottom-1 -right-1 bg-blue-500 rounded-full w-3.5 h-3.5 flex items-center justify-center text-[8px] text-white">
-                    ✓
-                  </span>
-                )}
-              </div>
-              <div>
-                <h3 className="font-bold text-xs text-white">{activePartner.displayName}</h3>
-                <span className="text-[10px] text-purple-300 font-digits">
+                <span className="text-[10px] text-purple-300 font-digits block">
                   UID: {activePartner.uid} • @{activePartner.username}
                 </span>
               </div>
@@ -372,11 +393,25 @@ export const PrivateMessagesView: React.FC<PrivateMessagesViewProps> = ({ curren
                       }}
                       className="w-full flex items-center justify-between p-2 rounded-xl hover:bg-purple-900/50 text-right transition-colors"
                     >
-                      <div className="flex items-center gap-2">
-                        <img src={user.avatar} alt={user.displayName} className="w-8 h-8 rounded-full border border-purple-500" />
-                        <div>
-                          <span className="text-xs font-bold text-white block">{user.displayName}</span>
-                          <span className="text-[10px] text-purple-300 font-digits">UID: {user.uid} • @{user.username}</span>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <img src={user.avatar} alt={user.displayName} className="w-8 h-8 rounded-full border border-purple-500 shrink-0" />
+                        <div className="min-w-0">
+                          <UserNameWithBadges
+                            displayName={user.displayName}
+                            nameGlowColor={user.nameGlowColor}
+                            isVerified={user.isVerified}
+                            verifiedBadgeColor={user.verifiedBadgeColor}
+                            verifiedBadgeShape={user.verifiedBadgeShape}
+                            verifiedBadgeGlow={user.verifiedBadgeGlow}
+                            customIconUrl={user.customIconUrl}
+                            customIconGlow={user.customIconGlow}
+                            customIconAnimated={user.customIconAnimated}
+                            customIconLabel={user.customIconLabel}
+                            badgeSize={13}
+                            iconSize={16}
+                            nameClassName="text-xs font-bold text-white"
+                          />
+                          <span className="text-[10px] text-purple-300 font-digits block">UID: {user.uid} • @{user.username}</span>
                         </div>
                       </div>
                       <span className="text-xs text-amber-400 font-bold">
@@ -399,34 +434,46 @@ export const PrivateMessagesView: React.FC<PrivateMessagesViewProps> = ({ curren
                 <span className="text-[11px] text-purple-400">ابحث عن مستخدم برقم المعرف لإرسال طلب مراسلة</span>
               </div>
             ) : (
-              threads.map(thread => (
+              threads.map(thread => {
+                const partner = livoStore.getUserByUid(thread.participantUid);
+                return (
                 <button
                   key={thread.participantUid}
                   onClick={() => {
-                    const partner = livoStore.getUserByUid(thread.participantUid);
                     if (partner) setActivePartner(partner);
                   }}
                   className="w-full flex items-center justify-between p-2.5 rounded-2xl bg-[#170b2c]/80 hover:bg-[#1f103b] border border-purple-800/40 hover:border-purple-600 transition-all text-right group"
                 >
-                  <div className="flex items-center gap-2.5">
-                    <div className="relative">
-                      <img
-                        src={thread.participantAvatar}
-                        alt={thread.participantName}
-                        className="w-11 h-11 rounded-full object-cover border border-purple-500"
-                      />
-                      {thread.participantVerified && (
-                        <span className="absolute -bottom-1 -right-1 bg-blue-500 rounded-full w-3.5 h-3.5 flex items-center justify-center text-[8px] text-white">
-                          ✓
-                        </span>
-                      )}
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-xs font-bold text-white group-hover:text-amber-300 transition-colors">
-                          {thread.participantName}
-                        </span>
-                        <span className="text-[10px] text-purple-400 font-digits">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <AvatarWithFrame
+                      sizePx={44}
+                      avatarUrl={partner?.avatar || thread.participantAvatar}
+                      displayName={partner?.displayName || thread.participantName}
+                      frameUrl={partner?.equippedFrameUrl}
+                      frameGlowColor={partner?.frameGlowColor}
+                      frameAnimated={partner?.frameAnimated}
+                      customIconUrl={partner?.customIconUrl}
+                      customIconGlow={partner?.customIconGlow}
+                      customIconAnimated={partner?.customIconAnimated}
+                    />
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <UserNameWithBadges
+                          displayName={partner?.displayName || thread.participantName}
+                          nameGlowColor={partner?.nameGlowColor}
+                          isVerified={partner?.isVerified ?? thread.participantVerified}
+                          verifiedBadgeColor={partner?.verifiedBadgeColor}
+                          verifiedBadgeShape={partner?.verifiedBadgeShape}
+                          verifiedBadgeGlow={partner?.verifiedBadgeGlow}
+                          customIconUrl={partner?.customIconUrl}
+                          customIconGlow={partner?.customIconGlow}
+                          customIconAnimated={partner?.customIconAnimated}
+                          customIconLabel={partner?.customIconLabel}
+                          badgeSize={13}
+                          iconSize={16}
+                          nameClassName="text-xs font-bold text-white group-hover:text-amber-300 transition-colors"
+                        />
+                        <span className="text-[10px] text-purple-400 font-digits shrink-0">
                           (UID: {thread.participantUid})
                         </span>
                       </div>
@@ -447,7 +494,8 @@ export const PrivateMessagesView: React.FC<PrivateMessagesViewProps> = ({ curren
                     )}
                   </div>
                 </button>
-              ))
+                );
+              })
             )}
           </div>
         </div>

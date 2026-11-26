@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { CustomerApp } from './components/customer/CustomerApp';
-import { AdminApp } from './components/admin/AdminApp';
 import { livoStore } from './services/livoStore';
 import { UserProfile } from './types';
-import { Shield, Smartphone, ExternalLink, ArrowRight } from 'lucide-react';
-import { LivoCustomerAppIcon, LivoAdminAppIcon } from './assets/appIcons';
+import { ArrowRight } from 'lucide-react';
+
+const AdminApp = lazy(() =>
+  import('./components/admin/AdminApp').then((mod) => ({ default: mod.AdminApp }))
+);
 
 export default function App() {
   // Support independent app launch: Customer by default, Admin via VITE_APP_MODE=admin or ?app=admin
@@ -59,7 +61,15 @@ export default function App() {
                 <span>العودة لتطبيق العميل</span>
               </button>
             </div>
-            <AdminApp />
+            <Suspense
+              fallback={
+                <div className="min-h-[60vh] flex items-center justify-center text-xs font-bold text-amber-300">
+                  جاري تحميل لوحة الإدارة...
+                </div>
+              }
+            >
+              <AdminApp />
+            </Suspense>
           </div>
         )}
       </main>

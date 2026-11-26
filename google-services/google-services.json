@@ -1,0 +1,121 @@
+{
+  "project_info": {
+    "project_number": "26477246453",
+    "project_id": "livo-53cc8",
+    "storage_bucket": "livo-53cc8.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:26477246453:android:6ac28d2b000c458f3192bc",
+        "android_client_info": {
+          "package_name": "com.livo.admin"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "26477246453-o9srs7tmiid7sf6759mf9k7ai1cfr9jr.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.livo.admin",
+            "certificate_hash": "638182f30c64761155721ff6f083ef696a49c70e"
+          }
+        },
+        {
+          "client_id": "26477246453-9eas864c487gqffis474m6thlort6u3q.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyATqxm93wd5-7XGkn75DJWRl6miZb5quwM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "26477246453-9eas864c487gqffis474m6thlort6u3q.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:26477246453:android:e054e62ca0b776b03192bc",
+        "android_client_info": {
+          "package_name": "com.livo.client"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "26477246453-hsp64k94p5ov54vqtsgcbie8ujv0lqdi.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.livo.client",
+            "certificate_hash": "638182f30c64761155721ff6f083ef696a49c70e"
+          }
+        },
+        {
+          "client_id": "26477246453-9eas864c487gqffis474m6thlort6u3q.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyATqxm93wd5-7XGkn75DJWRl6miZb5quwM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "26477246453-9eas864c487gqffis474m6thlort6u3q.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:26477246453:android:c78215bc1b0d379a3192bc",
+        "android_client_info": {
+          "package_name": "com.livolive.admin"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "26477246453-58o1tclk5h0l3aqnu34ap3tdknuose54.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.livolive.admin",
+            "certificate_hash": "638182f30c64761155721ff6f083ef696a49c70e"
+          }
+        },
+        {
+          "client_id": "26477246453-9eas864c487gqffis474m6thlort6u3q.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyATqxm93wd5-7XGkn75DJWRl6miZb5quwM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "26477246453-9eas864c487gqffis474m6thlort6u3q.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -196,14 +196,14 @@ export const LevelCenterModal: React.FC<LevelCenterModalProps> = ({
               {/* Quick Stats Grid */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="p-3.5 rounded-2xl bg-white/5 border border-purple-500/20">
-                  <span className="text-[11px] text-purple-300">إجمالي الشحن المؤهل للترقية</span>
+                  <span className="text-[11px] text-purple-300">إجمالي النقاط المؤهلة للترقية</span>
                   <div className="flex items-center gap-1.5 mt-1">
                     <span className="text-lg font-black font-digits text-yellow-400">
                       {eligibleCoins.toLocaleString('en-US')}
                     </span>
                     <span className="text-xs text-yellow-300 font-bold">كوينز</span>
                   </div>
-                  <p className="text-[10px] text-purple-400/70 mt-1">عمليات الشحن المعتمدة فقط</p>
+                  <p className="text-[10px] text-purple-400/70 mt-1">الشحن المعتمد + الهدايا المُرسلة</p>
                 </div>
 
                 <div className="p-3.5 rounded-2xl bg-white/5 border border-purple-500/20">
@@ -328,13 +328,16 @@ export const LevelCenterModal: React.FC<LevelCenterModalProps> = ({
                     <strong>الحد الأقصى للمستويات هو المستوى 50</strong>، ولا يمكن تجاوز هذا المستوى إطلاقاً.
                   </li>
                   <li>
-                    <strong>يتم الترقية تلقائياً</strong> فور تأكيد الإدارة أو نظام الشحن المعتمد لأي عملية شحن كوينز.
+                    <strong>يتم الترقية تلقائياً</strong> فور تأكيد الإدارة لأي عملية شحن كوينز معتمدة أو عند إرسال الهدايا داخل الغرف.
+                  </li>
+                  <li>
+                    <strong>حسابات الإدارة العليا (Admin)</strong> تعمل بالرتبة الملكية الكاملة (المستوى 50).
                   </li>
                   <li>
                     <strong>مكافأة الألماسات تُصرف لمرة واحدة فقط</strong> عند فتح كل مستوى ولا تتكرر عند إعادة الشحن في نفس المستوى.
                   </li>
                   <li className="text-amber-300 font-bold">
-                    <strong>تحويلات الكوينز بين المستخدمين أو من وكلاء الشحن لا تُحتسب</strong> ضمن شحن الترقية للمستوى، بل يُحتسب فقط الشحن الرسمي المباشر.
+                    <strong>تحويلات الكوينز بين المستخدمين لا تُحتسب</strong> ضمن الترقية، بل يُحتسب الشحن الرسمي المعتمد والهدايا المُرسلة داخل الغرف.
                   </li>
                   <li>
                     تظهر شارة المستوى الرسمية في الغرف الصوتية، والرسائل، والملف الشخصي فور الترقية تلقائياً.

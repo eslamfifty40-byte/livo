@@ -34,8 +34,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setAuthMode(initialMode);
       setErrorMsg('');
       setInfoMsg('');
+      setLoading(false);
     }
   }, [initialMode, isOpen]);
+
+  const redirectTimerRef = React.useRef<number | null>(null);
+  useEffect(() => {
+    return () => {
+      if (redirectTimerRef.current !== null) {
+        window.clearTimeout(redirectTimerRef.current);
+      }
+    };
+  }, []);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -60,7 +70,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   /**
    * Real Google Sign-In via Firebase Auth with forced Gmail account selector
    */
-  const handleGoogleAuth = async () => {
+  const handleGoogleAuth = async (preferRedirect = false) => {
     if (!agreedToTerms) {
       setErrorMsg('يرجى الموافقة على شروط الاستخدام وسياسة الخصوصية للمتابعة.');
       return;
@@ -71,14 +81,30 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setInfoMsg('');
 
     try {
-      const res = await firebaseService.loginCustomerWithGoogle();
+      const res = await firebaseService.loginCustomerWithGoogle(preferRedirect);
+      if (res.redirectStarted) {
+        setInfoMsg('جاري تحويلك إلى صفحة Google الآمنة لتأكيد الدخول...');
+        if (redirectTimerRef.current !== null) window.clearTimeout(redirectTimerRef.current);
+        redirectTimerRef.current = window.setTimeout(() => {
+          setLoading(false);
+        }, 6000);
+        return;
+      }
       if (!res.success || !res.user) {
         setLoading(false);
         setErrorMsg(res.error || 'تم إلغاء نافذة اختيار حساب Google');
         return;
       }
 
-      const syncedUser = livoStore.syncFirebaseUser(res.user);
+      const syncedUser = await livoStore.syncFirebaseUserAsync(res.user);
+      const activeBan = livoStore.getActiveBanForUser(syncedUser);
+      if (activeBan) {
+        await firebaseService.logout();
+        livoStore.logoutSession();
+        setLoading(false);
+        setErrorMsg(`تم حظر هذا الحساب (${activeBan.reason}). يمكنك التواصل مع الدعم الفني.`);
+        return;
+      }
       setLoading(false);
       onSuccess(syncedUser);
       onClose();
@@ -115,7 +141,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           setErrorMsg(res.error || 'فشل تسجيل الدخول');
           return;
         }
-        const synced = livoStore.syncFirebaseUser(res.user);
+        const synced = await livoStore.syncFirebaseUserAsync(res.user);
+        const activeBan = livoStore.getActiveBanForUser(synced);
+        if (activeBan) {
+          await firebaseService.logout();
+          livoStore.logoutSession();
+          setLoading(false);
+          setErrorMsg(`تم حظر هذا الحساب (${activeBan.reason}).`);
+          return;
+        }
         setLoading(false);
         onSuccess(synced);
         onClose();
@@ -131,7 +165,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           setErrorMsg(res.error || 'تعذر إنشاء الحساب');
           return;
         }
-        const synced = livoStore.syncFirebaseUser(res.user, {
+        const synced = await livoStore.syncFirebaseUserAsync(res.user, {
           displayName: displayName.trim()
         });
         setLoading(false);
@@ -161,9 +195,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   };
 
   /**
-   * Phone Login / Signup (strict phone lookup bound to phone number, zero account mixing)
+   * Phone Login / Signup backed by real Firebase Auth session so Firestore writes succeed reliably
    */
-  const handleVerifyPhoneOtp = (e: React.FormEvent) => {
+  const handleVerifyPhoneOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!agreedToTerms) {
       setErrorMsg('يرجى الموافقة على شروط الاستخدام وسياسة الخصوصية للمتابعة.');
@@ -177,31 +211,76 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
 
     setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
-      const users = livoStore.getUsers();
-      const existingUser = users.find(u => u.phoneNumber === cleanPhone);
-
-      if (existingUser) {
-        livoStore.setCurrentUser(existingUser.uid);
-        onSuccess(existingUser);
-        onClose();
-      } else if (authMode === 'login') {
-        setErrorMsg('رقم الهاتف غير مسجل. اختر "إنشاء حساب جديد" أولاً.');
-      } else {
-        const generatedUid = livoStore.generateUniqueUid();
-        const newUser = livoStore.registerNewUser(
-          displayName.trim() || `مستخدم ${cleanPhone.slice(-4)}`,
-          `phone_${cleanPhone.slice(-6)}_${generatedUid.slice(-2)}`,
-          undefined,
-          'personal',
-          cleanPhone,
-          `phone_${cleanPhone}`
-        );
-        onSuccess(newUser);
-        onClose();
+    setErrorMsg('');
+    try {
+      const authRes = await firebaseService.authenticateWithPhoneSession(cleanPhone, displayName.trim());
+      if (!authRes.success || !authRes.user) {
+        setLoading(false);
+        setErrorMsg(authRes.error || 'تعذر تأسيس جلسة المصادقة لرقم الهاتف');
+        return;
       }
-    }, 300);
+
+      const users = livoStore.getUsers();
+      const existingByPhone = users.find((u) => u.phoneNumber === cleanPhone);
+      if (existingByPhone) {
+        const activeBan = livoStore.getActiveBanForUser(existingByPhone);
+        if (activeBan) {
+          await firebaseService.logout();
+          livoStore.logoutSession();
+          setLoading(false);
+          setErrorMsg(`تم حظر هذا الحساب (${activeBan.reason}).`);
+          return;
+        }
+        if (existingByPhone.authUid !== authRes.user.uid) {
+          livoStore.updateUserProfile(existingByPhone.uid, { authUid: authRes.user.uid, isPhoneVerified: true });
+        }
+        livoStore.setCurrentUser(existingByPhone.uid);
+        setLoading(false);
+        onSuccess(existingByPhone);
+        onClose();
+        return;
+      }
+
+      const existingByAuth = await firebaseService.findUserByAuthUidOrEmail(authRes.user.uid, authRes.user.email);
+      if (existingByAuth) {
+        const synced = await livoStore.syncFirebaseUserAsync(authRes.user);
+        const activeBan = livoStore.getActiveBanForUser(synced);
+        if (activeBan) {
+          await firebaseService.logout();
+          livoStore.logoutSession();
+          setLoading(false);
+          setErrorMsg(`تم حظر هذا الحساب (${activeBan.reason}).`);
+          return;
+        }
+        setLoading(false);
+        onSuccess(synced);
+        onClose();
+        return;
+      }
+
+      if (authMode === 'login') {
+        // Still allow phone onboarding seamlessly or guide user if genuinely unregistered
+        setLoading(false);
+        setErrorMsg('رقم الهاتف غير مسجل بعد. اختر "إنشاء حساب جديد" في الأعلى لإكمال التسجيل.');
+        return;
+      }
+
+      const generatedUid = livoStore.generateUniqueUid();
+      const newUser = livoStore.registerNewUser(
+        displayName.trim() || `مستخدم ${cleanPhone.slice(-4)}`,
+        `phone_${cleanPhone.slice(-6)}_${generatedUid.slice(-2)}`,
+        authRes.user.email || undefined,
+        'personal',
+        cleanPhone,
+        authRes.user.uid
+      );
+      setLoading(false);
+      onSuccess(newUser);
+      onClose();
+    } catch (err: any) {
+      setLoading(false);
+      setErrorMsg(err?.message || 'حدث خطأ أثناء تأكيد رقم الهاتف');
+    }
   };
 
   /**
@@ -313,7 +392,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         {authMethod === 'main' && (
           <div className="space-y-3">
             <button
-              onClick={handleGoogleAuth}
+              onClick={() => handleGoogleAuth(false)}
               disabled={loading}
               className="w-full bg-[#FFE600] hover:bg-yellow-400 active:scale-[0.98] text-black font-black text-sm py-3.5 px-6 rounded-2xl shadow-md flex items-center justify-center gap-2.5 transition-all"
             >
@@ -328,11 +407,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <svg className="w-3.5 h-3.5" viewBox="0 0 24 24">
                   <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z" />
                   <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.35 24 12 24z" />
-                  <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 10.03 0 12s.45 3.82 1.25 5.42l4.03-3.15z" />
+                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 10.03 0 12s.45 3.82 1.25 5.42l4.03-3.15z" />
                   <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.35 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z" />
                 </svg>
               </span>
             </button>
+
+            <button
+              type="button"
+              onClick={() => handleGoogleAuth(true)}
+              disabled={loading}
+              className="w-full bg-gray-100 hover:bg-gray-200 active:scale-[0.98] text-gray-800 font-bold text-xs py-2.5 px-4 rounded-2xl flex items-center justify-center gap-2 transition-all"
+            >
+              <span>دخول Google بصفحة كاملة (حل صفحة Brave الفارغة والهاتف)</span>
+            </button>
+
+            <p className="text-[10px] text-gray-500 font-medium">
+              سيتم فتح نافذة آمنة لاختيار حساب Gmail الخاص بك مباشرة دون مغادرة التطبيق
+            </p>
 
             <div className="grid grid-cols-2 gap-2.5">
               <button

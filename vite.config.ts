@@ -1,7 +1,10 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import {defineConfig} from 'vite';
+import { fileURLToPath } from 'url';
+import { defineConfig } from 'vite';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig(() => {
   return {
@@ -12,11 +15,15 @@ export default defineConfig(() => {
       },
     },
     build: {
+      chunkSizeWarningLimit: 2000,
       rollupOptions: {
-        input: {
-          main: path.resolve(__dirname, 'index.html'),
-          admin: path.resolve(__dirname, 'admin.html'),
-        },
+        input:
+          process.env.VITE_APP_MODE === 'customer' || process.env.VITE_APP_MODE === 'admin'
+            ? path.resolve(__dirname, 'index.html')
+            : {
+                main: path.resolve(__dirname, 'index.html'),
+                admin: path.resolve(__dirname, 'admin.html'),
+              },
       },
     },
     server: {

@@ -12,11 +12,13 @@ import {
   VideoOff,
   Mic,
   MicOff,
-  RefreshCw
+  RefreshCw,
+  Minimize2
 } from 'lucide-react';
 import { UserProfile, GiftItem, StreamSupporter, VoiceRoom } from '../../types';
 import { livoStore } from '../../services/livoStore';
 import { GiftAnimationOverlay } from './GiftAnimationOverlay';
+import { UserNameWithBadges } from '../common/UserNameWithBadges';
 
 interface LiveStreamViewProps {
   currentUser: UserProfile;
@@ -24,6 +26,7 @@ interface LiveStreamViewProps {
   isHost?: boolean;
   onOpenRecharge: () => void;
   onClose?: () => void;
+  onMinimize?: () => void;
 }
 
 interface PKState {
@@ -40,7 +43,8 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
   room,
   isHost = false,
   onOpenRecharge,
-  onClose
+  onClose,
+  onMinimize
 }) => {
   const [gifts, setGifts] = useState<GiftItem[]>(livoStore.getActiveGifts());
   const [showGiftModal, setShowGiftModal] = useState(false);
@@ -48,7 +52,7 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
   const [lastSenderName, setLastSenderName] = useState('');
   const [commentText, setCommentText] = useState('');
   const [toastMsg, setToastMsg] = useState<string | null>(null);
-  const [comments, setComments] = useState<Array<{ id: string; user: string; text: string; isGift?: boolean }>>([]);
+  const [comments, setComments] = useState<Array<{ id: string; uid?: string; user: string; text: string; isGift?: boolean }>>([]);
   const [topSupporters, setTopSupporters] = useState<StreamSupporter[]>([]);
 
   // Real Camera & Mic state
@@ -78,6 +82,7 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
           setComments(
             latestRoom.messages.map(m => ({
               id: m.id,
+              uid: m.uid,
               user: m.user,
               text: m.text,
               isGift: m.isVip
@@ -172,7 +177,7 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
     }));
     if (room?.id) {
       livoStore.appendRoomMessage(room.id, {
-        uid: currentUser?.uid,
+        uid: currentUser.uid,
         user: 'نظام البث',
         text: '⚔️ بدأت جولة تحدي PK جديدة!'
       });
@@ -190,19 +195,37 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
   };
 
   const handleSendGift = (gift: GiftItem, targetChallenger: 1 | 2 = 1) => {
-    if (currentUser?.coins < gift.coins) {
+    if (currentUser.coins < gift.coins) {
       showToast('رصيد الكوينز غير كافٍ، يرجى الشحن');
       onOpenRecharge();
       return;
     }
 
-    livoStore.adjustUserCoins(
-      currentUser?.uid,
-      'deduct',
-      gift.coins,
-      `إرسال هدية ${gift.name} في البث المباشر`,
-      currentUser?.displayName
-    );
+    if (room?.id && livoStore.getRoomById(room.id)) {
+      const res = livoStore.sendGiftInRoom({
+        roomId: room.id,
+        senderUid: currentUser.uid,
+        giftId: gift.id,
+        recipientUid: room.ownerUid,
+        count: 1
+      });
+      if (!res.success) {
+        showToast(res.message);
+        return;
+      }
+    } else {
+      livoStore.adjustUserCoins(
+        currentUser.uid,
+        'deduct',
+        gift.coins,
+        `إرسال هدية ${gift.name} في البث المباشر`,
+        currentUser.displayName
+      );
+      setComments(prev => [
+        ...prev,
+        { id: String(Date.now()), user: currentUser.displayName, text: `أرسل ${gift.name} (${gift.icon})!`, isGift: true }
+      ]);
+    }
 
     if (pk.isActive) {
       setPk(prev => ({
@@ -213,16 +236,16 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
     }
 
     setTopSupporters(prev => {
-      const existing = prev.find(s => s.uid === currentUser?.uid);
+      const existing = prev.find(s => s.uid === currentUser.uid);
       const updated = existing
-        ? prev.map(s => s.uid === currentUser?.uid ? { ...s, supportedCoins: s.supportedCoins + gift.coins } : s)
+        ? prev.map(s => s.uid === currentUser.uid ? { ...s, supportedCoins: s.supportedCoins + gift.coins } : s)
         : [
             ...prev,
             {
               rank: 3 as 1 | 2 | 3,
-              uid: currentUser?.uid,
-              username: currentUser?.displayName,
-              avatar: currentUser?.avatar,
+              uid: currentUser.uid,
+              username: currentUser.displayName,
+              avatar: currentUser.avatar,
               supportedCoins: gift.coins
             }
           ];
@@ -232,21 +255,7 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
         .map((s, idx) => ({ ...s, rank: (idx + 1) as 1 | 2 | 3 }));
     });
 
-    if (room?.id) {
-      livoStore.appendRoomMessage(room.id, {
-        uid: currentUser?.uid,
-        user: currentUser?.displayName,
-        text: `أرسل هدية ${gift.name} ${gift.icon}!`,
-        isVip: true
-      });
-    } else {
-      setComments(prev => [
-        ...prev,
-        { id: String(Date.now()), user: currentUser?.displayName, text: `أرسل ${gift.name} (${gift.icon})!`, isGift: true }
-      ]);
-    }
-
-    setLastSenderName(currentUser?.displayName);
+    setLastSenderName(currentUser.displayName);
     setActiveGiftAnimation(gift);
     setShowGiftModal(false);
   };
@@ -256,22 +265,23 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
     if (!commentText.trim()) return;
     if (room?.id) {
       livoStore.appendRoomMessage(room.id, {
-        uid: currentUser?.uid,
-        user: currentUser?.displayName,
+        uid: currentUser.uid,
+        user: currentUser.displayName,
         text: commentText.trim(),
-        isVerified: currentUser?.isVerified
+        isVerified: currentUser.isVerified
       });
     } else {
       setComments(prev => [
         ...prev,
-        { id: String(Date.now()), user: currentUser?.displayName, text: commentText.trim() }
+        { id: String(Date.now()), user: currentUser.displayName, text: commentText.trim() }
       ]);
     }
     setCommentText('');
   };
 
-  const hostName = room?.ownerName || currentUser?.displayName;
-  const hostAvatar = room?.ownerAvatar || currentUser?.avatar;
+  const hostUser = room?.ownerUid ? livoStore.getUserByUid(room.ownerUid) : currentUser;
+  const hostName = hostUser?.displayName || room?.ownerName || currentUser.displayName;
+  const hostAvatar = hostUser?.avatar || room?.ownerAvatar || currentUser.avatar;
 
   return (
     <div className="relative w-full h-full min-h-[600px] bg-black overflow-hidden flex flex-col justify-between text-white">
@@ -323,9 +333,22 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
             className="w-8 h-8 rounded-full border border-[#FFE600] object-cover"
           />
           <div>
-            <div className="flex items-center gap-1">
-              <span className="text-xs font-bold text-white truncate max-w-[110px]">{hostName}</span>
-              <span className="bg-red-600 text-white text-[8px] font-black px-1.5 rounded-full animate-pulse">
+            <div className="flex items-center gap-1 min-w-0">
+              <UserNameWithBadges
+                displayName={hostName}
+                nameGlowColor={hostUser?.nameGlowColor}
+                isVerified={hostUser?.isVerified}
+                verifiedBadgeColor={hostUser?.verifiedBadgeColor}
+                verifiedBadgeShape={hostUser?.verifiedBadgeShape}
+                verifiedBadgeGlow={hostUser?.verifiedBadgeGlow}
+                customIconUrl={hostUser?.customIconUrl}
+                customIconGlow={hostUser?.customIconGlow}
+                customIconAnimated={hostUser?.customIconAnimated}
+                badgeSize={12}
+                iconSize={15}
+                nameClassName="text-xs font-bold text-white max-w-[110px]"
+              />
+              <span className="bg-red-600 text-white text-[8px] font-black px-1.5 rounded-full animate-pulse shrink-0">
                 LIVE
               </span>
             </div>
@@ -358,6 +381,16 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
             >
               <Swords className="w-3 h-3" />
               <span>تحدي PK</span>
+            </button>
+          )}
+
+          {onMinimize && (
+            <button
+              onClick={onMinimize}
+              className="w-8 h-8 rounded-full bg-amber-500/90 hover:bg-amber-400 flex items-center justify-center text-black"
+              title="لايف مصغر"
+            >
+              <Minimize2 className="w-4 h-4" />
             </button>
           )}
 
@@ -409,19 +442,36 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
       {/* Bottom Live Comments & Controls */}
       <div className="relative z-20 p-3 space-y-2.5 mt-auto">
         <div className="h-28 overflow-y-auto space-y-1.5 pr-1 flex flex-col justify-end">
-          {comments.slice(-6).map(c => (
-            <div
-              key={c.id}
-              className={`text-xs px-3 py-1 rounded-2xl w-fit max-w-[85%] backdrop-blur-sm ${
-                c.isGift
-                  ? 'bg-amber-500/25 border border-amber-400/50 text-amber-200 font-bold'
-                  : 'bg-black/45 text-white border border-white/10'
-              }`}
-            >
-              <span className="font-bold text-amber-400 ml-1.5">{c.user}:</span>
-              <span>{c.text}</span>
-            </div>
-          ))}
+          {comments.slice(-6).map(c => {
+            const commenter = c.uid ? livoStore.getUserByUid(c.uid) : undefined;
+            return (
+              <div
+                key={c.id}
+                className={`text-xs px-3 py-1 rounded-2xl w-fit max-w-[85%] backdrop-blur-sm flex items-center gap-1.5 flex-wrap ${
+                  c.isGift
+                    ? 'bg-amber-500/25 border border-amber-400/50 text-amber-200 font-bold'
+                    : 'bg-black/45 text-white border border-white/10'
+                }`}
+              >
+                <UserNameWithBadges
+                  displayName={`${c.user}:`}
+                  nameGlowColor={commenter?.nameGlowColor}
+                  isVerified={commenter?.isVerified}
+                  verifiedBadgeColor={commenter?.verifiedBadgeColor}
+                  verifiedBadgeShape={commenter?.verifiedBadgeShape}
+                  verifiedBadgeGlow={commenter?.verifiedBadgeGlow}
+                  customIconUrl={commenter?.customIconUrl}
+                  customIconGlow={commenter?.customIconGlow}
+                  customIconAnimated={commenter?.customIconAnimated}
+                  badgeSize={11}
+                  iconSize={14}
+                  nameClassName="font-bold text-amber-400"
+                  truncate={false}
+                />
+                <span>{c.text}</span>
+              </div>
+            );
+          })}
         </div>
 
         <div className="flex items-center gap-2">
@@ -513,7 +563,7 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-xs font-digits text-amber-300 font-bold">
-                  {currentUser?.coins.toLocaleString()} 🪙
+                  {currentUser.coins.toLocaleString()} 🪙
                 </span>
                 <button
                   onClick={onOpenRecharge}

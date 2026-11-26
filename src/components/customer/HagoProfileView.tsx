@@ -30,10 +30,13 @@ import {
   ExternalLink,
   Plus,
   Trash2,
-  UserCheck
+  UserCheck,
+  Menu,
+  Sparkles,
+  Gift
 } from 'lucide-react';
 import { UserProfile, VideoPost } from '../../types';
-import { LivoVerifiedBadge } from '../common/LivoVerifiedBadge';
+import { UserNameWithBadges } from '../common/UserNameWithBadges';
 import { AvatarWithFrame } from '../common/AvatarWithFrame';
 import { EditProfileModal } from './EditProfileModal';
 import { VideosView } from './VideosView';
@@ -82,6 +85,7 @@ export const HagoProfileView: React.FC<HagoProfileViewProps> = ({
   const [copiedLink, setCopiedLink] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [showSquareModal, setShowSquareModal] = useState(false);
+  const [profileTab, setProfileTab] = useState<'services' | 'videos' | 'about'>('services');
   const [infoNotice, setInfoNotice] = useState<string | null>(null);
 
   const refreshSavedAccounts = () => {
@@ -161,8 +165,12 @@ export const HagoProfileView: React.FC<HagoProfileViewProps> = ({
                     />
                     <div className="min-w-0">
                       <div className="flex items-center gap-1">
-                        <span className="font-black text-xs text-gray-900 truncate">{acc.displayName}</span>
-                        {acc.isVerified && <LivoVerifiedBadge size={13} />}
+                        <UserNameWithBadges
+                          displayName={acc.displayName}
+                          isVerified={acc.isVerified}
+                          badgeSize={13}
+                          nameClassName="font-black text-xs text-gray-900"
+                        />
                       </div>
                       <span className="text-[10px] text-gray-500 font-digits block truncate">
                         UID: {acc.uid} {acc.email ? `• ${acc.email}` : ''}
@@ -213,175 +221,239 @@ export const HagoProfileView: React.FC<HagoProfileViewProps> = ({
     setTimeout(() => setCopiedUid(false), 2000);
   };
 
-  const handleCopyLink = () => {
-    navigator.clipboard?.writeText(`https://livo.live/u/${user.uid}`);
+  const [shareFeedback, setShareFeedback] = useState<string | null>(null);
+  const handleCopyLink = (channelLabel?: string) => {
+    const shareUrl = `https://livo.live/u/${user.uid}`;
+    if (navigator.share && channelLabel && channelLabel !== 'نسخ الرابط') {
+      navigator.share({ title: `ملف ${user.displayName} في LIVO`, url: shareUrl }).catch(() => undefined);
+    }
+    navigator.clipboard?.writeText(shareUrl).catch(() => undefined);
     setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 2000);
+    setShareFeedback(
+      channelLabel
+        ? `تم نسخ رابط ملفك للمشاركة عبر ${channelLabel} ✓`
+        : 'تم نسخ رابط ملفك بنجاح ✓'
+    );
+    setTimeout(() => {
+      setCopiedLink(false);
+      setShareFeedback(null);
+    }, 2400);
   };
+
+  const hasUnreadNotifs = livoStore.getInAppNotifications().some((n) => !n.isRead);
 
   return (
     <div className="flex flex-col h-full bg-[#FAFAFA] text-black select-none overflow-y-auto pb-8">
-      
-      {/* Profile Header */}
-      <div className="bg-white px-4 pt-4 pb-3 border-b border-gray-100 shadow-2xs">
-        <div className="flex items-start justify-between">
-          <div className="flex items-center gap-3">
-            {/* Avatar with Admin-assigned Royal Frame / Glow / Flutter & quick edit on click */}
-            <div
-              onClick={() => setShowEditProfileModal(true)}
-              className="relative cursor-pointer group shrink-0"
-              title="اضغط لتغيير الصورة والاسم"
+      {/* HAGO Dark Cover Header */}
+      <div className="relative bg-gradient-to-br from-[#23103b] via-[#180a2a] to-[#0e0717] text-white px-4 pt-3.5 pb-10">
+        {/* Top Action Icons (Menu with real unread dot, Share, Edit, Likes Heart) */}
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onOpenSettings}
+              className="relative w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors"
+              title="الإعدادات"
             >
-              <AvatarWithFrame
-                sizePx={68}
-                avatarUrl={user.avatar}
+              <Menu className="w-4 h-4" />
+              {hasUnreadNotifs && (
+                <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-red-500" />
+              )}
+            </button>
+            <button
+              onClick={() => setShowShareModal(true)}
+              className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors"
+              title="مشاركة الحساب"
+            >
+              <Share2 className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setShowEditProfileModal(true)}
+              className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors"
+              title="تعديل الملف الشخصي"
+            >
+              <Edit3 className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="flex items-center gap-1.5 bg-white/10 border border-white/15 px-2.5 py-1 rounded-full text-xs font-digits font-black">
+            <Heart className="w-3.5 h-3.5 text-rose-500 fill-rose-500" />
+            <span>{((user.followersCount || 0) + (user.diamonds || 0)).toLocaleString('en-US')}</span>
+          </div>
+        </div>
+
+        {/* Floating Gift Invite Ribbon */}
+        <button
+          onClick={() => setShowShareModal(true)}
+          className="mb-3 w-full py-1.5 px-3 rounded-xl bg-gradient-to-l from-amber-400/20 via-purple-500/25 to-pink-500/20 border border-amber-300/30 flex items-center justify-between text-[11px] font-bold text-amber-200 hover:bg-white/10 transition-colors"
+        >
+          <span className="flex items-center gap-1.5">
+            <Gift className="w-3.5 h-3.5 text-[#FFE600]" />
+            <span>دعوة الأصدقاء والحصول على مكافآت 🎁</span>
+          </span>
+          <ChevronLeft className="w-3.5 h-3.5 text-amber-300" />
+        </button>
+
+        {/* User Avatar + Badges + Copyable UID + (+) Account Switcher */}
+        <div className="flex items-center gap-3">
+          <div
+            onClick={() => setShowEditProfileModal(true)}
+            className="relative cursor-pointer group shrink-0"
+            title="اضغط لتغيير الصورة والاسم"
+          >
+            <AvatarWithFrame
+              sizePx={70}
+              avatarUrl={user.avatar}
+              displayName={user.displayName}
+              frameUrl={livoStore.getResolvedFrameUrl(user)}
+              frameGlowColor={user.frameGlowColor}
+              frameAnimated={user.frameAnimated}
+              customIconUrl={user.customIconUrl}
+              customIconGlow={user.customIconGlow}
+              customIconAnimated={user.customIconAnimated}
+            />
+            <span className="absolute -bottom-1 -right-1 z-30 bg-[#FFE600] text-black text-[9px] font-black px-1.5 py-0.5 rounded-full border border-[#180a2a] font-digits shadow">
+              Lv.{user.level || 0}
+            </span>
+          </div>
+
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <UserNameWithBadges
                 displayName={user.displayName}
-                frameUrl={user.equippedFrameUrl}
-                frameGlowColor={user.frameGlowColor}
-                frameAnimated={user.frameAnimated}
+                nameGlowColor={user.nameGlowColor}
+                isVerified={user.isVerified}
+                verifiedBadgeColor={user.verifiedBadgeColor}
+                verifiedBadgeShape={user.verifiedBadgeShape}
+                verifiedBadgeGlow={user.verifiedBadgeGlow}
                 customIconUrl={user.customIconUrl}
                 customIconGlow={user.customIconGlow}
                 customIconAnimated={user.customIconAnimated}
+                customIconLabel={user.customIconLabel}
+                agencyLabel={livoStore.getAgencyDisplayLabel(user)}
+                agencyLabelBelow={true}
+                badgeSize={17}
+                iconSize={21}
+                nameClassName="font-black text-base text-white"
+                truncate={false}
               />
-              <span className="absolute -bottom-1 -right-1 z-30 bg-[#FFE600] text-black text-[9px] font-black px-1.5 py-0.2 rounded-full border border-white font-digits">
-                Lv.{user.level || 0}
+            </div>
+
+            {/* UID with Copy Button + VIP Level Chip */}
+            <div className="flex items-center gap-2 mt-1 flex-wrap">
+              <span className="text-[11px] text-purple-200 font-digits font-bold bg-white/10 px-2 py-0.5 rounded-full">
+                ID: {user.uid}
               </span>
-              <div className="absolute inset-0 z-20 rounded-full bg-black/25 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                <Edit3 className="w-4 h-4 text-white" />
-              </div>
+              <button
+                onClick={handleCopyUid}
+                className="text-purple-200 hover:text-[#FFE600] transition-colors p-0.5"
+                title="نسخ معرّف الحساب"
+              >
+                {copiedUid ? (
+                  <span className="text-[10px] text-emerald-300 font-bold flex items-center gap-0.5">
+                    <Check className="w-3 h-3" /> تم
+                  </span>
+                ) : (
+                  <Copy className="w-3.5 h-3.5" />
+                )}
+              </button>
+              <button
+                onClick={onOpenLevelCenter}
+                className="text-[10px] font-digits font-black px-2 py-0.5 rounded-full bg-gradient-to-r from-emerald-500 to-lime-400 text-black shadow-xs"
+              >
+                Lv.{user.level || 0}
+              </button>
             </div>
 
-            <div>
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <h3 className={`font-black text-base text-gray-900 ${nameGlowClass}`}>
-                  {user.displayName}
-                </h3>
-                {user.isVerified && (
-                  <LivoVerifiedBadge
-                    size={18}
-                    color={user.verifiedBadgeColor}
-                    shape={user.verifiedBadgeShape}
-                    glow={user.verifiedBadgeGlow}
-                  />
-                )}
-                {/* Charging Agent Badge (Requirement 3: Appears next to name after Admin approval) */}
-                {(user.role === 'charging_agent' || (user.agencyType === 'charging_agent' && user.canChargeUsers)) && (
-                  <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-400 to-yellow-300 text-black text-[10px] font-black border border-amber-500/60 shadow-xs">
-                    <span>⚡ وكيل شحن معتمد</span>
-                  </span>
-                )}
-                {user.role === 'distributor_agent' && (
-                  <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-gradient-to-r from-purple-700 to-indigo-700 text-white text-[10px] font-black border border-purple-500 shadow-xs">
-                    <span>📦 وكيل موزعين معتمد</span>
-                  </span>
-                )}
-              </div>
-
-              {/* UID with Copy Button */}
-              <div className="flex items-center gap-1.5 mt-0.5">
-                <span className="text-xs text-gray-500 font-digits font-bold">
-                  UID: {user.uid}
-                </span>
-                <button
-                  onClick={handleCopyUid}
-                  className="text-gray-400 hover:text-black transition-colors p-0.5"
-                  title="نسخ معرّف الحساب"
-                >
-                  {copiedUid ? (
-                    <span className="text-[10px] text-green-600 font-bold bg-green-50 px-1 rounded flex items-center gap-0.5">
-                      <Check className="w-3 h-3" /> تم
-                    </span>
-                  ) : (
-                    <Copy className="w-3.5 h-3.5" />
-                  )}
-                </button>
-              </div>
-
-              {/* Edit Profile Button + (+) Account Switcher Circle */}
-              <div className="flex items-center gap-2 mt-1">
-                <button
-                  onClick={() => setShowEditProfileModal(true)}
-                  className="inline-flex items-center gap-1 bg-yellow-400/20 hover:bg-[#FFE600] text-gray-900 text-[10px] font-black px-2 py-0.5 rounded-full transition-colors border border-yellow-400/40"
-                >
-                  <Edit3 className="w-3 h-3" />
-                  <span>تعديل الصورة والاسم</span>
-                </button>
-                <button
-                  onClick={() => {
-                    refreshSavedAccounts();
-                    setShowAccountSwitcher(true);
-                  }}
-                  className="w-6 h-6 rounded-full border-2 border-amber-400 bg-[#FFE600] hover:bg-yellow-400 text-black flex items-center justify-center shadow-2xs transition-transform active:scale-95"
-                  title="إضافة حساب أو التبديل بين الحسابات"
-                  aria-label="إضافة أو تبديل الحساب"
-                >
-                  <Plus className="w-3.5 h-3.5 stroke-[3]" />
-                </button>
-              </div>
+            {/* Edit Profile + (+) Account Switcher Circle */}
+            <div className="flex items-center gap-2 mt-2">
+              <button
+                onClick={() => setShowEditProfileModal(true)}
+                className="inline-flex items-center gap-1 bg-white/15 hover:bg-white/25 text-white text-[10px] font-black px-2.5 py-1 rounded-full transition-colors border border-white/20"
+              >
+                <Edit3 className="w-3 h-3 text-[#FFE600]" />
+                <span>تعديل الصورة والاسم</span>
+              </button>
+              <button
+                onClick={() => {
+                  refreshSavedAccounts();
+                  setShowAccountSwitcher(true);
+                }}
+                className="w-6 h-6 rounded-full border-2 border-amber-300 bg-[#FFE600] hover:bg-yellow-400 text-black flex items-center justify-center shadow transition-transform active:scale-95"
+                title="إضافة حساب أو التبديل بين الحسابات"
+                aria-label="إضافة أو تبديل الحساب"
+              >
+                <Plus className="w-3.5 h-3.5 stroke-[3]" />
+              </button>
             </div>
           </div>
-
-          {/* Share Card Button */}
-          <button
-            onClick={() => setShowShareModal(true)}
-            className="w-9 h-9 rounded-full bg-gray-100 hover:bg-[#FFE600] hover:text-black flex items-center justify-center text-gray-700 transition-colors shadow-2xs"
-            title="شارك بطاقة LIVO الخاصة بك"
-          >
-            <Share2 className="w-4 h-4" />
-          </button>
         </div>
+      </div>
 
-        {/* Bio if exists */}
-        {user.bio && (
-          <p className="text-xs text-gray-600 mt-2.5 px-1 leading-relaxed bg-gray-50 p-2 rounded-xl border border-gray-100">
-            {user.bio}
-          </p>
-        )}
-
+      {/* Overlapping White Sheet (HAGO Stats + Family/Agency + Mint Wallet + Tabs) */}
+      <div className="-mt-6 bg-[#FAFAFA] rounded-t-[26px] px-4 pt-4 pb-2 relative z-10 shadow-sm">
         {/* Following & Followers Bar */}
-        <div className="mt-3 flex items-center justify-around bg-gray-50 border border-gray-100 rounded-xl py-2 px-3 text-center">
+        <div className="flex items-center justify-around bg-white border border-gray-100 rounded-2xl py-2.5 px-3 text-center shadow-2xs">
           <div>
-            <span className="font-digits font-black text-sm text-gray-900 block">
-              {(user.followingCount || 0).toLocaleString()}
-            </span>
-            <span className="text-[10px] text-gray-500 font-bold">المتابَعون</span>
-          </div>
-          <div className="h-6 w-[1px] bg-gray-200" />
-          <div>
-            <span className="font-digits font-black text-sm text-gray-900 block">
+            <span className="font-digits font-black text-base text-gray-900 block">
               {(user.followersCount || 0).toLocaleString()}
             </span>
-            <span className="text-[10px] text-gray-500 font-bold">المتابعون</span>
+            <span className="text-[10px] text-gray-500 font-bold">متابعين</span>
           </div>
           <div className="h-6 w-[1px] bg-gray-200" />
           <div>
-            <span className="font-digits font-black text-sm text-gray-900 block">
+            <span className="font-digits font-black text-base text-gray-900 block">
+              {(user.followingCount || 0).toLocaleString()}
+            </span>
+            <span className="text-[10px] text-gray-500 font-bold">متابَع</span>
+          </div>
+          <div className="h-6 w-[1px] bg-gray-200" />
+          <div>
+            <span className="font-digits font-black text-base text-gray-900 block">
               {userVideos.length}
             </span>
             <span className="text-[10px] text-gray-500 font-bold">الفيديوهات</span>
           </div>
         </div>
 
-        {/* Active Agency Badge if user is an approved agent */}
-        {user.agencyName && (
-          <div className="mt-2.5 bg-purple-50 border border-purple-200 rounded-xl p-2.5 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="w-5 h-5 text-purple-700 shrink-0" />
-              <div>
-                <span className="text-xs font-black text-purple-900 block">{user.agencyName}</span>
-                <span className="text-[10px] text-purple-600">
-                  {user.canChargeUsers ? 'وكيل شحن معتمد • صلاحية الشحن مفعلة ✓' : 'وكيل معتمد في منصة LIVO'}
-                </span>
-              </div>
-            </div>
-            <button
-              onClick={onOpenAgency}
-              className="bg-purple-700 hover:bg-purple-800 text-white text-[10px] font-black px-2.5 py-1 rounded-full shadow-2xs"
-            >
-              إدارة
-            </button>
-          </div>
+        {/* Bio if exists */}
+        {user.bio && (
+          <p className="text-xs text-gray-600 mt-2.5 px-3 leading-relaxed bg-white p-2.5 rounded-2xl border border-gray-100">
+            {user.bio}
+          </p>
         )}
+
+        {/* HAGO Agency / Family & Couple Cards Row */}
+        <div className="mt-2.5 grid grid-cols-2 gap-2">
+          <button
+            onClick={onOpenAgency}
+            className="bg-gradient-to-br from-amber-50 to-yellow-50 border border-amber-200/80 rounded-2xl p-2.5 text-right flex items-center justify-between hover:shadow-xs transition-all"
+          >
+            <div className="min-w-0">
+              <span className="text-[11px] font-black text-amber-900 block truncate">
+                {user.agencyName || 'مربع الوكالة'}
+              </span>
+              <span className="text-[9px] text-amber-700 block truncate">
+                {user.canChargeUsers ? 'وكيل شحن معتمد ✓' : 'الانضمام لوكالة LIVO'}
+              </span>
+            </div>
+            <ShieldCheck className="w-5 h-5 text-amber-600 shrink-0" />
+          </button>
+
+          <button
+            onClick={onOpenVerification}
+            className="bg-gradient-to-br from-pink-50 to-rose-50 border border-pink-200/80 rounded-2xl p-2.5 text-right flex items-center justify-between hover:shadow-xs transition-all"
+          >
+            <div className="min-w-0">
+              <span className="text-[11px] font-black text-rose-900 block truncate">
+                {user.isVerified ? 'التوثيق الرسمي ✓' : 'باقة التوثيق'}
+              </span>
+              <span className="text-[9px] text-rose-700 block truncate">
+                {user.isVerified ? 'حساب موثق نشط' : 'تفعيل شارة التوثيق'}
+              </span>
+            </div>
+            <CheckCircle2 className="w-5 h-5 text-rose-500 shrink-0" />
+          </button>
+        </div>
 
         {/* Charging Agent Dedicated Center */}
         {(user.role === 'charging_agent' || user.canChargeUsers) && (
@@ -439,81 +511,154 @@ export const HagoProfileView: React.FC<HagoProfileViewProps> = ({
           </div>
         )}
 
-        {/* User Balance Strip */}
-        <div className="mt-3 grid grid-cols-2 gap-2 bg-[#FFFDE7] border border-[#FFE600]/80 rounded-2xl p-2.5">
-          <div className="flex items-center justify-between pr-2 border-l border-amber-200">
-            <div>
-              <span className="text-[10px] text-gray-600 block">رصيد الكوينز</span>
-              <span className="font-digits font-black text-sm text-amber-700">
-                {user.coins.toLocaleString()} 🪙
-              </span>
-            </div>
+        {/* HAGO Soft Mint Wallet Card ("المحفظة") */}
+        <div className="mt-2.5 bg-gradient-to-l from-[#E8FDF5] via-[#F2FBF8] to-[#FFFDF0] border border-emerald-200/70 rounded-2xl p-3 shadow-2xs space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-black text-gray-900 flex items-center gap-1.5">
+              <Wallet className="w-4 h-4 text-emerald-600" />
+              <span>المحفظة</span>
+            </span>
             <button
-              onClick={onOpenRecharge}
-              className="bg-[#FFE600] hover:bg-yellow-400 text-black text-[10px] font-black px-2.5 py-1 rounded-full shadow-2xs"
+              onClick={onOpenLevelCenter}
+              className="text-[10px] font-black text-emerald-800 bg-white/80 px-2 py-0.5 rounded-full border border-emerald-200 flex items-center gap-1"
             >
-              شحن
+              <Sparkles className="w-3 h-3 text-amber-500" />
+              <span>مركز المستوى Lv.{user.level || 0}</span>
             </button>
           </div>
 
-          <div className="flex items-center justify-between pr-2">
-            <div>
-              <span className="text-[10px] text-gray-600 block">رصيد الأرباح</span>
-              <span className="font-digits font-black text-sm text-emerald-700">
-                {(user.diamonds || 0).toLocaleString()} 💎
-              </span>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="bg-white/90 rounded-xl p-2 flex items-center justify-between border border-amber-100">
+              <div>
+                <span className="text-[10px] text-gray-500 block">الكوينز</span>
+                <span className="font-digits font-black text-sm text-amber-700">
+                  {user.coins.toLocaleString()} 🪙
+                </span>
+              </div>
+              <button
+                onClick={onOpenRecharge}
+                className="bg-[#FFE600] hover:bg-yellow-400 text-black text-[10px] font-black px-2.5 py-1 rounded-full shadow-2xs"
+              >
+                شحن
+              </button>
             </div>
-            <button
-              onClick={onOpenWithdrawal}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black px-2.5 py-1 rounded-full shadow-2xs"
-            >
-              سحب
-            </button>
+
+            <div className="bg-white/90 rounded-xl p-2 flex items-center justify-between border border-emerald-100">
+              <div>
+                <span className="text-[10px] text-gray-500 block">الألماسات</span>
+                <span className="font-digits font-black text-sm text-emerald-700">
+                  {(user.diamonds || 0).toLocaleString()} 💎
+                </span>
+              </div>
+              <button
+                onClick={onOpenWithdrawal}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black px-2.5 py-1 rounded-full shadow-2xs"
+              >
+                سحب
+              </button>
+            </div>
           </div>
+        </div>
+
+        {/* HAGO Underline Tabs */}
+        <div className="flex items-center justify-around border-b border-gray-200 mt-3 pt-1 text-xs font-bold">
+          {[
+            { id: 'services' as const, label: 'الخدمات والمزايا' },
+            { id: 'videos' as const, label: `المشاركات (${userVideos.length})` },
+            { id: 'about' as const, label: 'معلومات عني' }
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setProfileTab(tab.id)}
+              className={`pb-2.5 px-2 relative transition-colors ${
+                profileTab === tab.id ? 'text-gray-900 font-black' : 'text-gray-400 hover:text-gray-600'
+              }`}
+            >
+              {tab.label}
+              {profileTab === tab.id && (
+                <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-8 h-[3px] rounded-full bg-[#FFE600]" />
+              )}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* Real Videos Section (الفيديوهات الحقيقية) */}
-      <div className="px-3 pt-3">
-        <div className="bg-white rounded-2xl border border-gray-100 p-3 shadow-2xs">
-          <div className="flex items-center justify-between mb-2 pb-2 border-b border-gray-100">
-            <div className="flex items-center gap-2">
-              <Video className="w-4 h-4 text-purple-600" />
-              <span className="font-black text-xs text-gray-900">الفيديوهات الحقيقية</span>
+      {/* Tab Content: Videos Tab */}
+      {profileTab === 'videos' && (
+        <div className="px-3 pt-3">
+          <div className="bg-white rounded-2xl border border-gray-100 p-3 shadow-2xs">
+            <div className="flex items-center justify-between mb-2 pb-2 border-b border-gray-100">
+              <div className="flex items-center gap-2">
+                <Video className="w-4 h-4 text-purple-600" />
+                <span className="font-black text-xs text-gray-900">الفيديوهات الحقيقية</span>
+              </div>
+              <span className="text-[10px] text-gray-400 font-bold">{userVideos.length} فيديو</span>
             </div>
-            <span className="text-[10px] text-gray-400 font-bold">{userVideos.length} فيديو</span>
-          </div>
 
-          {userVideos.length > 0 ? (
-            <div className="grid grid-cols-2 gap-2">
-              {userVideos.map((video) => (
-                <div key={video.id} className="relative aspect-[9/12] rounded-xl overflow-hidden bg-black group shadow-sm">
-                  <video src={video.videoUrl} className="w-full h-full object-cover" />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex flex-col justify-end p-2 text-white">
-                    <p className="text-[10px] line-clamp-1 font-bold">{video.caption}</p>
-                    <div className="flex items-center justify-between text-[9px] mt-1 text-gray-300 font-digits">
-                      <span className="flex items-center gap-0.5">
-                        <Heart className="w-2.5 h-2.5 fill-red-500 text-red-500" /> {video.likesCount}
-                      </span>
-                      <span className="flex items-center gap-0.5">
-                        <MessageCircle className="w-2.5 h-2.5" /> {video.commentsCount}
-                      </span>
+            {userVideos.length > 0 ? (
+              <div className="grid grid-cols-2 gap-2">
+                {userVideos.map((video) => (
+                  <div key={video.id} className="relative aspect-[9/12] rounded-xl overflow-hidden bg-black group shadow-sm">
+                    <video src={video.videoUrl} className="w-full h-full object-cover" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex flex-col justify-end p-2 text-white">
+                      <p className="text-[10px] line-clamp-1 font-bold">{video.caption}</p>
+                      <div className="flex items-center justify-between text-[9px] mt-1 text-gray-300 font-digits">
+                        <span className="flex items-center gap-0.5">
+                          <Heart className="w-2.5 h-2.5 fill-red-500 text-red-500" /> {video.likesCount}
+                        </span>
+                        <span className="flex items-center gap-0.5">
+                          <MessageCircle className="w-2.5 h-2.5" /> {video.commentsCount}
+                        </span>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="text-center py-6 text-gray-400">
-              <Video className="w-8 h-8 mx-auto mb-1.5 opacity-40" />
-              <p className="text-xs font-bold text-gray-500">لا توجد مقاطع فيديو منشورة بعد</p>
-              <p className="text-[10px] text-gray-400 mt-0.5">شارك لحظاتك وبثوثك المميزة مع متابعيك في LIVO</p>
-            </div>
-          )}
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-6 text-gray-400">
+                <Video className="w-8 h-8 mx-auto mb-1.5 opacity-40" />
+                <p className="text-xs font-bold text-gray-500">لا توجد مقاطع فيديو منشورة بعد</p>
+                <p className="text-[10px] text-gray-400 mt-0.5">شارك لحظاتك وبثوثك المميزة مع متابعيك في LIVO</p>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* Side Menu Items */}
+      {/* Tab Content: About Me Tab */}
+      {profileTab === 'about' && (
+        <div className="px-3 pt-3">
+          <div className="bg-white rounded-2xl border border-gray-100 p-4 shadow-2xs space-y-3 text-xs">
+            <div className="flex items-center justify-between border-b border-gray-100 pb-2">
+              <span className="text-gray-500 font-bold">الاسم المستعار</span>
+              <span className="font-black text-gray-900">{user.displayName}</span>
+            </div>
+            <div className="flex items-center justify-between border-b border-gray-100 pb-2">
+              <span className="text-gray-500 font-bold">المعرّف الرقمي</span>
+              <span className="font-digits font-black text-gray-900">{user.uid}</span>
+            </div>
+            <div className="flex items-center justify-between border-b border-gray-100 pb-2">
+              <span className="text-gray-500 font-bold">المستوى</span>
+              <span className="font-digits font-black text-amber-600">Lv.{user.level || 0}</span>
+            </div>
+            <div className="flex items-center justify-between border-b border-gray-100 pb-2">
+              <span className="text-gray-500 font-bold">تاريخ الانضمام</span>
+              <span className="font-digits font-bold text-gray-700">
+                {user.createdAt ? new Date(user.createdAt).toLocaleDateString('ar-EG') : 'عضو نشط'}
+              </span>
+            </div>
+            <div>
+              <span className="text-gray-500 font-bold block mb-1">النبذة الشخصية</span>
+              <p className="text-gray-700 bg-gray-50 rounded-xl p-2.5 leading-relaxed">
+                {user.bio || 'لا توجد نبذة مكتوبة بعد — اضغط "تعديل الصورة والاسم" لإضافة نبذتك.'}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Services & Menus always preserved inside Services tab */}
+      {profileTab === 'services' && (
       <div className="px-3 pt-3 space-y-1">
         
         {/* Group 1: الأساسية والامتيازات */}
@@ -730,6 +875,7 @@ export const HagoProfileView: React.FC<HagoProfileViewProps> = ({
           </div>
         </div>
       </div>
+      )}
 
       {/* Edit Profile Modal */}
       <EditProfileModal
@@ -823,7 +969,21 @@ export const HagoProfileView: React.FC<HagoProfileViewProps> = ({
                   className="w-14 h-14 rounded-full border-2 border-black object-cover shadow"
                 />
                 <div>
-                  <h4 className="font-black text-base">{user.displayName}</h4>
+                  <UserNameWithBadges
+                    displayName={user.displayName}
+                    nameGlowColor={user.nameGlowColor}
+                    isVerified={user.isVerified}
+                    verifiedBadgeColor={user.verifiedBadgeColor}
+                    verifiedBadgeShape={user.verifiedBadgeShape}
+                    verifiedBadgeGlow={user.verifiedBadgeGlow}
+                    customIconUrl={user.customIconUrl}
+                    customIconGlow={user.customIconGlow}
+                    customIconAnimated={user.customIconAnimated}
+                    customIconLabel={user.customIconLabel}
+                    badgeSize={15}
+                    iconSize={19}
+                    nameClassName="font-black text-base text-black"
+                  />
                   <p className="text-xs font-bold font-digits text-gray-800">UID: {user.uid}</p>
                   <span className="text-[10px] font-extrabold bg-black text-[#FFE600] px-2 py-0.5 rounded-full inline-block mt-1">
                     🇪🇬 LIVO Official User
@@ -837,10 +997,16 @@ export const HagoProfileView: React.FC<HagoProfileViewProps> = ({
               </div>
             </div>
 
+            {shareFeedback && (
+              <div className="mb-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-black px-3 py-2 rounded-xl animate-in fade-in">
+                {shareFeedback}
+              </div>
+            )}
+
             {/* Share Targets */}
             <div className="grid grid-cols-4 gap-2 text-center text-[10px] font-bold text-gray-700">
               <button
-                onClick={handleCopyLink}
+                onClick={() => handleCopyLink('واتساب')}
                 className="flex flex-col items-center gap-1 group"
               >
                 <div className="w-12 h-12 rounded-full bg-[#25D366] text-white flex items-center justify-center text-xl shadow group-hover:scale-105 transition-transform">
@@ -850,7 +1016,7 @@ export const HagoProfileView: React.FC<HagoProfileViewProps> = ({
               </button>
 
               <button
-                onClick={handleCopyLink}
+                onClick={() => handleCopyLink('فيسبوك')}
                 className="flex flex-col items-center gap-1 group"
               >
                 <div className="w-12 h-12 rounded-full bg-[#1877F2] text-white flex items-center justify-center text-xl shadow group-hover:scale-105 transition-transform">
@@ -860,7 +1026,7 @@ export const HagoProfileView: React.FC<HagoProfileViewProps> = ({
               </button>
 
               <button
-                onClick={handleCopyLink}
+                onClick={() => handleCopyLink('سناب شات')}
                 className="flex flex-col items-center gap-1 group"
               >
                 <div className="w-12 h-12 rounded-full bg-[#FFFC00] text-black flex items-center justify-center text-xl shadow group-hover:scale-105 transition-transform">
@@ -870,7 +1036,7 @@ export const HagoProfileView: React.FC<HagoProfileViewProps> = ({
               </button>
 
               <button
-                onClick={handleCopyLink}
+                onClick={() => handleCopyLink('نسخ الرابط')}
                 className="flex flex-col items-center gap-1 group"
               >
                 <div className="w-12 h-12 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-800 flex items-center justify-center shadow group-hover:scale-105 transition-transform">
@@ -928,8 +1094,12 @@ export const HagoProfileView: React.FC<HagoProfileViewProps> = ({
                         />
                         <div className="min-w-0">
                           <div className="flex items-center gap-1.5">
-                            <span className="font-black text-xs text-gray-900 truncate">{acc.displayName}</span>
-                            {acc.isVerified && <LivoVerifiedBadge size={13} />}
+                            <UserNameWithBadges
+                              displayName={acc.displayName}
+                              isVerified={acc.isVerified}
+                              badgeSize={13}
+                              nameClassName="font-black text-xs text-gray-900"
+                            />
                             {isActive && (
                               <span className="text-[9px] bg-emerald-100 text-emerald-700 font-black px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
                                 <UserCheck className="w-2.5 h-2.5" /> نشط

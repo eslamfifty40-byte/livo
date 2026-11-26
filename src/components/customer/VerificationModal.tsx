@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
-import { X, CheckCircle2, Upload, AlertCircle, Check, Copy } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, CheckCircle2, Upload, AlertCircle, Check, Copy, Edit3 } from 'lucide-react';
 import { VERIFICATION_PLANS, RECHARGE_PAYMENT_PHONE } from '../../data/initialData';
 import { UserProfile } from '../../types';
 import { livoStore } from '../../services/livoStore';
 import { LivoVerifiedBadge } from '../common/LivoVerifiedBadge';
+import { compressImageForFirestore } from '../../utils/imageCompression';
 
 interface VerificationModalProps {
   user: UserProfile;
@@ -12,6 +13,9 @@ interface VerificationModalProps {
 }
 
 export const VerificationModal: React.FC<VerificationModalProps> = ({ user, isOpen, onClose }) => {
+  const [defaultPayNumber, setDefaultPayNumber] = useState<string>(
+    () => livoStore.getDefaultPaymentMethod()?.accountNumber || RECHARGE_PAYMENT_PHONE
+  );
   const [selectedPlan, setSelectedPlan] = useState(VERIFICATION_PLANS[0]);
   const [payerPhone, setPayerPhone] = useState('');
   const [receiptImage, setReceiptImage] = useState<string | null>(null);
@@ -20,23 +24,69 @@ export const VerificationModal: React.FC<VerificationModalProps> = ({ user, isOp
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
+  const isOwnerAdmin = user.role === 'owner' || livoStore.isOwnerEmail(user.email);
+  const [editingNumber, setEditingNumber] = useState(false);
+  const [editNumberInput, setEditNumberInput] = useState('');
+
+  useEffect(() => {
+    return livoStore.subscribe(() => {
+      const def = livoStore.getDefaultPaymentMethod();
+      if (def?.accountNumber) setDefaultPayNumber(def.accountNumber);
+    });
+  }, []);
+
   if (!isOpen) return null;
 
+  const handleSaveNumber = () => {
+    if (!editNumberInput.trim()) return;
+    const def = livoStore.getDefaultPaymentMethod();
+    if (def) {
+      livoStore.savePaymentMethod({
+        ...def,
+        accountNumber: editNumberInput.trim()
+      });
+    } else {
+      livoStore.savePaymentMethod({
+        id: 'pay-default-vodafone',
+        type: 'vodafone_cash',
+        title: 'فودافون كاش',
+        accountNumber: editNumberInput.trim(),
+        accountHolder: 'إدارة LIVO الرسمية',
+        instructions: 'يرجى إرسال صورة الإيصال بعد التحويل مباشرة',
+        isActive: true,
+        isDefault: true,
+        updatedAt: new Date().toISOString()
+      });
+    }
+    setDefaultPayNumber(editNumberInput.trim());
+    setEditingNumber(false);
+  };
+
   const handleCopyPhone = () => {
-    navigator.clipboard.writeText(RECHARGE_PAYMENT_PHONE);
+    navigator.clipboard.writeText(defaultPayNumber);
     setIsCopied(true);
     setTimeout(() => setIsCopied(false), 2000);
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    setErrorMsg('');
     const file = e.target.files?.[0];
     if (file) {
+      if (!file.type.startsWith('image/')) {
+        setErrorMsg('يرجى اختيار ملف صورة صالح');
+        return;
+      }
       setReceiptFileName(file.name);
-      const reader = new FileReader();
-      reader.onload = (uploadEvent) => {
-        setReceiptImage(uploadEvent.target?.result as string);
-      };
-      reader.readAsDataURL(file);
+      try {
+        const compressed = await compressImageForFirestore(file, {
+          maxDim: 900,
+          quality: 0.75,
+          maxBytes: 220_000
+        });
+        setReceiptImage(compressed);
+      } catch {
+        setErrorMsg('تعذر معالجة صورة الإيصال');
+      }
     }
   };
 
@@ -111,19 +161,55 @@ export const VerificationModal: React.FC<VerificationModalProps> = ({ user, isOp
         ) : (
           <div className="p-4 overflow-y-auto space-y-4">
             {/* Payment Transfer Info */}
-            <div className="bg-[#120824] p-3 rounded-2xl border border-purple-800/40 flex items-center justify-between">
-              <div>
-                <span className="text-[11px] text-purple-300 block">رقم التحويل المعتمد:</span>
-                <span className="font-digits font-black text-amber-400 text-sm">{RECHARGE_PAYMENT_PHONE}</span>
+            <div className="bg-[#120824] p-3 rounded-2xl border border-purple-800/40 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <span className="text-[11px] text-purple-300 block">رقم التحويل المعتمد:</span>
+                  <span className="font-digits font-black text-amber-400 text-sm">{defaultPayNumber}</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  {isOwnerAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditNumberInput(defaultPayNumber);
+                        setEditingNumber(v => !v);
+                      }}
+                      className="flex items-center gap-1 text-[11px] bg-[#FFE600] text-black font-black px-2.5 py-1 rounded-lg"
+                    >
+                      <Edit3 className="w-3 h-3" />
+                      <span>{editingNumber ? 'إلغاء' : 'تعديل'}</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleCopyPhone}
+                    className="flex items-center gap-1 text-xs bg-purple-800/70 hover:bg-purple-700 text-white px-2.5 py-1 rounded-lg"
+                  >
+                    {isCopied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{isCopied ? 'تم النسخ' : 'نسخ'}</span>
+                  </button>
+                </div>
               </div>
-              <button
-                type="button"
-                onClick={handleCopyPhone}
-                className="flex items-center gap-1 text-xs bg-purple-800/70 hover:bg-purple-700 text-white px-2.5 py-1 rounded-lg"
-              >
-                {isCopied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
-                <span>{isCopied ? 'تم النسخ' : 'نسخ'}</span>
-              </button>
+
+              {isOwnerAdmin && editingNumber && (
+                <div className="flex items-center gap-2 pt-1">
+                  <input
+                    type="text"
+                    value={editNumberInput}
+                    onChange={(e) => setEditNumberInput(e.target.value)}
+                    placeholder="أدخل رقم التحويل الجديد"
+                    className="flex-1 bg-black/40 border border-amber-400/60 rounded-lg px-2.5 py-1.5 text-xs font-digits text-white outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSaveNumber}
+                    className="px-3 py-1.5 rounded-lg bg-[#FFE600] text-black font-black text-xs shrink-0"
+                  >
+                    حفظ ✓
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Verification Plans Grid */}
